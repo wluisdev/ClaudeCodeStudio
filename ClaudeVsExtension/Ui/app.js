@@ -28,7 +28,6 @@ function updatePermissionBtn() {
     btn.classList.toggle("active", mode !== "auto");
 }
 
-permissionSelect.addEventListener("change", updatePermissionBtn);
 
 // ── Session history ───────────────────────────────────────────
 function toggleHistory() {
@@ -121,6 +120,7 @@ const newChatButton = document.querySelector(".new-chat");
 const modelSelect = document.querySelector(".model-select");
 const effortSelect = document.querySelector(".effort-select");
 const permissionSelect = document.querySelector(".permission-select");
+permissionSelect.addEventListener("change", updatePermissionBtn);
 const messages = document.querySelector("#messages");
 const attachmentsEl = document.getElementById("attachments");
 let welcome = document.querySelector(".welcome");

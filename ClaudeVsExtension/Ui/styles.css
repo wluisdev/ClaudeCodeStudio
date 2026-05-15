@@ -40,9 +40,15 @@ body {
     font-size: 22px;
 }
 
+.topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
 .actions {
     display: flex;
-    gap: 10px;
+    gap: 4px;
     color: #ddd;
     font-size: 18px;
     align-items: center;
