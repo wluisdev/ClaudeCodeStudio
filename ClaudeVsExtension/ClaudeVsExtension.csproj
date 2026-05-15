@@ -49,4 +49,11 @@
       <Generator>VsctGenerator</Generator>
     </VSCTCompile>
   </ItemGroup>
+<ItemGroup>
+  <Content Include="..\ClaudeVsAgent\bin\Debug\net10.0\**\*">
+    <Link>ClaudeVsAgent\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    <IncludeInVSIX>true</IncludeInVSIX>
+  </Content>
+</ItemGroup>
 </Project>
