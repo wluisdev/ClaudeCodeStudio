@@ -126,6 +126,24 @@ body {
     font-size: 13px;
     border-top: 1px solid #333;
     color: #ccc;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.notice-close {
+    background: none;
+    border: none;
+    color: #666;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 0 0 0 8px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.notice-close:hover {
+    color: #fff;
 }
 
 .composer {
