@@ -325,6 +325,13 @@ textarea {
     overflow: hidden;
 }
 
+.timing {
+    font-size: 11px;
+    color: #555;
+    padding: 1px 12px;
+    font-family: monospace;
+}
+
 .dots span {
     animation: blink 1.2s infinite;
     font-size: 20px;

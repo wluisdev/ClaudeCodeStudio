@@ -58,27 +58,42 @@ public class AgentClient
         }
     }
 
-    public async Task<string> AskAsync(string message, string model = "claude-sonnet-4-6")
+    public async Task AskStreamingAsync(string message, string model, Action<string> onChunk, Action<string>? onTiming = null)
     {
-        var request = new
-        {
-            Message = message,
-            Model = model
-        };
-
+        var request = new { Message = message, Model = model };
         var json = JsonSerializer.Serialize(request);
 
         await _writer!.WriteLineAsync(json);
         await _writer.FlushAsync();
 
-        var responseJson = await _reader!.ReadLineAsync();
+        while (true)
+        {
+            var responseJson = await _reader!.ReadLineAsync();
 
-        if (responseJson == null)
-            return "Agent não respondeu.";
+            if (responseJson == null) break;
 
-        var response = JsonSerializer.Deserialize<AgentResponse>(responseJson);
+            var chunk = JsonSerializer.Deserialize<AgentChunk>(responseJson);
 
-        return response?.Text ?? "";
+            if (chunk == null) break;
+
+            if (chunk.Type == "done") break;
+
+            if (chunk.Type == "timing")
+            {
+                onTiming?.Invoke(chunk.Text);
+                continue;
+            }
+
+            if (chunk.Type == "error")
+            {
+                if (!string.IsNullOrEmpty(chunk.Text))
+                    onChunk(chunk.Text);
+                break;
+            }
+
+            if (chunk.Type == "chunk" && !string.IsNullOrEmpty(chunk.Text))
+                onChunk(chunk.Text);
+        }
     }
 
     public async Task StopAsync()
@@ -114,8 +129,9 @@ public class AgentClient
         }
     }
 
-    private class AgentResponse
+    private class AgentChunk
     {
+        public string Type { get; set; } = "";
         public string Text { get; set; } = "";
     }
 

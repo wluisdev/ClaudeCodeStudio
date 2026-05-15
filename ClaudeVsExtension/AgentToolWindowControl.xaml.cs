@@ -90,15 +90,21 @@ public partial class AgentToolWindowControl : UserControl
 
             await _agentClient.StartAsync();
 
-            var agentResponse = await _agentClient.AskAsync(request.Text, request.Model);
+            var dispatcher = System.Windows.Application.Current.Dispatcher;
 
-            var responseJson = JsonSerializer.Serialize(new
+            await _agentClient.AskStreamingAsync(request.Text, request.Model,
+                chunk => dispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "chunk", text = chunk }))),
+                timing => dispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "timing", text = timing }))));
+
+            dispatcher.Invoke(() =>
             {
-                type = "assistant",
-                text = agentResponse
+                Browser.CoreWebView2.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new { type = "stream-done" }));
             });
-
-            Browser.CoreWebView2.PostWebMessageAsJson(responseJson);
         }
         catch (Exception ex)
         {

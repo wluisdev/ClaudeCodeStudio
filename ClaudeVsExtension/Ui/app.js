@@ -11,6 +11,7 @@ let welcome = document.querySelector(".welcome");
 let attachments = new Map();
 let attachmentIdCounter = 0;
 let imageCounter = 0;
+let currentStreamBubble = null;
 
 sendButton.addEventListener("click", sendMessage);
 newChatButton.addEventListener("click", clearChat);
@@ -95,9 +96,44 @@ window.chrome.webview.addEventListener("message", event => {
         return;
     }
 
-    removeLoading();
-    addMessage("assistant", event.data.text);
+    if (event.data.type === "chunk") {
+        appendChunk(event.data.text);
+        return;
+    }
+
+    if (event.data.type === "timing") {
+        appendTiming(event.data.text);
+        return;
+    }
+
+    if (event.data.type === "stream-done") {
+        currentStreamBubble = null;
+        return;
+    }
 });
+
+function appendTiming(text) {
+    const el = document.createElement("div");
+    el.className = "timing";
+    el.textContent = `⏱ ${text}`;
+    messages.appendChild(el);
+    messages.scrollTop = messages.scrollHeight;
+}
+
+function appendChunk(text) {
+    removeLoading();
+
+    if (!currentStreamBubble) {
+        const msg = document.createElement("div");
+        msg.className = "message assistant";
+        msg.innerHTML = `<div class="bubble"></div>`;
+        messages.appendChild(msg);
+        currentStreamBubble = msg.querySelector(".bubble");
+    }
+
+    currentStreamBubble.textContent += text;
+    messages.scrollTop = messages.scrollHeight;
+}
 
 function addLoading() {
     const el = document.createElement("div");

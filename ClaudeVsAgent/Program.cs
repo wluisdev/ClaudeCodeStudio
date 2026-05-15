@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 
@@ -18,33 +18,28 @@ try
             continue;
 
         var request = JsonSerializer.Deserialize<ChatRequest>(line);
-
         var message = request?.Message ?? "";
         var model = request?.Model ?? "claude-sonnet-4-6";
 
-        var responseText = await AskClaudeAsync(message, model);
-
-        var response = new ChatResponse
-        {
-            Text = responseText
-        };
-
-        Console.WriteLine(JsonSerializer.Serialize(response));
-        Console.Out.Flush();
+        await StreamClaudeAsync(message, model);
     }
 }
 catch (Exception ex)
 {
-    Console.WriteLine(JsonSerializer.Serialize(new ChatResponse
-    {
-        Text = ex.ToString()
-    }));
-
+    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = ex.ToString() }));
     Console.Out.Flush();
 }
 
-static async Task<string> AskClaudeAsync(string message, string model)
+static void EmitTiming(string label, long ms)
 {
+    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"{label}: {ms}ms" }));
+    Console.Out.Flush();
+}
+
+static async Task StreamClaudeAsync(string message, string model)
+{
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+
     var psi = new ProcessStartInfo
     {
         FileName = FindClaude(),
@@ -60,6 +55,9 @@ static async Task<string> AskClaudeAsync(string message, string model)
         CreateNoWindow = true
     };
 
+    psi.ArgumentList.Add("--output-format");
+    psi.ArgumentList.Add("stream-json");
+    psi.ArgumentList.Add("--verbose");
     psi.ArgumentList.Add("-p");
     psi.ArgumentList.Add(message);
     psi.ArgumentList.Add("--model");
@@ -69,26 +67,91 @@ static async Task<string> AskClaudeAsync(string message, string model)
     using var process = Process.Start(psi);
 
     if (process == null)
-        return "Não foi possível iniciar Claude.";
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = "Não foi possível iniciar Claude." }));
+        Console.Out.Flush();
+        return;
+    }
 
+    EmitTiming("process started", sw.ElapsedMilliseconds);
     process.StandardInput.Close();
 
-    var outputTask = process.StandardOutput.ReadToEndAsync();
     var errorTask = process.StandardError.ReadToEndAsync();
+    string? line;
+    bool firstLine = true;
+    bool firstChunk = true;
 
-    await Task.WhenAll(outputTask, errorTask);
+    while ((line = await process.StandardOutput.ReadLineAsync()) != null)
+    {
+        if (string.IsNullOrWhiteSpace(line)) continue;
+
+        if (firstLine)
+        {
+            EmitTiming("first stdout line", sw.ElapsedMilliseconds);
+            firstLine = false;
+        }
+
+        try
+        {
+            var evt = JsonSerializer.Deserialize<JsonElement>(line);
+
+            if (!evt.TryGetProperty("type", out var typeProp)) continue;
+            var type = typeProp.GetString();
+
+            if (type == "assistant")
+            {
+                var content = evt.GetProperty("message").GetProperty("content");
+                foreach (var item in content.EnumerateArray())
+                {
+                    if (item.TryGetProperty("type", out var itemType) &&
+                        itemType.GetString() == "text" &&
+                        item.TryGetProperty("text", out var textProp))
+                    {
+                        var text = textProp.GetString();
+                        if (!string.IsNullOrEmpty(text))
+                        {
+                            if (firstChunk)
+                            {
+                                EmitTiming("first chunk", sw.ElapsedMilliseconds);
+                                firstChunk = false;
+                            }
+                            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "chunk", Text = text }));
+                            Console.Out.Flush();
+                        }
+                    }
+                }
+            }
+            else if (type == "result")
+            {
+                EmitTiming("result received", sw.ElapsedMilliseconds);
+                if (evt.TryGetProperty("is_error", out var isErrProp) && isErrProp.GetBoolean() &&
+                    evt.TryGetProperty("result", out var resultProp))
+                {
+                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = resultProp.GetString() ?? "" }));
+                    Console.Out.Flush();
+                }
+                break;
+            }
+        }
+        catch { /* ignora linhas malformadas */ }
+    }
+
+    EmitTiming("total", sw.ElapsedMilliseconds);
+    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "done" }));
+    Console.Out.Flush();
+
+    var error = await errorTask;
     process.WaitForExit();
 
-    var error = errorTask.Result;
-    if (!string.IsNullOrWhiteSpace(error))
-        return error;
-
-    return outputTask.Result.Trim();
+    if (!string.IsNullOrWhiteSpace(error) && process.ExitCode != 0)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = error.Trim() }));
+        Console.Out.Flush();
+    }
 }
 
 static string FindClaude()
 {
-    // Busca no PATH primeiro
     var pathDirs = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
     foreach (var dir in pathDirs)
     {
@@ -97,7 +160,6 @@ static string FindClaude()
             return candidate;
     }
 
-    // Fallback: locais comuns de instalação global do npm
     var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
     var fallbacks = new[]
     {
@@ -120,7 +182,8 @@ public class ChatRequest
     public string Model { get; set; } = "claude-sonnet-4-6";
 }
 
-public class ChatResponse
+public class ChatChunk
 {
+    public string Type { get; set; } = "";
     public string Text { get; set; } = "";
 }
