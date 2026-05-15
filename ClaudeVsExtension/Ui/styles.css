@@ -237,8 +237,19 @@ textarea {
     gap: 10px;
 }
 
-.mode {
-    font-size: 13px;
+.permission-select {
+    background: #2a2a2a;
+    border: 1px solid #444;
+    color: #ccc;
+    font-size: 12px;
+    padding: 3px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    outline: none;
+}
+
+.permission-select:hover {
+    border-color: #d88763;
 }
 
 .send {

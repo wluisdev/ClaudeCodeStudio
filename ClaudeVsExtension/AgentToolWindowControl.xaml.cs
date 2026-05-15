@@ -92,7 +92,7 @@ public partial class AgentToolWindowControl : UserControl
 
             var dispatcher = System.Windows.Application.Current.Dispatcher;
 
-            await _agentClient.AskStreamingAsync(request.Text, request.Model, request.Effort,
+            await _agentClient.AskStreamingAsync(request.Text, request.Model, request.Effort, request.PermissionMode,
                 chunk => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "chunk", text = chunk }))),
@@ -180,5 +180,8 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("effort")]
         public string? Effort { get; set; }
+
+        [JsonPropertyName("permissionMode")]
+        public string PermissionMode { get; set; } = "auto";
     }
 }

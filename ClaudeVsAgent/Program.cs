@@ -33,8 +33,9 @@ try
         var message = request.Message ?? "";
         var model = request.Model ?? "claude-sonnet-4-6";
         var effort = request.Effort;
+        var permissionMode = request.PermissionMode ?? "auto";
 
-        sessionId = await StreamClaudeAsync(message, model, effort, sessionId);
+        sessionId = await StreamClaudeAsync(message, model, effort, permissionMode, sessionId);
     }
 }
 catch (Exception ex)
@@ -49,7 +50,7 @@ static void EmitTiming(string label, long ms)
     Console.Out.Flush();
 }
 
-static async Task<string?> StreamClaudeAsync(string message, string model, string? effort, string? sessionId)
+static async Task<string?> StreamClaudeAsync(string message, string model, string? effort, string permissionMode, string? sessionId)
 {
     var sw = Stopwatch.StartNew();
     string? newSessionId = null;
@@ -76,7 +77,19 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
     psi.ArgumentList.Add(message);
     psi.ArgumentList.Add("--model");
     psi.ArgumentList.Add(model);
-    psi.ArgumentList.Add("--dangerously-skip-permissions");
+    if (permissionMode == "plan")
+    {
+        psi.ArgumentList.Add("--permission-mode");
+        psi.ArgumentList.Add("plan");
+    }
+    else if (permissionMode == "ask")
+    {
+        // sem flag extra — comportamento padrão do claude
+    }
+    else // "auto" (padrão)
+    {
+        psi.ArgumentList.Add("--dangerously-skip-permissions");
+    }
 
     if (!string.IsNullOrEmpty(effort))
     {
@@ -213,6 +226,7 @@ public class ChatRequest
     public string Message { get; set; } = "";
     public string Model { get; set; } = "claude-sonnet-4-6";
     public string? Effort { get; set; }
+    public string PermissionMode { get; set; } = "auto";
     public bool ResetSession { get; set; }
 }
 

@@ -5,6 +5,7 @@ const sendButton = document.querySelector(".send");
 const newChatButton = document.querySelector(".new-chat");
 const modelSelect = document.querySelector(".model-select");
 const effortSelect = document.querySelector(".effort-select");
+const permissionSelect = document.querySelector(".permission-select");
 const messages = document.querySelector("#messages");
 const attachmentsEl = document.getElementById("attachments");
 let welcome = document.querySelector(".welcome");
@@ -64,7 +65,8 @@ function sendMessage() {
             type: "chat",
             text: fullMessage,
             model: modelSelect.value,
-            effort: effortSelect.value || null
+            effort: effortSelect.value || null,
+            permissionMode: permissionSelect.value
         });
     }
 }
