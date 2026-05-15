@@ -15,8 +15,16 @@
             </div>
 
             <div class="actions">
-                <span>◫</span>
-                <span>🔒</span>
+                <button class="action-btn" id="btn-layout" title="Alternar layout" onclick="toggleLayout()">◫</button>
+                <button class="action-btn" id="btn-permission" title="Modo de permissão" onclick="cyclePermission()">⚡</button>
+                <div class="cmd-wrap" id="history-wrap">
+                    <button class="action-btn" title="Histórico de sessões" onclick="toggleHistory()">◷</button>
+                    <div class="cmd-menu" id="history-menu">
+                        <div class="cmd-section">Sessões anteriores</div>
+                        <div id="history-list"><div class="cmd-item" style="color:#555;font-family:inherit">Carregando…</div></div>
+                    </div>
+                </div>
+                </div>
                 <div class="cmd-wrap" id="cmd-wrap">
                     <button class="cmd-trigger" title="Comandos" onclick="toggleCmdMenu()">⌘</button>
                     <div class="cmd-menu" id="cmd-menu">

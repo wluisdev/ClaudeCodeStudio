@@ -15,6 +15,8 @@ public class AgentClient
 
     private StreamReader? _reader;
 
+    public string? PendingResumeSessionId { get; set; }
+
     public async Task StartAsync()
     {
         if (_process != null)
@@ -60,7 +62,10 @@ public class AgentClient
 
     public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null)
     {
-        var request = new { Message = message, Model = model, Effort = effort, PermissionMode = permissionMode };
+        var resumeId = PendingResumeSessionId;
+        PendingResumeSessionId = null;
+
+        var request = new { Message = message, Model = model, Effort = effort, PermissionMode = permissionMode, ResumeSessionId = resumeId };
         var json = JsonSerializer.Serialize(request);
 
         await _writer!.WriteLineAsync(json);

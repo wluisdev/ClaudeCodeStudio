@@ -56,4 +56,12 @@
     <IncludeInVSIX>true</IncludeInVSIX>
   </Content>
 </ItemGroup>
+
+  <Target Name="SyncVsixVersion" BeforeTargets="CreateVsixContainer">
+    <XmlPoke
+      XmlInputPath="$(IntermediateOutputPath)merged.source.extension.vsixmanifest"
+      Query="//*[local-name()='Identity']/@Version"
+      Value="$(Version)" />
+  </Target>
+
 </Project>

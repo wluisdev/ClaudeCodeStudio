@@ -1,5 +1,52 @@
 console.log("Claude VS loaded");
 
+// ── Layout toggle ────────────────────────────────────────────
+function toggleLayout() {
+    const app = document.querySelector(".app");
+    const btn = document.getElementById("btn-layout");
+    app.classList.toggle("compact");
+    btn.classList.toggle("active", app.classList.contains("compact"));
+}
+
+// ── Permission mode cycle ─────────────────────────────────────
+const permissionCycle = ["auto", "plan", "ask"];
+const permissionIcons = { auto: "⚡", plan: "📋", ask: "🔒" };
+const permissionLabels = { auto: "auto — edita sem pedir", plan: "plan — só planeja", ask: "ask — padrão Claude" };
+
+function cyclePermission() {
+    const cur = permissionSelect.value;
+    const next = permissionCycle[(permissionCycle.indexOf(cur) + 1) % permissionCycle.length];
+    permissionSelect.value = next;
+    updatePermissionBtn();
+}
+
+function updatePermissionBtn() {
+    const btn = document.getElementById("btn-permission");
+    const mode = permissionSelect.value;
+    btn.textContent = permissionIcons[mode] || "🔒";
+    btn.title = permissionLabels[mode] || mode;
+    btn.classList.toggle("active", mode !== "auto");
+}
+
+permissionSelect.addEventListener("change", updatePermissionBtn);
+
+// ── Session history ───────────────────────────────────────────
+function toggleHistory() {
+    const menu = document.getElementById("history-menu");
+    const isOpen = menu.classList.toggle("open");
+    if (isOpen) {
+        document.getElementById("history-list").innerHTML =
+            '<div class="cmd-item" style="color:#555;font-family:inherit">Carregando…</div>';
+        window.chrome.webview.postMessage({ type: "get-history" });
+    }
+}
+
+document.addEventListener("click", e => {
+    const wrap = document.getElementById("history-wrap");
+    if (wrap && !wrap.contains(e.target))
+        document.getElementById("history-menu")?.classList.remove("open");
+});
+
 // ── Custom commands ──────────────────────────────────────────
 let customCommands = JSON.parse(localStorage.getItem("customCommands") || "[]");
 
@@ -168,6 +215,11 @@ function addMessage(role, text) {
 
 window.chrome.webview.addEventListener("message", event => {
 
+    if (event.data.type === "history") {
+        renderHistory(event.data.sessions);
+        return;
+    }
+
     if (event.data.type === "attach-file") {
         addAttachment(event.data.filename, event.data.content, event.data.isBinary, event.data.filePath);
         return;
@@ -315,6 +367,24 @@ function insertAtCursor(text) {
     textarea.value = textarea.value.substring(0, start) + text + textarea.value.substring(end);
     textarea.selectionStart = textarea.selectionEnd = start + text.length;
     textarea.focus();
+}
+
+function renderHistory(sessions) {
+    const list = document.getElementById("history-list");
+    if (!sessions || sessions.length === 0) {
+        list.innerHTML = '<div class="cmd-item" style="color:#555;font-family:inherit">Nenhuma sessão encontrada</div>';
+        return;
+    }
+    list.innerHTML = sessions.map(s => `
+<div class="cmd-item history-item" onclick="resumeSession('${escapeAttr(s.id)}')">
+  <div class="history-preview">${escapeHtml(s.preview)}</div>
+  <div class="history-date">${escapeHtml(s.date)}</div>
+</div>`).join("");
+}
+
+function resumeSession(sessionId) {
+    document.getElementById("history-menu").classList.remove("open");
+    window.chrome.webview.postMessage({ type: "resume-session", sessionId });
 }
 
 function escapeHtml(text) {

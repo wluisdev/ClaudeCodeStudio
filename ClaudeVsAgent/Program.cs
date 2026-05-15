@@ -30,6 +30,9 @@ try
             continue;
         }
 
+        if (request.ResumeSessionId != null)
+            sessionId = request.ResumeSessionId;
+
         var message = request.Message ?? "";
         var model = request.Model ?? "claude-sonnet-4-6";
         var effort = request.Effort;
@@ -228,6 +231,7 @@ public class ChatRequest
     public string? Effort { get; set; }
     public string PermissionMode { get; set; } = "auto";
     public bool ResetSession { get; set; }
+    public string? ResumeSessionId { get; set; }
 }
 
 public class ChatChunk

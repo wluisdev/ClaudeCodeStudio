@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Controls;
 using ClaudeVsExtension.Agent;
@@ -70,6 +71,19 @@ public partial class AgentToolWindowControl : UserControl
             if (request.Type == "clear")
             {
                 await _agentClient.StopAsync();
+                return;
+            }
+
+            if (request.Type == "get-history")
+            {
+                await HandleGetHistoryAsync();
+                return;
+            }
+
+            if (request.Type == "resume-session")
+            {
+                await _agentClient.StopAsync();
+                _agentClient.PendingResumeSessionId = request.SessionId;
                 return;
             }
 
@@ -168,6 +182,76 @@ public partial class AgentToolWindowControl : UserControl
         Browser.CoreWebView2.PostWebMessageAsJson(json);
     }
 
+    private async Task HandleGetHistoryAsync()
+    {
+        var claudeDir = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".claude", "projects");
+
+        var sessions = new System.Collections.Generic.List<object>();
+
+        if (Directory.Exists(claudeDir))
+        {
+            var files = Directory.GetFiles(claudeDir, "*.jsonl", SearchOption.AllDirectories)
+                .OrderByDescending(File.GetLastWriteTime)
+                .Take(30);
+
+            foreach (var file in files)
+            {
+                var sessionId = System.IO.Path.GetFileNameWithoutExtension(file);
+                var preview = "";
+                var date = File.GetLastWriteTime(file).ToString("dd/MM/yyyy HH:mm");
+
+                try
+                {
+                    using var sr = new StreamReader(file);
+                    string? jsonLine;
+                    while ((jsonLine = await sr.ReadLineAsync()) != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(jsonLine)) continue;
+                        using var doc = System.Text.Json.JsonDocument.Parse(jsonLine);
+                        var root = doc.RootElement;
+                        if (!root.TryGetProperty("type", out var t) || t.GetString() != "user") continue;
+                        if (!root.TryGetProperty("message", out var msg)) continue;
+                        if (!msg.TryGetProperty("content", out var content)) continue;
+
+                        if (content.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        {
+                            foreach (var item in content.EnumerateArray())
+                            {
+                                if (item.TryGetProperty("type", out var itemType) &&
+                                    itemType.GetString() == "text" &&
+                                    item.TryGetProperty("text", out var textEl))
+                                {
+                                    preview = textEl.GetString() ?? "";
+                                    break;
+                                }
+                            }
+                        }
+                        else if (content.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            preview = content.GetString() ?? "";
+                        }
+
+                        if (!string.IsNullOrEmpty(preview))
+                        {
+                            if (preview.Length > 80) preview = preview.Substring(0, 80) + "…";
+                            break;
+                        }
+                    }
+                }
+                catch { }
+
+                if (!string.IsNullOrEmpty(preview))
+                    sessions.Add(new { id = sessionId, preview, date });
+            }
+        }
+
+        var json = JsonSerializer.Serialize(new { type = "history", sessions });
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
+    }
+
     private class WebChatMessage
     {
         [JsonPropertyName("type")]
@@ -184,5 +268,8 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("permissionMode")]
         public string PermissionMode { get; set; } = "auto";
+
+        [JsonPropertyName("sessionId")]
+        public string? SessionId { get; set; }
     }
 }
