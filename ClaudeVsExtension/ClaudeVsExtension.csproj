@@ -12,6 +12,20 @@
   <ItemGroup>
     <None Remove="AgentToolWindowControl.xaml" />
     <None Remove="ClaudeVsExtensionPackage.vsct" />
+    <None Remove="Ui\app.js" />
+    <None Remove="Ui\index.html" />
+    <None Remove="Ui\styles.css" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Ui\app.js">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Ui\index.html">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Ui\styles.css">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
   <ItemGroup>
     <ProjectCapability Include="CreateVsixContainer" />

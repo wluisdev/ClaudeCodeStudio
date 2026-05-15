@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Windows.Controls;
-using Microsoft.Web.WebView2.Core;
 
 namespace ClaudeVsExtension
 {
@@ -22,21 +21,20 @@ namespace ClaudeVsExtension
                 "ClaudeVsStudio",
                 "WebView2");
 
-            var environment = await CoreWebView2Environment.CreateAsync(
-                null,
-                userDataFolder);
+            var environment = await Microsoft.Web.WebView2.Core.CoreWebView2Environment
+                .CreateAsync(null, userDataFolder);
 
             await Browser.EnsureCoreWebView2Async(environment);
 
-            Browser.NavigateToString("""
-    <!DOCTYPE html>
-    <html>
-    <body style='background:#1e1e1e;color:white;font-family:Segoe UI;padding:20px'>
-        <h1>Claude VS Extension</h1>
-        <p>WebView2 funcionando 🚀</p>
-    </body>
-    </html>
-    """);
+            var extensionAssemblyPath = System.IO.Path.GetDirectoryName(
+    typeof(AgentToolWindowControl).Assembly.Location);
+
+            var htmlPath = System.IO.Path.Combine(
+                extensionAssemblyPath,
+                "Ui",
+                "index.html");
+
+            Browser.Source = new Uri(htmlPath);
         }
     }
 }
