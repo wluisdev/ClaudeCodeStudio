@@ -26,8 +26,9 @@ namespace ClaudeVsExtension
 
             await Browser.EnsureCoreWebView2Async(environment);
 
-            var extensionAssemblyPath = System.IO.Path.GetDirectoryName(
-    typeof(AgentToolWindowControl).Assembly.Location);
+            Browser.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
+
+            var extensionAssemblyPath = System.IO.Path.GetDirectoryName(typeof(AgentToolWindowControl).Assembly.Location);
 
             var htmlPath = System.IO.Path.Combine(
                 extensionAssemblyPath,
@@ -35,6 +36,22 @@ namespace ClaudeVsExtension
                 "index.html");
 
             Browser.Source = new Uri(htmlPath);
+        }
+
+        private void CoreWebView2_WebMessageReceived(
+    object? sender,
+    Microsoft.Web.WebView2.Core.CoreWebView2WebMessageReceivedEventArgs e)
+        {
+            var messageJson = e.WebMessageAsJson;
+
+            var response = """
+            {
+                "type": "assistant",
+                "text": "Mensagem recebida no VSIX 🚀"
+            }
+            """;
+
+            Browser.CoreWebView2.PostWebMessageAsJson(response);
         }
     }
 }

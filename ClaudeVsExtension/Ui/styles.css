@@ -59,18 +59,19 @@ body {
 
 .content {
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding-bottom: 90px;
+    padding: 20px 12px;
 }
 
 .hero {
     font-size: 28px;
     font-weight: 700;
-    margin-bottom: 120px;
+    margin-bottom: 70px;
 }
 
 .bot {

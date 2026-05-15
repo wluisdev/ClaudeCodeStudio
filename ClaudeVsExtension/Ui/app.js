@@ -1,11 +1,39 @@
-console.log("Claude VS UI loaded");
+console.log("Claude VS loaded");
 
-document.querySelector(".send").addEventListener("click", () => {
-    const text = document.querySelector("textarea").value;
+const textarea = document.querySelector("textarea");
+const sendButton = document.querySelector(".send");
 
-    if (!text.trim()) {
+sendButton.addEventListener("click", sendMessage);
+
+textarea.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+    }
+});
+
+function sendMessage() {
+
+    const text = textarea.value.trim();
+
+    if (!text) {
         return;
     }
 
-    alert("Mensagem enviada: " + text);
+    if (window.chrome?.webview) {
+
+        window.chrome.webview.postMessage({
+            type: "chat",
+            text: text
+        });
+    }
+
+    textarea.value = "";
+}
+
+window.chrome.webview.addEventListener("message", event => {
+
+    console.log("Resposta do C#:", event.data);
+
+    alert(event.data.text);
 });
