@@ -58,11 +58,12 @@ public class AgentClient
         }
     }
 
-    public async Task<string> AskAsync(string message)
+    public async Task<string> AskAsync(string message, string model = "claude-sonnet-4-6")
     {
         var request = new
         {
-            Message = message
+            Message = message,
+            Model = model
         };
 
         var json = JsonSerializer.Serialize(request);

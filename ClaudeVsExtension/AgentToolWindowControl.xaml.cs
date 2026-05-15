@@ -1,9 +1,12 @@
 ﻿using System;
+using System.IO;
+using System.Threading.Tasks;
 using System.Windows.Controls;
 using ClaudeVsExtension.Agent;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using System.Text.Json.Serialization;
+using Microsoft.VisualStudio.Shell;
 
 namespace ClaudeVsExtension;
 
@@ -21,8 +24,8 @@ public partial class AgentToolWindowControl : UserControl
     }
 
     private async void AgentToolWindowControl_Loaded(
-object sender,
-System.Windows.RoutedEventArgs e)
+        object sender,
+        System.Windows.RoutedEventArgs e)
     {
         var userDataFolder = System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -47,8 +50,8 @@ System.Windows.RoutedEventArgs e)
     }
 
     private async void AgentToolWindowControl_Unloaded(
-    object sender,
-    System.Windows.RoutedEventArgs e)
+        object sender,
+        System.Windows.RoutedEventArgs e)
     {
         await _agentClient.StopAsync();
     }
@@ -70,12 +73,24 @@ System.Windows.RoutedEventArgs e)
                 return;
             }
 
+            if (request.Type == "add-file")
+            {
+                await HandleAddFileAsync();
+                return;
+            }
+
+            if (request.Type == "get-selection")
+            {
+                await HandleGetSelectionAsync();
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(request.Text))
                 return;
 
             await _agentClient.StartAsync();
 
-            var agentResponse = await _agentClient.AskAsync(request.Text);
+            var agentResponse = await _agentClient.AskAsync(request.Text, request.Model);
 
             var responseJson = JsonSerializer.Serialize(new
             {
@@ -97,6 +112,55 @@ System.Windows.RoutedEventArgs e)
         }
     }
 
+    private static readonly System.Collections.Generic.HashSet<string> _binaryExtensions =
+        new(System.StringComparer.OrdinalIgnoreCase)
+        {
+            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".tiff",
+            ".pdf", ".zip", ".rar", ".7z", ".tar", ".gz",
+            ".exe", ".dll", ".bin", ".dat", ".pdb",
+            ".mp3", ".mp4", ".wav", ".avi", ".mov"
+        };
+
+    private async Task HandleAddFileAsync()
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Selecionar arquivo",
+            Filter = "Todos os arquivos (*.*)|*.*|Arquivos de texto|*.txt;*.cs;*.js;*.ts;*.html;*.css;*.json;*.xml;*.md;*.py;*.cpp;*.h"
+        };
+
+        if (dialog.ShowDialog() != true)
+            return;
+
+        var filename = Path.GetFileName(dialog.FileName);
+        var ext = Path.GetExtension(dialog.FileName);
+
+        var isBinary = _binaryExtensions.Contains(ext);
+        var content = isBinary
+            ? null
+            : $"[{filename}]\n```\n{File.ReadAllText(dialog.FileName)}\n```";
+
+        var json = JsonSerializer.Serialize(new { type = "attach-file", filename, content, isBinary });
+        Browser.CoreWebView2.PostWebMessageAsJson(json);
+    }
+
+    private async Task HandleGetSelectionAsync()
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+        var selection = dte?.ActiveDocument?.Selection as EnvDTE.TextSelection;
+        var text = selection?.Text;
+
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        var json = JsonSerializer.Serialize(new { type = "insert-text", text });
+        Browser.CoreWebView2.PostWebMessageAsJson(json);
+    }
+
     private class WebChatMessage
     {
         [JsonPropertyName("type")]
@@ -104,5 +168,8 @@ System.Windows.RoutedEventArgs e)
 
         [JsonPropertyName("text")]
         public string Text { get; set; } = "";
+
+        [JsonPropertyName("model")]
+        public string Model { get; set; } = "claude-sonnet-4-6";
     }
 }

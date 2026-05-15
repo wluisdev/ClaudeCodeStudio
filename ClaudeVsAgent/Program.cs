@@ -20,8 +20,9 @@ try
         var request = JsonSerializer.Deserialize<ChatRequest>(line);
 
         var message = request?.Message ?? "";
+        var model = request?.Model ?? "claude-sonnet-4-6";
 
-        var responseText = await AskClaudeAsync(message);
+        var responseText = await AskClaudeAsync(message, model);
 
         var response = new ChatResponse
         {
@@ -42,7 +43,7 @@ catch (Exception ex)
     Console.Out.Flush();
 }
 
-static async Task<string> AskClaudeAsync(string message)
+static async Task<string> AskClaudeAsync(string message, string model)
 {
     var psi = new ProcessStartInfo
     {
@@ -61,6 +62,9 @@ static async Task<string> AskClaudeAsync(string message)
 
     psi.ArgumentList.Add("-p");
     psi.ArgumentList.Add(message);
+    psi.ArgumentList.Add("--model");
+    psi.ArgumentList.Add(model);
+    psi.ArgumentList.Add("--dangerously-skip-permissions");
 
     using var process = Process.Start(psi);
 
@@ -69,15 +73,17 @@ static async Task<string> AskClaudeAsync(string message)
 
     process.StandardInput.Close();
 
-    var output = await process.StandardOutput.ReadToEndAsync();
-    var error = await process.StandardError.ReadToEndAsync();
+    var outputTask = process.StandardOutput.ReadToEndAsync();
+    var errorTask = process.StandardError.ReadToEndAsync();
 
+    await Task.WhenAll(outputTask, errorTask);
     process.WaitForExit();
 
+    var error = errorTask.Result;
     if (!string.IsNullOrWhiteSpace(error))
         return error;
 
-    return output.Trim();
+    return outputTask.Result.Trim();
 }
 
 static string FindClaude()
@@ -111,6 +117,7 @@ static string FindClaude()
 public class ChatRequest
 {
     public string Message { get; set; } = "";
+    public string Model { get; set; } = "claude-sonnet-4-6";
 }
 
 public class ChatResponse
