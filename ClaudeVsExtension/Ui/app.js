@@ -1,5 +1,73 @@
 console.log("Claude VS loaded");
 
+// ── Custom commands ──────────────────────────────────────────
+let customCommands = JSON.parse(localStorage.getItem("customCommands") || "[]");
+
+function saveCustomCommands() {
+    localStorage.setItem("customCommands", JSON.stringify(customCommands));
+}
+
+function renderCustomCommands() {
+    const list = document.getElementById("custom-cmd-list");
+    list.innerHTML = "";
+    customCommands.forEach((cmd, i) => {
+        const row = document.createElement("div");
+        row.className = "cmd-item cmd-custom-item";
+        row.innerHTML = `<span onclick="runCommand('${escapeAttr(cmd.command)}')">${escapeHtml(cmd.name || cmd.command)}</span><button class="cmd-custom-remove" onclick="removeCommand(${i})" title="Remover">×</button>`;
+        list.appendChild(row);
+    });
+}
+
+function removeCommand(i) {
+    customCommands.splice(i, 1);
+    saveCustomCommands();
+    renderCustomCommands();
+}
+
+function toggleCmdMenu() {
+    const menu = document.getElementById("cmd-menu");
+    menu.classList.toggle("open");
+}
+
+function runCommand(cmd) {
+    document.getElementById("cmd-menu").classList.remove("open");
+    textarea.value = cmd;
+    sendMessage();
+}
+
+function openAddCommand() {
+    document.getElementById("cmd-menu").classList.remove("open");
+    document.getElementById("cmd-modal-overlay").classList.add("open");
+    document.getElementById("cmd-modal-name").value = "";
+    document.getElementById("cmd-modal-cmd").value = "";
+    setTimeout(() => document.getElementById("cmd-modal-name").focus(), 50);
+}
+
+function closeAddCommand() {
+    document.getElementById("cmd-modal-overlay").classList.remove("open");
+}
+
+function saveNewCommand() {
+    const name = document.getElementById("cmd-modal-name").value.trim();
+    const cmd = document.getElementById("cmd-modal-cmd").value.trim();
+    if (!cmd) return;
+    customCommands.push({ name: name || cmd, command: cmd });
+    saveCustomCommands();
+    renderCustomCommands();
+    closeAddCommand();
+}
+
+function escapeAttr(s) {
+    return s.replace(/'/g, "\\'");
+}
+
+document.addEventListener("click", e => {
+    const wrap = document.getElementById("cmd-wrap");
+    if (wrap && !wrap.contains(e.target))
+        document.getElementById("cmd-menu").classList.remove("open");
+});
+// ────────────────────────────────────────────────────────────
+
 const textarea = document.querySelector("textarea");
 const sendButton = document.querySelector(".send");
 const newChatButton = document.querySelector(".new-chat");
@@ -257,3 +325,5 @@ function escapeHtml(text) {
 
     return div.innerHTML;
 }
+
+renderCustomCommands();

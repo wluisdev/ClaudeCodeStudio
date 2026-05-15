@@ -17,7 +17,20 @@
             <div class="actions">
                 <span>◫</span>
                 <span>🔒</span>
-                <span>⋯</span>
+                <div class="cmd-wrap" id="cmd-wrap">
+                    <button class="cmd-trigger" title="Comandos" onclick="toggleCmdMenu()">⌘</button>
+                    <div class="cmd-menu" id="cmd-menu">
+                        <div class="cmd-section">Built-in</div>
+                        <div class="cmd-item" onclick="runCommand('/usage')">/usage</div>
+                        <div class="cmd-item" onclick="runCommand('/compact')">/compact</div>
+                        <div class="cmd-item" onclick="runCommand('/review')">/review</div>
+                        <div class="cmd-item" onclick="runCommand('/clear')">/clear</div>
+                        <div class="cmd-divider"></div>
+                        <div class="cmd-section">Custom</div>
+                        <div id="custom-cmd-list"></div>
+                        <div class="cmd-item cmd-add" onclick="openAddCommand()">＋ Add command…</div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -89,6 +102,20 @@
                         <button class="send">↑</button>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="cmd-modal-overlay" id="cmd-modal-overlay" onclick="if(event.target===this)closeAddCommand()">
+        <div class="cmd-modal">
+            <h3>Adicionar comando</h3>
+            <label>Nome (exibido no menu)</label>
+            <input id="cmd-modal-name" placeholder="Ex: Code Review" onkeydown="if(event.key==='Enter')document.getElementById('cmd-modal-cmd').focus()" />
+            <label>Comando (enviado ao Claude)</label>
+            <input id="cmd-modal-cmd" placeholder="Ex: /review" onkeydown="if(event.key==='Enter')saveNewCommand()" />
+            <div class="cmd-modal-buttons">
+                <button onclick="closeAddCommand()">Cancelar</button>
+                <button class="btn-primary" onclick="saveNewCommand()">Adicionar</button>
             </div>
         </div>
     </div>
