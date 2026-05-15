@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using ClaudeVsShared;
 
 namespace ClaudeVsExtension.Agent;
 
@@ -65,7 +66,14 @@ public class AgentClient
         var resumeId = PendingResumeSessionId;
         PendingResumeSessionId = null;
 
-        var request = new { Message = message, Model = model, Effort = effort, PermissionMode = permissionMode, ResumeSessionId = resumeId };
+        var request = new ChatRequest
+        {
+            Message = message,
+            Model = model,
+            Effort = effort,
+            PermissionMode = permissionMode,
+            ResumeSessionId = resumeId
+        };
         var json = JsonSerializer.Serialize(request);
 
         await _writer!.WriteLineAsync(json);
@@ -77,7 +85,7 @@ public class AgentClient
 
             if (responseJson == null) break;
 
-            var chunk = JsonSerializer.Deserialize<AgentChunk>(responseJson);
+            var chunk = JsonSerializer.Deserialize<ChatChunk>(responseJson);
 
             if (chunk == null) break;
 
@@ -132,12 +140,6 @@ public class AgentClient
             _writer = null;
             _process = null;
         }
-    }
-
-    private class AgentChunk
-    {
-        public string Type { get; set; } = "";
-        public string Text { get; set; } = "";
     }
 
     private static string GetAgentPath()

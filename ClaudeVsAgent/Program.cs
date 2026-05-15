@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using ClaudeVsShared;
 
 string? sessionId = null;
 
@@ -224,18 +225,3 @@ static string FindClaude()
         "claude.exe não encontrado. Verifique se o Claude Code está instalado e no PATH.");
 }
 
-public class ChatRequest
-{
-    public string Message { get; set; } = "";
-    public string Model { get; set; } = "claude-sonnet-4-6";
-    public string? Effort { get; set; }
-    public string PermissionMode { get; set; } = "auto";
-    public bool ResetSession { get; set; }
-    public string? ResumeSessionId { get; set; }
-}
-
-public class ChatChunk
-{
-    public string Type { get; set; } = "";
-    public string Text { get; set; } = "";
-}
