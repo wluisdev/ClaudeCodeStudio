@@ -61,7 +61,16 @@ System.Windows.RoutedEventArgs e)
 
             var request = JsonSerializer.Deserialize<WebChatMessage>(messageJson);
 
-            if (request == null || string.IsNullOrWhiteSpace(request.Text))
+            if (request == null)
+                return;
+
+            if (request.Type == "clear")
+            {
+                await _agentClient.StopAsync();
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Text))
                 return;
 
             await _agentClient.StartAsync();

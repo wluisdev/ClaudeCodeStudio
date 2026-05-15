@@ -51,10 +51,27 @@ body {
     height: 46px;
     display: flex;
     align-items: center;
+    justify-content: space-between;
     padding: 0 18px;
     font-size: 18px;
     font-weight: 600;
     border-bottom: 1px solid #333;
+}
+
+.new-chat {
+    background: none;
+    border: none;
+    color: #aaa;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    line-height: 1;
+}
+
+.new-chat:hover {
+    background: #333;
+    color: #fff;
 }
 
 .content {

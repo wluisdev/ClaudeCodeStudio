@@ -2,10 +2,12 @@ console.log("Claude VS loaded");
 
 const textarea = document.querySelector("textarea");
 const sendButton = document.querySelector(".send");
+const newChatButton = document.querySelector(".new-chat");
 const messages = document.querySelector("#messages");
-const welcome = document.querySelector(".welcome");
+let welcome = document.querySelector(".welcome");
 
 sendButton.addEventListener("click", sendMessage);
+newChatButton.addEventListener("click", clearChat);
 
 textarea.addEventListener("keydown", (e) => {
 
@@ -61,6 +63,21 @@ window.chrome.webview.addEventListener("message", event => {
         "assistant",
         event.data.text);
 });
+
+function clearChat() {
+    messages.innerHTML = `
+        <div class="welcome">
+            <div class="hero"><span class="logo">✺</span> Claude VS</div>
+            <div class="bot">🤖</div>
+            <div class="hint">Type /model to pick the right tool for the job.</div>
+        </div>`;
+
+    welcome = messages.querySelector(".welcome");
+
+    textarea.value = "";
+
+    window.chrome.webview.postMessage({ type: "clear" });
+}
 
 function escapeHtml(text) {
 
