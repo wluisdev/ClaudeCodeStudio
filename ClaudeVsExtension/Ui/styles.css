@@ -345,6 +345,53 @@ textarea {
     font-family: monospace;
 }
 
+.question-card {
+    background: #252525;
+    border: 1px solid #3a3a3a;
+    border-radius: 10px 10px 10px 4px;
+    padding: 10px 14px;
+    max-width: 75%;
+    align-self: flex-start;
+}
+
+.question-card.question-answered {
+    opacity: 0.55;
+}
+
+.question-text {
+    font-size: 13px;
+    color: #ddd;
+    margin-bottom: 10px;
+}
+
+.question-answered .question-text {
+    margin-bottom: 0;
+}
+
+.question-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.q-btn {
+    padding: 4px 18px;
+    border-radius: 6px;
+    border: 1px solid #555;
+    cursor: pointer;
+    font-size: 13px;
+    background: #333;
+    color: #ddd;
+}
+
+.q-yes {
+    background: #d88763;
+    border-color: #d88763;
+    color: white;
+}
+
+.q-yes:hover { background: #c4734f; }
+.q-no:hover { background: #3a3a3a; }
+
 .dots span {
     animation: blink 1.2s infinite;
     font-size: 20px;

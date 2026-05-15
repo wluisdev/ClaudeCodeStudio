@@ -147,8 +147,9 @@ public partial class AgentToolWindowControl : UserControl
         var content = isBinary
             ? null
             : $"[{filename}]\n```\n{File.ReadAllText(dialog.FileName)}\n```";
+        var filePath = isBinary ? dialog.FileName : (string?)null;
 
-        var json = JsonSerializer.Serialize(new { type = "attach-file", filename, content, isBinary });
+        var json = JsonSerializer.Serialize(new { type = "attach-file", filename, content, isBinary, filePath });
         Browser.CoreWebView2.PostWebMessageAsJson(json);
     }
 

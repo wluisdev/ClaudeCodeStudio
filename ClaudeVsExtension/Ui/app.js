@@ -52,8 +52,18 @@ function sendMessage() {
     addMessage("user", text || `(${activeAttachments.map(a => a.displayName).join(", ")})`);
 
     let fullMessage = text;
-    for (const att of activeAttachments)
-        if (att.content) fullMessage += "\n\n" + att.content;
+    const filePaths = [];
+
+    for (const att of activeAttachments) {
+        if (att.content) {
+            fullMessage += "\n\n" + att.content;
+        } else if (att.filePath && att.includeFile) {
+            filePaths.push(att.filePath);
+        }
+    }
+
+    if (filePaths.length > 0)
+        fullMessage += "\n\nFiles attached:\n" + filePaths.map(p => `  - ${p}`).join("\n");
 
     attachments.clear();
     attachmentsEl.innerHTML = "";
@@ -91,7 +101,7 @@ function addMessage(role, text) {
 window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "attach-file") {
-        addAttachment(event.data.filename, event.data.content, event.data.isBinary);
+        addAttachment(event.data.filename, event.data.content, event.data.isBinary, event.data.filePath);
         return;
     }
 
@@ -167,7 +177,7 @@ function clearChat() {
     window.chrome.webview.postMessage({ type: "clear" });
 }
 
-function addAttachment(filename, content, isBinary) {
+function addAttachment(filename, content, isBinary, filePath) {
     const imageExts = ["png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "tiff"];
     const ext = filename.split(".").pop().toLowerCase();
     const isImage = imageExts.includes(ext);
@@ -175,17 +185,60 @@ function addAttachment(filename, content, isBinary) {
     const displayName = isImage ? `imagem${++imageCounter}.${ext}` : filename;
 
     const id = attachmentIdCounter++;
-    attachments.set(id, { displayName, content: isBinary ? null : content });
+    attachments.set(id, { displayName, content: isBinary ? null : content, filePath: filePath || null, includeFile: false });
 
     const chip = document.createElement("div");
-    chip.className = `attachment-chip${isBinary ? " attachment-binary" : ""}`;
-    chip.title = isBinary ? "Arquivos binários não são enviados como conteúdo" : "";
+    chip.className = "attachment-chip" + (isBinary ? " attachment-binary" : "");
+    chip.dataset.attId = id;
     chip.innerHTML = `<span>${displayName}</span><button class="attachment-remove">×</button>`;
     chip.querySelector(".attachment-remove").addEventListener("click", () => {
         attachments.delete(id);
         chip.remove();
+        document.getElementById(`q-card-${id}`)?.remove();
     });
     attachmentsEl.appendChild(chip);
+
+    if (isBinary && filePath) {
+        showFileQuestion(id, displayName);
+    }
+}
+
+function showFileQuestion(id, displayName) {
+    if (welcome) {
+        welcome.remove();
+        welcome = null;
+    }
+
+    const card = document.createElement("div");
+    card.className = "question-card";
+    card.id = `q-card-${id}`;
+    card.innerHTML = `
+<div class="question-text">📎 <strong>${escapeHtml(displayName)}</strong> — Deseja que o Claude leia este arquivo?</div>
+<div class="question-buttons">
+<button class="q-btn q-yes" onclick="confirmFile(${id}, true)">Sim</button>
+<button class="q-btn q-no" onclick="confirmFile(${id}, false)">Não</button>
+</div>`;
+    messages.appendChild(card);
+    messages.scrollTop = messages.scrollHeight;
+}
+
+function confirmFile(id, include) {
+    const att = attachments.get(id);
+    if (att) att.includeFile = include;
+
+    const card = document.getElementById(`q-card-${id}`);
+    if (card) {
+        card.innerHTML = `<div class="question-text">📎 <strong>${escapeHtml(att?.displayName || "")}</strong> — ${include ? "✓ será enviado ao Claude" : "✗ ignorado"}</div>`;
+        card.classList.add("question-answered");
+    }
+
+    if (!include) {
+        attachments.delete(id);
+        document.querySelector(`[data-att-id="${id}"]`)?.remove();
+    } else {
+        const chip = document.querySelector(`[data-att-id="${id}"]`);
+        if (chip) chip.classList.remove("attachment-binary");
+    }
 }
 
 function insertAtCursor(text) {
