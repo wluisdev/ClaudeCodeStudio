@@ -58,9 +58,9 @@ public class AgentClient
         }
     }
 
-    public async Task AskStreamingAsync(string message, string model, Action<string> onChunk, Action<string>? onTiming = null)
+    public async Task AskStreamingAsync(string message, string model, string? effort, Action<string> onChunk, Action<string>? onTiming = null)
     {
-        var request = new { Message = message, Model = model };
+        var request = new { Message = message, Model = model, Effort = effort };
         var json = JsonSerializer.Serialize(request);
 
         await _writer!.WriteLineAsync(json);

@@ -4,6 +4,7 @@ const textarea = document.querySelector("textarea");
 const sendButton = document.querySelector(".send");
 const newChatButton = document.querySelector(".new-chat");
 const modelSelect = document.querySelector(".model-select");
+const effortSelect = document.querySelector(".effort-select");
 const messages = document.querySelector("#messages");
 const attachmentsEl = document.getElementById("attachments");
 let welcome = document.querySelector(".welcome");
@@ -62,7 +63,8 @@ function sendMessage() {
         window.chrome.webview.postMessage({
             type: "chat",
             text: fullMessage,
-            model: modelSelect.value
+            model: modelSelect.value,
+            effort: effortSelect.value || null
         });
     }
 }

@@ -92,7 +92,7 @@ public partial class AgentToolWindowControl : UserControl
 
             var dispatcher = System.Windows.Application.Current.Dispatcher;
 
-            await _agentClient.AskStreamingAsync(request.Text, request.Model,
+            await _agentClient.AskStreamingAsync(request.Text, request.Model, request.Effort,
                 chunk => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "chunk", text = chunk }))),
@@ -177,5 +177,8 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("model")]
         public string Model { get; set; } = "claude-sonnet-4-6";
+
+        [JsonPropertyName("effort")]
+        public string? Effort { get; set; }
     }
 }

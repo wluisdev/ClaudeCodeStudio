@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 
+string? sessionId = null;
+
 try
 {
     Console.WriteLine("READY");
@@ -18,10 +20,21 @@ try
             continue;
 
         var request = JsonSerializer.Deserialize<ChatRequest>(line);
-        var message = request?.Message ?? "";
-        var model = request?.Model ?? "claude-sonnet-4-6";
 
-        await StreamClaudeAsync(message, model);
+        if (request == null)
+            continue;
+
+        if (request.ResetSession)
+        {
+            sessionId = null;
+            continue;
+        }
+
+        var message = request.Message ?? "";
+        var model = request.Model ?? "claude-sonnet-4-6";
+        var effort = request.Effort;
+
+        sessionId = await StreamClaudeAsync(message, model, effort, sessionId);
     }
 }
 catch (Exception ex)
@@ -36,9 +49,10 @@ static void EmitTiming(string label, long ms)
     Console.Out.Flush();
 }
 
-static async Task StreamClaudeAsync(string message, string model)
+static async Task<string?> StreamClaudeAsync(string message, string model, string? effort, string? sessionId)
 {
-    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var sw = Stopwatch.StartNew();
+    string? newSessionId = null;
 
     var psi = new ProcessStartInfo
     {
@@ -64,13 +78,25 @@ static async Task StreamClaudeAsync(string message, string model)
     psi.ArgumentList.Add(model);
     psi.ArgumentList.Add("--dangerously-skip-permissions");
 
+    if (!string.IsNullOrEmpty(effort))
+    {
+        psi.ArgumentList.Add("--effort");
+        psi.ArgumentList.Add(effort);
+    }
+
+    if (sessionId != null)
+    {
+        psi.ArgumentList.Add("--resume");
+        psi.ArgumentList.Add(sessionId);
+    }
+
     using var process = Process.Start(psi);
 
     if (process == null)
     {
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = "Não foi possível iniciar Claude." }));
         Console.Out.Flush();
-        return;
+        return sessionId;
     }
 
     EmitTiming("process started", sw.ElapsedMilliseconds);
@@ -124,6 +150,10 @@ static async Task StreamClaudeAsync(string message, string model)
             else if (type == "result")
             {
                 EmitTiming("result received", sw.ElapsedMilliseconds);
+
+                if (evt.TryGetProperty("session_id", out var sidProp))
+                    newSessionId = sidProp.GetString();
+
                 if (evt.TryGetProperty("is_error", out var isErrProp) && isErrProp.GetBoolean() &&
                     evt.TryGetProperty("result", out var resultProp))
                 {
@@ -148,6 +178,8 @@ static async Task StreamClaudeAsync(string message, string model)
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = error.Trim() }));
         Console.Out.Flush();
     }
+
+    return newSessionId ?? sessionId;
 }
 
 static string FindClaude()
@@ -180,6 +212,8 @@ public class ChatRequest
 {
     public string Message { get; set; } = "";
     public string Model { get; set; } = "claude-sonnet-4-6";
+    public string? Effort { get; set; }
+    public bool ResetSession { get; set; }
 }
 
 public class ChatChunk

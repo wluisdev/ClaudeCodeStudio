@@ -64,7 +64,8 @@ body {
     gap: 8px;
 }
 
-.model-select {
+.model-select,
+.effort-select {
     background: #2a2a2a;
     border: 1px solid #444;
     color: #ccc;
@@ -75,7 +76,8 @@ body {
     outline: none;
 }
 
-.model-select:hover {
+.model-select:hover,
+.effort-select:hover {
     border-color: #d88763;
 }
 
