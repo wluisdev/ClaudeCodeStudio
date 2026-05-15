@@ -2,12 +2,17 @@ console.log("Claude VS loaded");
 
 const textarea = document.querySelector("textarea");
 const sendButton = document.querySelector(".send");
+const messages = document.querySelector("#messages");
+const welcome = document.querySelector(".welcome");
 
 sendButton.addEventListener("click", sendMessage);
 
 textarea.addEventListener("keydown", (e) => {
+
     if (e.key === "Enter" && !e.shiftKey) {
+
         e.preventDefault();
+
         sendMessage();
     }
 });
@@ -20,6 +25,8 @@ function sendMessage() {
         return;
     }
 
+    addMessage("user", text);
+
     if (window.chrome?.webview) {
 
         window.chrome.webview.postMessage({
@@ -31,9 +38,39 @@ function sendMessage() {
     textarea.value = "";
 }
 
+function addMessage(role, text) {
+
+    if (welcome) {
+        welcome.style.display = "none";
+    }
+
+    const message = document.createElement("div");
+
+    message.className = `message ${role}`;
+
+    message.innerHTML = `
+        <div class="bubble">
+            ${escapeHtml(text)}
+        </div>
+    `;
+
+    messages.appendChild(message);
+
+    messages.scrollTop = messages.scrollHeight;
+}
+
 window.chrome.webview.addEventListener("message", event => {
 
-    console.log("Resposta do C#:", event.data);
-
-    alert(event.data.text);
+    addMessage(
+        "assistant",
+        event.data.text);
 });
+
+function escapeHtml(text) {
+
+    const div = document.createElement("div");
+
+    div.innerText = text;
+
+    return div.innerHTML;
+}
