@@ -41,18 +41,14 @@ function sendMessage() {
 function addMessage(role, text) {
 
     if (welcome) {
-        welcome.style.display = "none";
+        welcome.remove();
     }
 
     const message = document.createElement("div");
 
     message.className = `message ${role}`;
 
-    message.innerHTML = `
-        <div class="bubble">
-            ${escapeHtml(text)}
-        </div>
-    `;
+    message.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
 
     messages.appendChild(message);
 
