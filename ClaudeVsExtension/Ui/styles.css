@@ -99,6 +99,13 @@ body {
     border: 1px solid #3a3a3a;
     border-radius: 14px;
     padding: 12px;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.input:focus-within {
+    border-color: #d88763;
+    box-shadow: 0 0 0 1px rgba(216, 135, 99, 0.25), 0 0 18px rgba(216, 135, 99, 0.12);
+    background: #303030;
 }
 
 textarea {
