@@ -3,6 +3,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.VisualStudio.Shell.Interop;
 
 namespace ClaudeVsExtension
 {
@@ -24,7 +25,10 @@ namespace ClaudeVsExtension
     /// </para>
     /// </remarks>
     [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
-    [Guid(ClaudeVsExtensionPackage.PackageGuidString)]
+    [InstalledProductRegistration("#110", "#112", "1.0", IconResourceID = 400)]
+    [ProvideMenuResource("Menus.ctmenu", 1)]
+    [ProvideToolWindow(typeof(AgentToolWindow))]
+    [Guid(PackageGuidString)]
     public sealed class ClaudeVsExtensionPackage : AsyncPackage
     {
         /// <summary>
@@ -43,9 +47,9 @@ namespace ClaudeVsExtension
         /// <returns>A task representing the async work of package initialization, or an already completed task if there is none. Do not return null from this method.</returns>
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
-            // When initialized asynchronously, the current thread may be a background thread at this point.
-            // Do any initialization that requires the UI thread after switching to the UI thread.
             await this.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+
+            await AgentToolWindowCommand.InitializeAsync(this);
         }
 
         #endregion
