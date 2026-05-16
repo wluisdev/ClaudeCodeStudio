@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -8,6 +9,7 @@ using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using System.Text.Json.Serialization;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.PlatformUI;
 
 namespace ClaudeVsExtension;
 
@@ -20,8 +22,16 @@ public partial class AgentToolWindowControl : UserControl
         InitializeComponent();
 
         Loaded += AgentToolWindowControl_Loaded;
-
         Unloaded += AgentToolWindowControl_Unloaded;
+
+        AgentToolWindowCommand.ActiveControl = this;
+    }
+
+    public void FocusTextarea()
+    {
+        Browser.Focus();
+        Browser.CoreWebView2?.PostWebMessageAsJson(
+            JsonSerializer.Serialize(new { type = "focus" }));
     }
 
     private async void AgentToolWindowControl_Loaded(
@@ -55,6 +65,12 @@ public partial class AgentToolWindowControl : UserControl
             var versionString = $"{version?.Major}.{version?.Minor}.{version?.Build}";
             Browser.CoreWebView2.PostWebMessageAsJson(
                 JsonSerializer.Serialize(new { type = "version", text = versionString }));
+
+            var bgColor = VSColorTheme.GetThemedColor(EnvironmentColors.ToolWindowBackgroundColorKey);
+            var brightness = bgColor.R * 0.299 + bgColor.G * 0.587 + bgColor.B * 0.114;
+            var isDark = brightness < 128;
+            Browser.CoreWebView2.PostWebMessageAsJson(
+                JsonSerializer.Serialize(new { type = "theme", isDark }));
         };
     }
 
@@ -101,6 +117,26 @@ public partial class AgentToolWindowControl : UserControl
             {
                 await _agentClient.StopAsync();
                 _agentClient.PendingResumeSessionId = request.SessionId;
+                return;
+            }
+
+            if (request.Type == "delete-session")
+            {
+                await HandleDeleteSessionAsync(request.SessionId);
+                return;
+            }
+
+            if (request.Type == "get-diff")
+            {
+                await HandleGetDiffAsync();
+                return;
+            }
+
+            if (request.Type == "unfocus")
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+                dte?.ActiveDocument?.Activate();
                 return;
             }
 
@@ -383,6 +419,73 @@ public partial class AgentToolWindowControl : UserControl
         var json = JsonSerializer.Serialize(new { type = "history", sessions });
         var dispatcher = System.Windows.Application.Current.Dispatcher;
         dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
+    }
+
+    private async Task HandleDeleteSessionAsync(string? sessionId)
+    {
+        if (string.IsNullOrEmpty(sessionId)) return;
+
+        var claudeDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".claude", "projects");
+
+        if (Directory.Exists(claudeDir))
+        {
+            var files = Directory.GetFiles(claudeDir, $"{sessionId}.jsonl", SearchOption.AllDirectories);
+            foreach (var file in files)
+                try { File.Delete(file); } catch { }
+        }
+
+        var json = JsonSerializer.Serialize(new { type = "session-deleted", sessionId });
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
+    }
+
+    private async Task HandleGetDiffAsync()
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+        var solutionPath = dte?.Solution?.FullName;
+        var workDir = string.IsNullOrEmpty(solutionPath) ? null : Path.GetDirectoryName(solutionPath);
+
+        if (string.IsNullOrEmpty(workDir) || !Directory.Exists(workDir))
+        {
+            var errJson = JsonSerializer.Serialize(new { type = "diff", stat = "", diff = "No solution open." });
+            var disp = System.Windows.Application.Current.Dispatcher;
+            disp.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(errJson));
+            return;
+        }
+
+        var stat = await RunGitAsync(workDir, "diff --stat HEAD");
+        var diff = await RunGitAsync(workDir, "diff HEAD");
+
+        if (string.IsNullOrWhiteSpace(stat) && string.IsNullOrWhiteSpace(diff))
+            stat = await RunGitAsync(workDir, "status --short");
+
+        var json = JsonSerializer.Serialize(new { type = "diff", stat = stat.Trim(), diff = diff.Trim() });
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
+    }
+
+    private static async Task<string> RunGitAsync(string workDir, string arguments)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("git", arguments)
+            {
+                WorkingDirectory = workDir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = Process.Start(psi)!;
+            var output = await proc.StandardOutput.ReadToEndAsync();
+            await Task.Run(() => proc.WaitForExit(5000));
+            return output;
+        }
+        catch { return ""; }
     }
 
     private class WebChatMessage

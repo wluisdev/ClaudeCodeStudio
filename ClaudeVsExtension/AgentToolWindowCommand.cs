@@ -11,15 +11,12 @@ namespace ClaudeVsExtension
     /// </summary>
     internal sealed class AgentToolWindowCommand
     {
-        /// <summary>
-        /// Command ID.
-        /// </summary>
         public const int CommandId = 0x0100;
+        public const int FocusCommandId = 0x0101;
 
-        /// <summary>
-        /// Command menu group (command set GUID).
-        /// </summary>
         public static readonly Guid CommandSet = new("dd63979a-7c8a-4d0c-b2f7-321ba5b6d8d2");
+
+        public static AgentToolWindowControl? ActiveControl { get; set; }
 
         /// <summary>
         /// VS Package that provides this command, not null.
@@ -40,6 +37,10 @@ namespace ClaudeVsExtension
             var menuCommandID = new CommandID(CommandSet, CommandId);
             var menuItem = new MenuCommand(this.Execute, menuCommandID);
             commandService.AddCommand(menuItem);
+
+            var focusCommandID = new CommandID(CommandSet, FocusCommandId);
+            var focusItem = new MenuCommand(this.ExecuteFocus, focusCommandID);
+            commandService.AddCommand(focusItem);
         }
 
         /// <summary>
@@ -96,6 +97,17 @@ namespace ClaudeVsExtension
 
             IVsWindowFrame windowFrame = (IVsWindowFrame)window.Frame;
             Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(windowFrame.Show());
+        }
+
+        private void ExecuteFocus(object sender, EventArgs e)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            ToolWindowPane window = this.package.FindToolWindow(typeof(AgentToolWindow), 0, true);
+            if (window?.Frame is not IVsWindowFrame frame) return;
+
+            Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(frame.Show());
+            ActiveControl?.FocusTextarea();
         }
     }
 }

@@ -41,6 +41,20 @@ document.addEventListener("click", e => {
         document.getElementById("settings-menu")?.classList.remove("open");
 });
 
+// ── Prompt history (Ctrl+Up / Ctrl+Down) ─────────────────────
+let promptHistory = JSON.parse(localStorage.getItem("promptHistory") || "[]");
+let historyIndex = -1;
+let historyDraft = "";
+
+function pushPromptHistory(text) {
+    if (!text) return;
+    if (promptHistory[0] === text) return;
+    promptHistory.unshift(text);
+    if (promptHistory.length > 50) promptHistory.pop();
+    localStorage.setItem("promptHistory", JSON.stringify(promptHistory));
+    historyIndex = -1;
+}
+
 // ── Session history ───────────────────────────────────────────
 function toggleHistory() {
     const menu = document.getElementById("history-menu");
@@ -343,6 +357,33 @@ textarea.addEventListener("keydown", (e) => {
         }
     }
 
+    if (e.key === "Escape") {
+        textarea.blur();
+        window.chrome.webview.postMessage({ type: "unfocus" });
+        return;
+    }
+
+    if (e.key === "ArrowUp" && e.ctrlKey && !isOpen) {
+        e.preventDefault();
+        if (historyIndex === -1) historyDraft = textarea.value;
+        if (historyIndex < promptHistory.length - 1) {
+            historyIndex++;
+            textarea.value = promptHistory[historyIndex];
+        }
+        return;
+    }
+    if (e.key === "ArrowDown" && e.ctrlKey && !isOpen) {
+        e.preventDefault();
+        if (historyIndex > 0) {
+            historyIndex--;
+            textarea.value = promptHistory[historyIndex];
+        } else if (historyIndex === 0) {
+            historyIndex = -1;
+            textarea.value = historyDraft;
+        }
+        return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         hideAutocomplete();
@@ -432,6 +473,8 @@ textarea.addEventListener("paste", e => {
 function sendMessage() {
     _userScrolledUp = false;
     const text = textarea.value.trim();
+    pushPromptHistory(text);
+    historyIndex = -1;
     const activeAttachments = [...attachments.values()];
 
     if (text === "/model") {
@@ -507,14 +550,36 @@ function addMessage(role, text) {
 
 window.chrome.webview.addEventListener("message", event => {
 
+    if (event.data.type === "focus") {
+        textarea.focus();
+        textarea.select();
+        return;
+    }
+
     if (event.data.type === "version") {
         const el = document.querySelector(".about-meta");
         if (el) el.textContent = `v${event.data.text} · wluisdev`;
         return;
     }
 
+    if (event.data.type === "theme") {
+        document.documentElement.classList.toggle("light-theme", !event.data.isDark);
+        return;
+    }
+
     if (event.data.type === "history") {
         renderHistory(event.data.sessions);
+        return;
+    }
+
+    if (event.data.type === "session-deleted") {
+        const item = document.querySelector(`.history-item[data-session-id="${event.data.sessionId}"]`);
+        if (item) item.remove();
+        return;
+    }
+
+    if (event.data.type === "diff") {
+        renderDiff(event.data.stat, event.data.diff);
         return;
     }
 
@@ -822,8 +887,11 @@ function renderHistory(sessions) {
     }
     list.innerHTML = sessions.map(s => {
         const tok = s.tokens > 1000 ? `${(s.tokens / 1000).toFixed(1)}k tok` : `${s.tokens} tok`;
-        return `<div class="cmd-item history-item" onclick="resumeSession('${escapeAttr(s.id)}')">
-  <div class="history-preview">${escapeHtml(s.preview)}</div>
+        return `<div class="cmd-item history-item" data-session-id="${escapeAttr(s.id)}">
+  <div class="history-header">
+    <div class="history-preview" onclick="resumeSession('${escapeAttr(s.id)}')">${escapeHtml(s.preview)}</div>
+    <button class="history-delete" onclick="deleteSession('${escapeAttr(s.id)}')" title="Delete session">×</button>
+  </div>
   <div class="history-date">${escapeHtml(s.date)} · ${tok}</div>
 </div>`;
     }).join("");
@@ -841,6 +909,40 @@ function escapeHtml(text) {
     div.innerText = text;
 
     return div.innerHTML;
+}
+
+function deleteSession(sessionId) {
+    if (!confirm("Delete this session? This cannot be undone.")) return;
+    window.chrome.webview.postMessage({ type: "delete-session", sessionId });
+}
+
+// ── Diff viewer ───────────────────────────────────────────────
+function openDiffModal() {
+    document.getElementById("diff-modal-overlay").classList.add("open");
+    document.getElementById("diff-stat").textContent = "";
+    document.getElementById("diff-body").innerHTML = '<span class="usage-loading">Running git diff…</span>';
+    window.chrome.webview.postMessage({ type: "get-diff" });
+}
+
+function closeDiffModal() {
+    document.getElementById("diff-modal-overlay").classList.remove("open");
+}
+
+function renderDiff(stat, diff) {
+    document.getElementById("diff-stat").textContent = stat || "";
+    const body = document.getElementById("diff-body");
+    if (!diff) {
+        body.textContent = stat ? "" : "No changes.";
+        return;
+    }
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    code.className = "language-diff";
+    code.textContent = diff;
+    pre.appendChild(code);
+    body.innerHTML = "";
+    body.appendChild(pre);
+    if (typeof hljs !== "undefined") hljs.highlightElement(code);
 }
 
 renderCustomCommands();

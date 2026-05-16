@@ -49,6 +49,14 @@
           <ButtonText>AgentToolWindow</ButtonText>
         </Strings>
       </Button>
+      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="FocusClaudeVsCommandId" priority="0x0101" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_TOOLS_EXT_CUST"/>
+        <CommandFlag>DefaultInvisible</CommandFlag>
+        <Strings>
+          <ButtonText>Focus Claude VS</ButtonText>
+          <CommandName>ClaudeVS.Focus</CommandName>
+        </Strings>
+      </Button>
     </Buttons>
 
     <!--The bitmaps section is used to define the bitmaps that are used for the commands.-->
@@ -62,6 +70,10 @@
     </Bitmaps>
   </Commands>
 
+  <KeyBindings>
+    <KeyBinding guid="guidClaudeVsExtensionPackageCmdSet" id="FocusClaudeVsCommandId" editor="guidVSStd97" key1="VK_F12" mod1="Alt" />
+  </KeyBindings>
+
   <Symbols>
     <!-- This is the package guid. -->
     <GuidSymbol name="guidClaudeVsExtensionPackage" value="{36a4617b-b537-4a28-bdd4-a18067f26ea2}" />
@@ -69,6 +81,7 @@
     <!-- This is the guid used to group the menu commands together -->
     <GuidSymbol name="guidClaudeVsExtensionPackageCmdSet" value="{dd63979a-7c8a-4d0c-b2f7-321ba5b6d8d2}">
       <IDSymbol name="AgentToolWindowCommandId" value="0x0100" />
+      <IDSymbol name="FocusClaudeVsCommandId" value="0x0101" />
     </GuidSymbol>
 
     <GuidSymbol name="guidImages" value="{6ebedfa4-f3fb-4a41-a6b3-9a15b185f370}" >
