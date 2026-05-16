@@ -35,7 +35,11 @@ public partial class AgentToolWindowControl : UserControl
         System.Windows.DependencyPropertyChangedEventArgs e)
     {
         if ((bool)e.NewValue && Browser?.CoreWebView2 != null)
-            FocusTextarea();
+        {
+            Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                new Action(FocusTextarea));
+        }
     }
 
     public void FocusTextarea()
@@ -126,6 +130,7 @@ public partial class AgentToolWindowControl : UserControl
             if (request.Type == "cancel")
             {
                 _agentClient.CancelCurrent();
+                VsStatusBar.Clear();
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "stream-done" })));
@@ -211,6 +216,8 @@ public partial class AgentToolWindowControl : UserControl
 
             await _agentClient.StartAsync();
 
+            VsStatusBar.ShowThinking();
+
             var dispatcher = System.Windows.Application.Current.Dispatcher;
 
             await _agentClient.AskStreamingAsync(request.Text, request.Model, request.Effort, request.PermissionMode,
@@ -223,7 +230,10 @@ public partial class AgentToolWindowControl : UserControl
                 tokens => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "tokens", text = tokens }))),
-                workingDirectory: workingDir);
+                workingDirectory: workingDir,
+                autoResume: request.AutoResume);
+
+            VsStatusBar.Clear();
 
             dispatcher.Invoke(() =>
             {
@@ -233,6 +243,7 @@ public partial class AgentToolWindowControl : UserControl
         }
         catch (Exception ex)
         {
+            VsStatusBar.Clear();
             var responseJson = JsonSerializer.Serialize(new
             {
                 type = "assistant",
@@ -279,6 +290,27 @@ public partial class AgentToolWindowControl : UserControl
     }
 
     public Task SendActiveSelectionAsync() => HandleGetSelectionAsync();
+
+    public void InsertFileReference(string fullPath)
+    {
+        if (string.IsNullOrEmpty(fullPath)) return;
+
+#pragma warning disable VSTHRD010
+        string displayPath = fullPath;
+        try
+        {
+            var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+            var solutionDir = Path.GetDirectoryName(dte?.Solution?.FullName ?? "");
+            if (!string.IsNullOrEmpty(solutionDir) && fullPath.StartsWith(solutionDir, StringComparison.OrdinalIgnoreCase))
+                displayPath = fullPath.Substring(solutionDir.Length).TrimStart('\\', '/');
+        }
+        catch { }
+#pragma warning restore VSTHRD010
+
+        var text = "@" + displayPath.Replace('\\', '/') + " ";
+        var json = JsonSerializer.Serialize(new { type = "insert-text", text });
+        Browser.CoreWebView2?.PostWebMessageAsJson(json);
+    }
 
     public async Task ResetSessionAsync()
     {
@@ -591,5 +623,8 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("workingDirectory")]
         public string? WorkingDirectory { get; set; }
+
+        [JsonPropertyName("autoResume")]
+        public bool AutoResume { get; set; }
     }
 }

@@ -9,6 +9,7 @@ public class ChatRequest
     public bool ResetSession { get; set; }
     public string? ResumeSessionId { get; set; }
     public string? WorkingDirectory { get; set; }
+    public bool AutoResume { get; set; }
 }
 
 public class ChatChunk

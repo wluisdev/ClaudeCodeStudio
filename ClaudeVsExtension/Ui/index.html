@@ -48,6 +48,14 @@
                     <div class="cmd-menu settings-menu" id="settings-menu">
                         <div class="cmd-section">Settings</div>
                         <div class="settings-row">
+                            <span class="settings-label">Auto-resume last session</span>
+                            <label class="toggle">
+                                <input type="checkbox" id="auto-resume-toggle" onchange="setAutoResume(this.checked)" />
+                                <span class="toggle-track"></span>
+                            </label>
+                        </div>
+                        <div class="cmd-divider"></div>
+                        <div class="settings-row">
                             <span class="settings-label">Show tokens</span>
                             <label class="toggle">
                                 <input type="checkbox" id="tokens-toggle" checked onchange="setShowTokens(this.checked)" />

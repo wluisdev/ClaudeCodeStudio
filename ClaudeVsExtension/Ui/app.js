@@ -396,6 +396,11 @@ textarea.addEventListener("keydown", (e) => {
         hideAutocomplete();
         sendMessage();
     }
+
+    if (e.ctrlKey && (e.key === "l" || e.key === "L")) {
+        e.preventDefault();
+        clearChat();
+    }
 });
 
 // ── /model picker ─────────────────────────────────────────────
@@ -534,7 +539,8 @@ function sendMessage() {
             model: modelSelect.value,
             effort: effortSelect.value || null,
             permissionMode: permissionSelect.value,
-            workingDirectory: localStorage.getItem("workingDirectory") || null
+            workingDirectory: localStorage.getItem("workingDirectory") || null,
+            autoResume: localStorage.getItem("autoResume") === "true"
         });
     }
 }
@@ -648,6 +654,14 @@ sendEnterToggle.checked = localStorage.getItem("sendWithEnter") !== "false";
 
 function setSendWithEnter(checked) {
     localStorage.setItem("sendWithEnter", checked);
+}
+
+// Auto-resume
+const autoResumeToggle = document.getElementById("auto-resume-toggle");
+autoResumeToggle.checked = localStorage.getItem("autoResume") === "true";
+
+function setAutoResume(checked) {
+    localStorage.setItem("autoResume", checked);
 }
 
 // Working directory

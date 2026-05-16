@@ -35,6 +35,9 @@
       <Group guid="guidClaudeVsExtensionPackageCmdSet" id="EditorContextMenuGroup" priority="0x0600">
         <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN"/>
       </Group>
+      <Group guid="guidClaudeVsExtensionPackageCmdSet" id="SolutionExplorerContextMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_ITEMNODE"/>
+      </Group>
     </Groups>
 
     <!--Buttons section. -->
@@ -70,6 +73,13 @@
           <ButtonText>Send Selection to Claude VS</ButtonText>
         </Strings>
       </Button>
+      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="SolutionExplorerSendFileCommandId" priority="0x0100" type="Button">
+        <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="SolutionExplorerContextMenuGroup"/>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <Strings>
+          <ButtonText>Send to Claude VS</ButtonText>
+        </Strings>
+      </Button>
     </Buttons>
 
     <!--The bitmaps section is used to define the bitmaps that are used for the commands.-->
@@ -96,7 +106,9 @@
       <IDSymbol name="AgentToolWindowCommandId" value="0x0100" />
       <IDSymbol name="FocusClaudeVsCommandId" value="0x0101" />
       <IDSymbol name="EditorSendSelectionCommandId" value="0x0102" />
+      <IDSymbol name="SolutionExplorerSendFileCommandId" value="0x0103" />
       <IDSymbol name="EditorContextMenuGroup" value="0x1020" />
+      <IDSymbol name="SolutionExplorerContextMenuGroup" value="0x1021" />
     </GuidSymbol>
 
     <GuidSymbol name="guidImages" value="{6ebedfa4-f3fb-4a41-a6b3-9a15b185f370}" >

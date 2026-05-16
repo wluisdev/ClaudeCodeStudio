@@ -39,7 +39,7 @@ try
         var effort = request.Effort;
         var permissionMode = request.PermissionMode ?? "yolo";
 
-        sessionId = await StreamClaudeAsync(message, model, effort, permissionMode, request.WorkingDirectory, sessionId);
+        sessionId = await StreamClaudeAsync(message, model, effort, permissionMode, request.WorkingDirectory, sessionId, request.AutoResume);
     }
 }
 catch (Exception ex)
@@ -54,7 +54,7 @@ static void EmitTiming(string label, long ms)
     Console.Out.Flush();
 }
 
-static async Task<string?> StreamClaudeAsync(string message, string model, string? effort, string permissionMode, string? workingDirectory, string? sessionId)
+static async Task<string?> StreamClaudeAsync(string message, string model, string? effort, string permissionMode, string? workingDirectory, string? sessionId, bool autoResume)
 {
     var sw = Stopwatch.StartNew();
     string? newSessionId = null;
@@ -108,6 +108,10 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
     {
         psi.ArgumentList.Add("--resume");
         psi.ArgumentList.Add(sessionId);
+    }
+    else if (autoResume)
+    {
+        psi.ArgumentList.Add("--continue");
     }
 
     using var process = Process.Start(psi);
