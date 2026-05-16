@@ -1040,6 +1040,45 @@ html.light-theme .token-estimate { color: #999; }
 
 .message {
     display: flex;
+    position: relative;
+}
+
+.msg-branch {
+    position: absolute;
+    top: -8px;
+    background: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    color: #aaa;
+    font-size: 12px;
+    width: 22px;
+    height: 22px;
+    border-radius: 11px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, color 0.15s, border-color 0.15s, background 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    line-height: 1;
+}
+
+.message.user .msg-branch {
+    right: 4px;
+}
+
+.message.assistant .msg-branch {
+    left: 4px;
+}
+
+.message:hover .msg-branch {
+    opacity: 1;
+}
+
+.msg-branch:hover {
+    color: #fff;
+    border-color: #d88763;
+    background: #3a3a3a;
 }
 
 .message.user {

@@ -176,7 +176,14 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
                 EmitTiming("result received", sw.ElapsedMilliseconds);
 
                 if (evt.TryGetProperty("session_id", out var sidProp))
+                {
                     newSessionId = sidProp.GetString();
+                    if (!string.IsNullOrEmpty(newSessionId))
+                    {
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "session", Text = newSessionId }));
+                        Console.Out.Flush();
+                    }
+                }
 
                 if (evt.TryGetProperty("usage", out var usage))
                 {

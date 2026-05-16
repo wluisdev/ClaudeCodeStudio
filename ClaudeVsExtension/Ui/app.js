@@ -343,6 +343,24 @@ function autoScroll() {
 
 let attachments = new Map();
 let attachmentIdCounter = 0;
+let msgCounter = 0;
+let currentSessionId = null;
+
+function decorateMessage(msgEl) {
+    const idx = msgCounter++;
+    msgEl.dataset.msgIndex = idx;
+    const btn = document.createElement("button");
+    btn.className = "msg-branch";
+    btn.title = "Branch from here";
+    btn.textContent = "⎇";
+    btn.addEventListener("click", () => branchFromMessage(idx));
+    msgEl.appendChild(btn);
+}
+
+function branchFromMessage(idx) {
+    if (!currentSessionId) return;
+    window.chrome.webview.postMessage({ type: "branch", msgIndex: idx });
+}
 let imageCounter = 0;
 let currentStreamBubble = null;
 let isStreaming = false;
@@ -677,6 +695,7 @@ function addMessage(role, text) {
     message.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
 
     messages.appendChild(message);
+    decorateMessage(message);
 
     autoScroll();
 }
@@ -708,6 +727,16 @@ window.chrome.webview.addEventListener("message", event => {
     if (event.data.type === "session-deleted") {
         const item = document.querySelector(`.history-item[data-session-id="${event.data.sessionId}"]`);
         if (item) item.remove();
+        return;
+    }
+
+    if (event.data.type === "session-info") {
+        currentSessionId = event.data.sessionId;
+        return;
+    }
+
+    if (event.data.type === "branched") {
+        renderBranchedMessages(event.data.sessionId, event.data.messages || []);
         return;
     }
 
@@ -1070,6 +1099,7 @@ function appendChunk(text) {
         msg.className = "message assistant";
         msg.innerHTML = `<div class="bubble"></div>`;
         messages.appendChild(msg);
+        decorateMessage(msg);
         currentStreamBubble = msg.querySelector(".bubble");
     }
 
@@ -1116,9 +1146,35 @@ function clearChat() {
     textarea.value = "";
     sessionIn = 0;
     sessionOut = 0;
+    msgCounter = 0;
+    currentSessionId = null;
     updateUsageSessionValues();
 
     window.chrome.webview.postMessage({ type: "clear" });
+}
+
+function renderBranchedMessages(newSessionId, msgs) {
+    if (welcome) { welcome.remove(); welcome = null; }
+    messages.innerHTML = "";
+    msgCounter = 0;
+    currentSessionId = newSessionId;
+
+    for (const m of msgs) {
+        if (m.role === "user") {
+            addMessage("user", m.text || "");
+        } else if (m.role === "assistant") {
+            const msg = document.createElement("div");
+            msg.className = "message assistant";
+            const bubble = document.createElement("div");
+            bubble.className = "bubble";
+            bubble.dataset.raw = m.text || "";
+            messages.appendChild(msg);
+            msg.appendChild(bubble);
+            applyMarkdown(bubble, m.text || "");
+            decorateMessage(msg);
+        }
+    }
+    autoScroll();
 }
 
 function addAttachment(filename, content, isBinary, filePath) {

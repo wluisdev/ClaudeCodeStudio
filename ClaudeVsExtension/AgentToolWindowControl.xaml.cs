@@ -254,6 +254,12 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "branch")
+            {
+                await HandleBranchAsync(request.MsgIndex);
+                return;
+            }
+
             if (request.Type == "add-file")
             {
                 await HandleAddFileAsync();
@@ -343,7 +349,10 @@ public partial class AgentToolWindowControl : UserControl
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "tokens", text = tokens }))),
                 workingDirectory: workingDir,
-                autoResume: request.AutoResume);
+                autoResume: request.AutoResume,
+                onSession: sid => dispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "session-info", sessionId = sid }))));
 
             VsStatusBar.Clear();
 
@@ -703,6 +712,7 @@ public partial class AgentToolWindowControl : UserControl
                             if (!root.TryGetProperty("message", out var msg)) continue;
                             if (!msg.TryGetProperty("content", out var content)) continue;
 
+                            string candidate = "";
                             if (content.ValueKind == System.Text.Json.JsonValueKind.Array)
                             {
                                 foreach (var item in content.EnumerateArray())
@@ -711,17 +721,20 @@ public partial class AgentToolWindowControl : UserControl
                                         itemType.GetString() == "text" &&
                                         item.TryGetProperty("text", out var textEl))
                                     {
-                                        preview = textEl.GetString() ?? "";
+                                        candidate = textEl.GetString() ?? "";
                                         break;
                                     }
                                 }
                             }
                             else if (content.ValueKind == System.Text.Json.JsonValueKind.String)
                             {
-                                preview = content.GetString() ?? "";
+                                candidate = content.GetString() ?? "";
                             }
 
-                            if (preview.Length > 80) preview = preview.Substring(0, 80) + "…";
+                            candidate = StripLocalCommandCaveat(candidate).Trim();
+                            if (string.IsNullOrEmpty(candidate)) continue;
+
+                            preview = candidate.Length > 80 ? candidate.Substring(0, 80) + "…" : candidate;
                         }
                         else if (entryType == "assistant")
                         {
@@ -738,13 +751,174 @@ public partial class AgentToolWindowControl : UserControl
                 catch { }
 
                 if (!string.IsNullOrEmpty(preview))
-                    sessions.Add(new { id = sessionId, preview, date, tokens = tokenCount });
+                {
+                    var sidecar = Path.Combine(Path.GetDirectoryName(file)!, $"{sessionId}.branch");
+                    var isBranch = File.Exists(sidecar);
+                    if (isBranch) preview = "↳ " + preview;
+                    sessions.Add(new { id = sessionId, preview, date, tokens = tokenCount, isBranch });
+                }
             }
         }
 
         var json = JsonSerializer.Serialize(new { type = "history", sessions });
         var dispatcher = System.Windows.Application.Current.Dispatcher;
         dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
+    }
+
+    private async Task HandleBranchAsync(int msgIndex)
+    {
+        var currentSessionId = _agentClient.CurrentSessionId;
+        if (string.IsNullOrEmpty(currentSessionId))
+        {
+            OutputLog.Warn("branch ignored: no current session id");
+            return;
+        }
+
+        var claudeDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".claude", "projects");
+
+        if (!Directory.Exists(claudeDir))
+        {
+            OutputLog.Warn("branch ignored: ~/.claude/projects not found");
+            return;
+        }
+
+        var sourceFile = Directory.GetFiles(claudeDir, $"{currentSessionId}.jsonl", SearchOption.AllDirectories).FirstOrDefault();
+        if (sourceFile == null)
+        {
+            OutputLog.Warn($"branch ignored: session file {currentSessionId}.jsonl not found");
+            return;
+        }
+
+        var newSessionId = Guid.NewGuid().ToString();
+        var newFile = Path.Combine(Path.GetDirectoryName(sourceFile)!, $"{newSessionId}.jsonl");
+
+        var keptLines = new System.Collections.Generic.List<string>();
+        var msgs = new System.Collections.Generic.List<object>();
+        int visibleCount = 0;
+
+        try
+        {
+            using var fs = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var sr = new StreamReader(fs);
+            string? line;
+            while ((line = await sr.ReadLineAsync()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+                string? role = null;
+                string? text = null;
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    var root = doc.RootElement;
+                    if (!root.TryGetProperty("type", out var tEl)) { keptLines.Add(line); continue; }
+                    var entryType = tEl.GetString();
+                    if (entryType != "user" && entryType != "assistant") { keptLines.Add(line); continue; }
+                    if (!root.TryGetProperty("message", out var msg)) { keptLines.Add(line); continue; }
+                    if (!msg.TryGetProperty("content", out var content)) { keptLines.Add(line); continue; }
+
+                    if (content.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in content.EnumerateArray())
+                        {
+                            if (item.TryGetProperty("type", out var itEl) && itEl.GetString() == "text" &&
+                                item.TryGetProperty("text", out var txEl))
+                            {
+                                text = (text ?? "") + (txEl.GetString() ?? "");
+                            }
+                        }
+                    }
+                    else if (content.ValueKind == JsonValueKind.String)
+                    {
+                        text = content.GetString();
+                    }
+
+                    if (string.IsNullOrEmpty(text)) { keptLines.Add(line); continue; }
+                    role = entryType;
+                }
+                catch { keptLines.Add(line); continue; }
+
+                var rewritten = RewriteSessionIdInLine(line, newSessionId);
+                keptLines.Add(rewritten);
+                msgs.Add(new { role, text });
+
+                if (visibleCount == msgIndex)
+                    break;
+                visibleCount++;
+            }
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Error($"branch read failed: {ex.Message}");
+            return;
+        }
+
+        try
+        {
+            File.WriteAllLines(newFile, keptLines);
+            var sidecar = Path.Combine(Path.GetDirectoryName(sourceFile)!, $"{newSessionId}.branch");
+            File.WriteAllText(sidecar, JsonSerializer.Serialize(new { parent = currentSessionId, msgIndex }));
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Error($"branch write failed: {ex.Message}");
+            return;
+        }
+
+        OutputLog.Info($"branched session {currentSessionId} → {newSessionId} at msgIndex {msgIndex} ({msgs.Count} messages kept)");
+
+        await _agentClient.StopAsync();
+        _agentClient.PendingResumeSessionId = newSessionId;
+
+        var json = JsonSerializer.Serialize(new { type = "branched", sessionId = newSessionId, messages = msgs });
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
+    }
+
+    private static string StripLocalCommandCaveat(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+        // Claude Code wraps slash-command output in <local-command-*>...</local-command-*> blocks
+        // and <command-name>, <command-message>, <command-args>, <local-command-stdout> tags.
+        // Strip them so the preview shows the user's actual following content (if any).
+        var stripped = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"<local-command-[a-z-]+>[\s\S]*?</local-command-[a-z-]+>|<command-[a-z-]+>[\s\S]*?</command-[a-z-]+>|<local-command-[a-z-]+>[\s\S]*",
+            "",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return stripped;
+    }
+
+    private static string RewriteSessionIdInLine(string line, string newSessionId)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return line;
+            if (!root.TryGetProperty("sessionId", out _)) return line;
+
+            using var ms = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(ms))
+            {
+                writer.WriteStartObject();
+                foreach (var prop in root.EnumerateObject())
+                {
+                    if (prop.NameEquals("sessionId"))
+                        writer.WriteString("sessionId", newSessionId);
+                    else
+                        prop.WriteTo(writer);
+                }
+                writer.WriteEndObject();
+            }
+            return System.Text.Encoding.UTF8.GetString(ms.ToArray());
+        }
+        catch
+        {
+            return line;
+        }
     }
 
     private async Task HandleDeleteSessionAsync(string? sessionId)
@@ -759,7 +933,11 @@ public partial class AgentToolWindowControl : UserControl
         {
             var files = Directory.GetFiles(claudeDir, $"{sessionId}.jsonl", SearchOption.AllDirectories);
             foreach (var file in files)
+            {
                 try { File.Delete(file); } catch { }
+                var sidecar = Path.Combine(Path.GetDirectoryName(file)!, $"{sessionId}.branch");
+                try { if (File.Exists(sidecar)) File.Delete(sidecar); } catch { }
+            }
         }
 
         var json = JsonSerializer.Serialize(new { type = "session-deleted", sessionId });
@@ -863,5 +1041,8 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("content")]
         public string? Content { get; set; }
+
+        [JsonPropertyName("msgIndex")]
+        public int MsgIndex { get; set; }
     }
 }

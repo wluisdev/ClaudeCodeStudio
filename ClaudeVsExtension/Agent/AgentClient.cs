@@ -19,6 +19,7 @@ public class AgentClient
     private TaskCompletionSource<bool>? _cancelTcs;
 
     public string? PendingResumeSessionId { get; set; }
+    public string? CurrentSessionId { get; private set; }
 
     public void CancelCurrent()
     {
@@ -77,7 +78,7 @@ public class AgentClient
         OutputLog.Info($"agent started (pid {_process.Id})");
     }
 
-    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false)
+    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null)
     {
         var resumeId = PendingResumeSessionId;
         PendingResumeSessionId = null;
@@ -136,6 +137,14 @@ public class AgentClient
             {
                 OutputLog.Info($"tokens: {chunk.Text}");
                 onTokens?.Invoke(chunk.Text);
+                continue;
+            }
+
+            if (chunk.Type == "session")
+            {
+                CurrentSessionId = chunk.Text;
+                OutputLog.Info($"session: {chunk.Text}");
+                onSession?.Invoke(chunk.Text);
                 continue;
             }
 
