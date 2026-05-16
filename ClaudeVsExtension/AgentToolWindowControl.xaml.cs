@@ -278,6 +278,14 @@ public partial class AgentToolWindowControl : UserControl
         Browser.CoreWebView2.PostWebMessageAsJson(json);
     }
 
+    public Task SendActiveSelectionAsync() => HandleGetSelectionAsync();
+
+    public async Task ResetSessionAsync()
+    {
+        await _agentClient.StopAsync();
+        _lastWorkingDir = null;
+    }
+
     private async Task HandleGetSelectionAsync()
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();

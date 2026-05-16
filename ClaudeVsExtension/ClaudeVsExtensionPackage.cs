@@ -36,6 +36,9 @@ namespace ClaudeVsExtension
         /// </summary>
         public const string PackageGuidString = "36a4617b-b537-4a28-bdd4-a18067f26ea2";
 
+        private uint _solutionEventsCookie;
+        private SolutionEventsHandler? _solutionEventsHandler;
+
         #region Package Members
 
         /// <summary>
@@ -50,6 +53,27 @@ namespace ClaudeVsExtension
             await this.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
 
             await AgentToolWindowCommand.InitializeAsync(this);
+
+            if (await GetServiceAsync(typeof(SVsSolution)) is IVsSolution solution)
+            {
+                _solutionEventsHandler = new SolutionEventsHandler();
+                solution.AdviseSolutionEvents(_solutionEventsHandler, out _solutionEventsCookie);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _solutionEventsCookie != 0)
+            {
+                ThreadHelper.JoinableTaskFactory.Run(async () =>
+                {
+                    await JoinableTaskFactory.SwitchToMainThreadAsync();
+                    if (GetService(typeof(SVsSolution)) is IVsSolution solution)
+                        solution.UnadviseSolutionEvents(_solutionEventsCookie);
+                });
+                _solutionEventsCookie = 0;
+            }
+            base.Dispose(disposing);
         }
 
         #endregion

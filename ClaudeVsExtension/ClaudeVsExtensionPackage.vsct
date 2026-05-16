@@ -31,6 +31,12 @@
     group; your package should define its own command set in order to avoid collisions
     with command ids defined by other packages. -->
 
+    <Groups>
+      <Group guid="guidClaudeVsExtensionPackageCmdSet" id="EditorContextMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN"/>
+      </Group>
+    </Groups>
+
     <!--Buttons section. -->
     <!--This section defines the elements the user can interact with, like a menu command or a button
         or combo box in a toolbar. -->
@@ -55,6 +61,13 @@
         <Strings>
           <ButtonText>Focus Claude VS</ButtonText>
           <CommandName>ClaudeVS.Focus</CommandName>
+        </Strings>
+      </Button>
+      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="EditorSendSelectionCommandId" priority="0x0100" type="Button">
+        <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="EditorContextMenuGroup"/>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <Strings>
+          <ButtonText>Send Selection to Claude VS</ButtonText>
         </Strings>
       </Button>
     </Buttons>
@@ -82,6 +95,8 @@
     <GuidSymbol name="guidClaudeVsExtensionPackageCmdSet" value="{dd63979a-7c8a-4d0c-b2f7-321ba5b6d8d2}">
       <IDSymbol name="AgentToolWindowCommandId" value="0x0100" />
       <IDSymbol name="FocusClaudeVsCommandId" value="0x0101" />
+      <IDSymbol name="EditorSendSelectionCommandId" value="0x0102" />
+      <IDSymbol name="EditorContextMenuGroup" value="0x1020" />
     </GuidSymbol>
 
     <GuidSymbol name="guidImages" value="{6ebedfa4-f3fb-4a41-a6b3-9a15b185f370}" >

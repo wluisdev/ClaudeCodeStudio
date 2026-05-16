@@ -9,9 +9,9 @@ function toggleLayout() {
 }
 
 // ── Permission mode cycle ─────────────────────────────────────
-const permissionCycle = ["auto", "plan", "ask"];
-const permissionIcons = { auto: "⚡", plan: "📋", ask: "🔒" };
-const permissionLabels = { auto: "auto — edits without asking", plan: "plan — plans only", ask: "ask — Claude default" };
+const permissionCycle = ["yolo", "plan", "ask"];
+const permissionIcons = { yolo: "⚡", plan: "📋", ask: "🔒" };
+const permissionLabels = { yolo: "yolo — skips ALL permission prompts (dangerous)", plan: "plan — plans only", ask: "ask — Claude default" };
 
 function cyclePermission() {
     const cur = permissionSelect.value;
@@ -25,7 +25,7 @@ function updatePermissionBtn() {
     const mode = permissionSelect.value;
     btn.textContent = permissionIcons[mode] || "🔒";
     btn.title = permissionLabels[mode] || mode;
-    btn.classList.toggle("active", mode !== "auto");
+    btn.classList.toggle("active", mode !== "yolo");
 }
 
 

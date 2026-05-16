@@ -37,7 +37,7 @@ try
         var message = request.Message ?? "";
         var model = request.Model ?? "claude-sonnet-4-6";
         var effort = request.Effort;
-        var permissionMode = request.PermissionMode ?? "auto";
+        var permissionMode = request.PermissionMode ?? "yolo";
 
         sessionId = await StreamClaudeAsync(message, model, effort, permissionMode, request.WorkingDirectory, sessionId);
     }
@@ -93,7 +93,7 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
     {
         // sem flag extra — comportamento padrão do claude
     }
-    else // "auto" (padrão)
+    else // "yolo" (padrão)
     {
         psi.ArgumentList.Add("--dangerously-skip-permissions");
     }

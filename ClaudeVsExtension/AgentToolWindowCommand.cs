@@ -13,6 +13,7 @@ namespace ClaudeVsExtension
     {
         public const int CommandId = 0x0100;
         public const int FocusCommandId = 0x0101;
+        public const int SendSelectionCommandId = 0x0102;
 
         public static readonly Guid CommandSet = new("dd63979a-7c8a-4d0c-b2f7-321ba5b6d8d2");
 
@@ -41,6 +42,44 @@ namespace ClaudeVsExtension
             var focusCommandID = new CommandID(CommandSet, FocusCommandId);
             var focusItem = new MenuCommand(this.ExecuteFocus, focusCommandID);
             commandService.AddCommand(focusItem);
+
+            var sendSelCmdID = new CommandID(CommandSet, SendSelectionCommandId);
+            var sendSelItem = new OleMenuCommand(this.ExecuteSendSelection, sendSelCmdID);
+            sendSelItem.BeforeQueryStatus += OnSendSelectionQueryStatus;
+            commandService.AddCommand(sendSelItem);
+        }
+
+        private void OnSendSelectionQueryStatus(object sender, EventArgs e)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            var cmd = (OleMenuCommand)sender;
+            try
+            {
+                var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+                var sel = dte?.ActiveDocument?.Selection as EnvDTE.TextSelection;
+                cmd.Visible = true;
+                cmd.Enabled = sel != null && !string.IsNullOrEmpty(sel.Text);
+            }
+            catch
+            {
+                cmd.Visible = true;
+                cmd.Enabled = false;
+            }
+        }
+
+        private void ExecuteSendSelection(object sender, EventArgs e)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            ToolWindowPane window = this.package.FindToolWindow(typeof(AgentToolWindow), 0, true);
+            if (window?.Frame is IVsWindowFrame frame)
+                Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(frame.Show());
+
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                if (ActiveControl != null)
+                    await ActiveControl.SendActiveSelectionAsync();
+            });
         }
 
         /// <summary>
