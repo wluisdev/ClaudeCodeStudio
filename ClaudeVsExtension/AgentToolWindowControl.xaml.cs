@@ -117,6 +117,21 @@ public partial class AgentToolWindowControl : UserControl
                 var solutionPath = dteForCwd?.Solution?.FullName;
                 if (!string.IsNullOrEmpty(solutionPath))
                     currentSolutionDir = Path.GetDirectoryName(solutionPath);
+
+                if (request.AutoSave == "active")
+                {
+                    try { dteForCwd?.ActiveDocument?.Save(); } catch { }
+                }
+                else if (request.AutoSave == "all")
+                {
+                    try
+                    {
+                        if (dteForCwd?.Documents != null)
+                            foreach (EnvDTE.Document doc in dteForCwd.Documents)
+                                try { if (!doc.Saved) doc.Save(); } catch { }
+                    }
+                    catch { }
+                }
             }
             catch { }
 #pragma warning restore VSTHRD010
@@ -626,5 +641,8 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("autoResume")]
         public bool AutoResume { get; set; }
+
+        [JsonPropertyName("autoSave")]
+        public string? AutoSave { get; set; }
     }
 }

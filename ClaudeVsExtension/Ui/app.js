@@ -184,6 +184,20 @@ const effortSelect = { get value() { return effortValues[+effortSlider.value]; }
     effortSlider.value = saved;
     effortLabel.textContent = effortLabels[+saved];
 })();
+const autoSaveSlider = document.getElementById("autosave-slider");
+const autoSaveLabel = document.getElementById("autosave-label");
+const autoSaveValues = ["none", "active", "all"];
+(function () {
+    const saved = localStorage.getItem("autoSaveLevel") ?? "1";
+    autoSaveSlider.value = saved;
+    autoSaveLabel.textContent = autoSaveValues[+saved];
+})();
+autoSaveSlider.addEventListener("input", () => {
+    const i = +autoSaveSlider.value;
+    autoSaveLabel.textContent = autoSaveValues[i];
+    localStorage.setItem("autoSaveLevel", i);
+});
+
 effortSlider.addEventListener("input", () => {
     const i = +effortSlider.value;
     effortLabel.textContent = effortLabels[i];
@@ -540,7 +554,8 @@ function sendMessage() {
             effort: effortSelect.value || null,
             permissionMode: permissionSelect.value,
             workingDirectory: localStorage.getItem("workingDirectory") || null,
-            autoResume: localStorage.getItem("autoResume") === "true"
+            autoResume: localStorage.getItem("autoResume") === "true",
+            autoSave: autoSaveValues[+autoSaveSlider.value]
         });
     }
 }
