@@ -105,6 +105,127 @@ body {
 
 .cmd-menu.open { display: block; }
 
+.settings-menu {
+    min-width: 220px;
+    padding: 8px 0;
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 14px;
+    gap: 12px;
+}
+
+.settings-label {
+    font-size: 12px;
+    color: #aaa;
+    white-space: nowrap;
+}
+
+.settings-select {
+    background: #2a2a2a;
+    border: 1px solid #444;
+    color: #ccc;
+    font-size: 12px;
+    padding: 3px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    outline: none;
+}
+
+.settings-select:hover { border-color: #d88763; }
+
+.effort-row { margin-bottom: 2px; }
+
+.effort-value-label {
+    font-size: 12px;
+    color: #d88763;
+    font-family: monospace;
+}
+
+.effort-slider-wrap {
+    padding: 2px 14px 10px;
+}
+
+.effort-slider {
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 2px;
+    background: #3a3a3a;
+    outline: none;
+    cursor: pointer;
+}
+
+.effort-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #d88763;
+    cursor: pointer;
+    border: none;
+}
+
+.effort-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #d88763;
+    cursor: pointer;
+    border: none;
+}
+
+.effort-ticks {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 5px;
+}
+
+.effort-ticks span {
+    font-size: 10px;
+    color: #555;
+    font-family: monospace;
+}
+
+.timing-options {
+    display: flex;
+    flex-direction: column;
+    padding: 2px 0 6px;
+}
+
+.timing-opt {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 14px;
+    cursor: pointer;
+    gap: 10px;
+}
+
+.timing-opt:hover { background: #333; }
+
+.timing-opt-active .timing-opt-name {
+    color: #d88763;
+}
+
+.timing-opt-name {
+    font-size: 12px;
+    color: #ccc;
+    white-space: nowrap;
+}
+
+.timing-opt-ex {
+    font-size: 11px;
+    color: #555;
+    font-family: monospace;
+    white-space: nowrap;
+}
+
 .cmd-section {
     font-size: 10px;
     color: #555;
@@ -262,7 +383,8 @@ body {
 }
 
 .model-select,
-.effort-select {
+.effort-select,
+.timing-select {
     background: #2a2a2a;
     border: 1px solid #444;
     color: #ccc;
@@ -274,7 +396,8 @@ body {
 }
 
 .model-select:hover,
-.effort-select:hover {
+.effort-select:hover,
+.timing-select:hover {
     border-color: #d88763;
 }
 
@@ -392,11 +515,42 @@ body {
 }
 
 .input {
+    position: relative;
     background: #2a2a2a;
     border: 1px solid #3a3a3a;
     border-radius: 14px;
     padding: 12px;
     transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.cmd-autocomplete {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    background: #252525;
+    border: 1px solid #3a3a3a;
+    border-radius: 8px;
+    overflow: hidden;
+    z-index: 50;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+
+.cmd-autocomplete.open { display: block; }
+
+.cmd-autocomplete-item {
+    padding: 7px 14px;
+    font-size: 13px;
+    color: #ccc;
+    cursor: pointer;
+    font-family: monospace;
+}
+
+.cmd-autocomplete-item:hover,
+.cmd-autocomplete-item.ac-selected {
+    background: #333;
+    color: #fff;
 }
 
 .input:focus-within {
@@ -640,4 +794,10 @@ textarea {
 
 .composer {
     flex-shrink: 0;
+}
+
+.composer.drag-over .input {
+    border-color: #d88763;
+    box-shadow: 0 0 0 2px rgba(216, 135, 99, 0.2);
+    background: #2d2020;
 }

@@ -93,6 +93,25 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "get-clipboard-image")
+            {
+                await HandleGetClipboardImageAsync();
+                return;
+            }
+
+            if (request.Type == "get-clipboard-files")
+            {
+                await HandleGetClipboardFilesAsync();
+                return;
+            }
+
+            if (request.Type == "save-dropped-file")
+            {
+                if (!string.IsNullOrEmpty(request.Filename) && !string.IsNullOrEmpty(request.Data))
+                    await HandleSaveDroppedFileAsync(request.Filename, request.Data);
+                return;
+            }
+
             if (request.Type == "get-selection")
             {
                 await HandleGetSelectionAsync();
@@ -180,6 +199,86 @@ public partial class AgentToolWindowControl : UserControl
 
         var json = JsonSerializer.Serialize(new { type = "insert-text", text });
         Browser.CoreWebView2.PostWebMessageAsJson(json);
+    }
+
+    private static readonly string _tempDir = Path.Combine(Path.GetTempPath(), "ClaudeVsStudio");
+
+    private async Task HandleGetClipboardFilesAsync()
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+
+        // Arquivos copiados do Explorer
+        if (System.Windows.Clipboard.ContainsFileDropList())
+        {
+            var files = System.Windows.Clipboard.GetFileDropList();
+            foreach (string filePath in files)
+            {
+                var filename = Path.GetFileName(filePath);
+                var ext = Path.GetExtension(filePath);
+                var isBinary = _binaryExtensions.Contains(ext);
+                var content = isBinary ? null : $"[{filename}]\n```\n{File.ReadAllText(filePath)}\n```";
+                var returnPath = isBinary ? filePath : (string?)null;
+                var fileJson = JsonSerializer.Serialize(new { type = "attach-file", filename, content, isBinary, filePath = returnPath });
+                dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(fileJson));
+            }
+            return;
+        }
+
+        // Imagem
+        if (System.Windows.Clipboard.ContainsImage())
+        {
+            await HandleGetClipboardImageAsync();
+            return;
+        }
+
+        // Texto
+        if (System.Windows.Clipboard.ContainsText())
+        {
+            var text = System.Windows.Clipboard.GetText();
+            if (!string.IsNullOrEmpty(text))
+            {
+                var json = JsonSerializer.Serialize(new { type = "insert-text", text });
+                dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
+            }
+        }
+    }
+
+    private async Task HandleGetClipboardImageAsync()
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var image = System.Windows.Clipboard.GetImage();
+        if (image == null) return;
+
+        Directory.CreateDirectory(_tempDir);
+        var filename = $"clipboard_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+        var filePath = Path.Combine(_tempDir, filename);
+
+        using (var stream = File.Create(filePath))
+        {
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(image));
+            encoder.Save(stream);
+        }
+
+        var json = JsonSerializer.Serialize(new { type = "attach-file", filename, content = (string?)null, isBinary = true, filePath });
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
+    }
+
+    private async Task HandleSaveDroppedFileAsync(string filename, string base64Data)
+    {
+        Directory.CreateDirectory(_tempDir);
+        var filePath = Path.Combine(_tempDir, filename);
+
+        var bytes = Convert.FromBase64String(base64Data);
+        await Task.Run(() => File.WriteAllBytes(filePath, bytes));
+
+        var json = JsonSerializer.Serialize(new { type = "attach-file", filename, content = (string?)null, isBinary = true, filePath });
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
     }
 
     private async Task HandleGetHistoryAsync()
@@ -271,5 +370,11 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("sessionId")]
         public string? SessionId { get; set; }
+
+        [JsonPropertyName("filename")]
+        public string? Filename { get; set; }
+
+        [JsonPropertyName("data")]
+        public string? Data { get; set; }
     }
 }
