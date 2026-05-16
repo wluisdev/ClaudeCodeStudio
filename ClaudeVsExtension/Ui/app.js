@@ -5,8 +5,63 @@ function toggleLayout() {
     const app = document.querySelector(".app");
     const btn = document.getElementById("btn-layout");
     app.classList.toggle("compact");
-    btn.classList.toggle("active", app.classList.contains("compact"));
+    const compact = app.classList.contains("compact");
+    btn.classList.toggle("active", compact);
+    localStorage.setItem("compactLayout", compact ? "1" : "0");
 }
+
+(function restoreCompactLayout() {
+    if (localStorage.getItem("compactLayout") === "1") {
+        const app = document.querySelector(".app");
+        const btn = document.getElementById("btn-layout");
+        app.classList.add("compact");
+        if (btn) btn.classList.add("active");
+    }
+})();
+
+// ── Composer splitter ────────────────────────────────────────
+(function initSplitter() {
+    const splitter = document.getElementById("splitter");
+    if (!splitter) return;
+
+    const MIN_HEIGHT = 54;
+    const MAX_HEIGHT = 400;
+    const ta = document.querySelector(".composer textarea");
+
+    const saved = parseInt(localStorage.getItem("composerTextareaHeight") || "0", 10);
+    if (saved >= MIN_HEIGHT && saved <= MAX_HEIGHT && ta) {
+        ta.style.height = saved + "px";
+    }
+
+    let startY = 0;
+    let startHeight = 0;
+
+    function onMove(e) {
+        const delta = startY - e.clientY;
+        const next = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, startHeight + delta));
+        ta.style.height = next + "px";
+    }
+
+    function onUp() {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        splitter.classList.remove("dragging");
+        document.body.classList.remove("splitter-dragging");
+        const h = parseInt(ta.style.height, 10);
+        if (h) localStorage.setItem("composerTextareaHeight", String(h));
+    }
+
+    splitter.addEventListener("mousedown", e => {
+        if (!ta) return;
+        e.preventDefault();
+        startY = e.clientY;
+        startHeight = ta.getBoundingClientRect().height;
+        splitter.classList.add("dragging");
+        document.body.classList.add("splitter-dragging");
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+    });
+})();
 
 // ── Permission mode cycle ─────────────────────────────────────
 const permissionCycle = ["yolo", "plan", "ask"];
