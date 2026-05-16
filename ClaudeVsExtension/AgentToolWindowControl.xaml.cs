@@ -74,6 +74,15 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "cancel")
+            {
+                _agentClient.CancelCurrent();
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "stream-done" })));
+                return;
+            }
+
             if (request.Type == "get-history")
             {
                 await HandleGetHistoryAsync();

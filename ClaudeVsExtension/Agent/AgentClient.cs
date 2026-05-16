@@ -16,7 +16,11 @@ public class AgentClient
 
     private StreamReader? _reader;
 
+    private TaskCompletionSource<bool>? _cancelTcs;
+
     public string? PendingResumeSessionId { get; set; }
+
+    public void CancelCurrent() => _cancelTcs?.TrySetResult(true);
 
     public async Task StartAsync()
     {
@@ -79,17 +83,27 @@ public class AgentClient
         await _writer!.WriteLineAsync(json);
         await _writer.FlushAsync();
 
+        _cancelTcs = new TaskCompletionSource<bool>();
+        bool cancelled = false;
+
         while (true)
         {
-            var responseJson = await _reader!.ReadLineAsync();
+            var readTask = _reader!.ReadLineAsync();
+            var winner = await Task.WhenAny(readTask, _cancelTcs.Task);
+            if (winner == _cancelTcs.Task) cancelled = true;
+
+            var responseJson = await readTask;
 
             if (responseJson == null) break;
 
             var chunk = JsonSerializer.Deserialize<ChatChunk>(responseJson);
 
-            if (chunk == null) break;
+            if (chunk == null) continue;
 
             if (chunk.Type == "done") break;
+
+            // Drain silently after cancel — don't forward any callbacks
+            if (cancelled) continue;
 
             if (chunk.Type == "timing")
             {
@@ -113,6 +127,8 @@ public class AgentClient
             if (chunk.Type == "chunk" && !string.IsNullOrEmpty(chunk.Text))
                 onChunk(chunk.Text);
         }
+
+        _cancelTcs = null;
     }
 
     public async Task StopAsync()

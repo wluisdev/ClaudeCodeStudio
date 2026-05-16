@@ -157,7 +157,7 @@ document.addEventListener("click", e => {
 // ────────────────────────────────────────────────────────────
 
 const textarea = document.querySelector("textarea");
-const sendButton = document.querySelector(".send");
+const sendButton = null; // replaced by btnSend with streaming toggle
 const newChatButton = document.querySelector(".new-chat");
 const modelSelect = document.querySelector(".model-select");
 const effortSlider = document.getElementById("effort-slider");
@@ -200,8 +200,38 @@ let attachments = new Map();
 let attachmentIdCounter = 0;
 let imageCounter = 0;
 let currentStreamBubble = null;
+let isStreaming = false;
+const btnSend = document.getElementById("btn-send");
 
-sendButton.addEventListener("click", sendMessage);
+function setStreaming(on) {
+    isStreaming = on;
+    btnSend.textContent = on ? "■" : "↑";
+    btnSend.classList.toggle("stop", on);
+}
+
+btnSend.addEventListener("click", () => {
+    if (isStreaming) {
+        window.chrome.webview.postMessage({ type: "cancel" });
+        setStreaming(false);
+        removeLoading();
+        if (currentStreamBubble) {
+            const raw = currentStreamBubble.dataset.raw || "";
+            currentStreamBubble.innerHTML = (raw ? renderMarkdown(raw) + "<br>" : "") +
+                '<span class="cancelled">⊘ cancelled</span>';
+            currentStreamBubble = null;
+        } else {
+            const msg = document.createElement("div");
+            msg.className = "message assistant";
+            msg.innerHTML = '<div class="bubble"><span class="cancelled">⊘ cancelled</span></div>';
+            messages.appendChild(msg);
+            messages.scrollTop = messages.scrollHeight;
+        }
+    } else {
+        sendMessage();
+    }
+});
+
+// send handled by btnSend listener above
 newChatButton.addEventListener("click", clearChat);
 
 document.getElementById("btn-paste").addEventListener("click", async () => {
@@ -427,6 +457,7 @@ function sendMessage() {
     textarea.value = "";
 
     if (window.chrome?.webview) {
+        setStreaming(true);
         addLoading();
         window.chrome.webview.postMessage({
             type: "chat",
@@ -497,7 +528,12 @@ window.chrome.webview.addEventListener("message", event => {
             isUsageCapture = false;
             removeLoading();
         }
-        currentStreamBubble = null;
+        if (currentStreamBubble) {
+            const raw = currentStreamBubble.dataset.raw || "";
+            currentStreamBubble.innerHTML = renderMarkdown(raw);
+            currentStreamBubble = null;
+        }
+        setStreaming(false);
         return;
     }
 });
@@ -555,6 +591,63 @@ function appendTiming(text) {
     messages.scrollTop = messages.scrollHeight;
 }
 
+function renderMarkdown(raw) {
+    // Protect fenced code blocks
+    const blocks = [];
+    let text = raw.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+        const i = blocks.length;
+        blocks.push(`<pre><code>${escapeHtml(code.trimEnd())}</code></pre>`);
+        return `\x00B${i}\x00`;
+    });
+
+    // Protect inline code
+    const inlines = [];
+    text = text.replace(/`([^`\n]+)`/g, (_, code) => {
+        const i = inlines.length;
+        inlines.push(`<code>${escapeHtml(code)}</code>`);
+        return `\x00I${i}\x00`;
+    });
+
+    // Headers
+    text = text.replace(/^#{3} (.+)$/gm, '<h3>$1</h3>');
+    text = text.replace(/^#{2} (.+)$/gm, '<h2>$1</h2>');
+    text = text.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+    // Bold / italic
+    text = text.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    text = text.replace(/\*([^\s*][^*\n]*?)\*/g, '<em>$1</em>');
+
+    // Unordered lists
+    text = text.replace(/((?:^[ \t]*[-*+] .+\n?)+)/gm, m => {
+        const items = m.trim().split('\n').map(l => `<li>${l.replace(/^[ \t]*[-*+] /, '')}</li>`).join('');
+        return `<ul>${items}</ul>`;
+    });
+
+    // Ordered lists
+    text = text.replace(/((?:^\d+\. .+\n?)+)/gm, m => {
+        const items = m.trim().split('\n').map(l => `<li>${l.replace(/^\d+\. /, '')}</li>`).join('');
+        return `<ol>${items}</ol>`;
+    });
+
+    // Links
+    text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+    // Paragraphs
+    text = text.split(/\n{2,}/).map(block => {
+        block = block.trim();
+        if (!block) return '';
+        if (/^<(h[1-3]|ul|ol|pre|\x00B)/.test(block)) return block;
+        return `<p>${block.replace(/\n/g, '<br>')}</p>`;
+    }).join('');
+
+    // Restore
+    text = text.replace(/\x00B(\d+)\x00/g, (_, i) => blocks[+i]);
+    text = text.replace(/\x00I(\d+)\x00/g, (_, i) => inlines[+i]);
+
+    return text;
+}
+
 function appendChunk(text) {
     removeLoading();
 
@@ -566,7 +659,8 @@ function appendChunk(text) {
         currentStreamBubble = msg.querySelector(".bubble");
     }
 
-    currentStreamBubble.textContent += text;
+    currentStreamBubble.dataset.raw = (currentStreamBubble.dataset.raw || "") + text;
+    currentStreamBubble.textContent = currentStreamBubble.dataset.raw;
     messages.scrollTop = messages.scrollHeight;
 }
 
