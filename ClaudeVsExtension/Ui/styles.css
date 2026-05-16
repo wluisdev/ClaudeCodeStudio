@@ -930,7 +930,30 @@ textarea {
 
 .content {
     overflow: hidden;
+    position: relative;
 }
+
+.scroll-bottom {
+    display: none;
+    position: absolute;
+    bottom: 12px;
+    right: 18px;
+    z-index: 10;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: 1px solid #3a3a3a;
+    background: #252525;
+    color: #aaa;
+    font-size: 16px;
+    cursor: pointer;
+    line-height: 1;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    transition: opacity 0.15s;
+}
+
+.scroll-bottom:hover { color: #fff; background: #333; }
+.scroll-bottom.visible { display: flex; align-items: center; justify-content: center; }
 
 .timing {
     font-size: 11px;

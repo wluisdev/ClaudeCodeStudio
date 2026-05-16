@@ -48,6 +48,14 @@ public partial class AgentToolWindowControl : UserControl
             "index.html");
 
         Browser.Source = new Uri(htmlPath);
+
+        Browser.NavigationCompleted += (_, _) =>
+        {
+            var version = typeof(AgentToolWindowControl).Assembly.GetName().Version;
+            var versionString = $"{version?.Major}.{version?.Minor}.{version?.Build}";
+            Browser.CoreWebView2.PostWebMessageAsJson(
+                JsonSerializer.Serialize(new { type = "version", text = versionString }));
+        };
     }
 
     private async void AgentToolWindowControl_Unloaded(

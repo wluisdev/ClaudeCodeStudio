@@ -196,6 +196,24 @@ const messages = document.querySelector("#messages");
 const attachmentsEl = document.getElementById("attachments");
 let welcome = document.querySelector(".welcome");
 
+let _userScrolledUp = false;
+const btnScrollBottom = document.getElementById("btn-scroll-bottom");
+
+messages.addEventListener("scroll", () => {
+    _userScrolledUp = messages.scrollTop + messages.clientHeight < messages.scrollHeight - 24;
+    btnScrollBottom.classList.toggle("visible", _userScrolledUp);
+});
+
+function scrollToBottom() {
+    _userScrolledUp = false;
+    btnScrollBottom.classList.remove("visible");
+    messages.scrollTop = messages.scrollHeight;
+}
+
+function autoScroll() {
+    if (!_userScrolledUp) messages.scrollTop = messages.scrollHeight;
+}
+
 let attachments = new Map();
 let attachmentIdCounter = 0;
 let imageCounter = 0;
@@ -224,7 +242,7 @@ btnSend.addEventListener("click", () => {
             msg.className = "message assistant";
             msg.innerHTML = '<div class="bubble"><span class="cancelled">⊘ cancelled</span></div>';
             messages.appendChild(msg);
-            messages.scrollTop = messages.scrollHeight;
+            autoScroll();
         }
     } else {
         sendMessage();
@@ -352,7 +370,7 @@ function showModelPicker() {
         ).join("")}
         </div>`;
     messages.appendChild(card);
-    messages.scrollTop = messages.scrollHeight;
+    autoScroll();
 }
 
 function selectModel(id, card) {
@@ -411,7 +429,7 @@ textarea.addEventListener("paste", e => {
 });
 
 function sendMessage() {
-
+    _userScrolledUp = false;
     const text = textarea.value.trim();
     const activeAttachments = [...attachments.values()];
 
@@ -483,10 +501,16 @@ function addMessage(role, text) {
 
     messages.appendChild(message);
 
-    messages.scrollTop = messages.scrollHeight;
+    autoScroll();
 }
 
 window.chrome.webview.addEventListener("message", event => {
+
+    if (event.data.type === "version") {
+        const el = document.querySelector(".about-meta");
+        if (el) el.textContent = `v${event.data.text} · wluisdev`;
+        return;
+    }
 
     if (event.data.type === "history") {
         renderHistory(event.data.sessions);
@@ -576,7 +600,7 @@ function appendTokens(text) {
     el.className = "timing";
     el.textContent = `tokens: ↑ ${fmt(inp)} in · ↓ ${fmt(out)} out`;
     messages.appendChild(el);
-    messages.scrollTop = messages.scrollHeight;
+    autoScroll();
 }
 
 function appendTiming(text) {
@@ -588,7 +612,7 @@ function appendTiming(text) {
     el.className = "timing";
     el.textContent = `⏱ ${formatted}`;
     messages.appendChild(el);
-    messages.scrollTop = messages.scrollHeight;
+    autoScroll();
 }
 
 function renderMarkdown(raw) {
@@ -661,7 +685,7 @@ function appendChunk(text) {
 
     currentStreamBubble.dataset.raw = (currentStreamBubble.dataset.raw || "") + text;
     currentStreamBubble.textContent = currentStreamBubble.dataset.raw;
-    messages.scrollTop = messages.scrollHeight;
+    autoScroll();
 }
 
 let _loadingTimer = null;
@@ -672,7 +696,7 @@ function addLoading() {
     el.className = "message assistant loading";
     el.innerHTML = `<div class="bubble"><span class="dots"><span>.</span><span>.</span><span>.</span></span><span class="live-timer">0.0s</span></div>`;
     messages.appendChild(el);
-    messages.scrollTop = messages.scrollHeight;
+    autoScroll();
     _loadingStart = Date.now();
     _loadingTimer = setInterval(() => {
         const timerEl = messages.querySelector(".live-timer");
@@ -747,7 +771,7 @@ function showFileQuestion(id, displayName) {
 <button class="q-btn q-no" onclick="confirmFile(${id}, false)">No</button>
 </div>`;
     messages.appendChild(card);
-    messages.scrollTop = messages.scrollHeight;
+    autoScroll();
 }
 
 function confirmFile(id, include) {
