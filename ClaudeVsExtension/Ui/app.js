@@ -637,16 +637,29 @@ window.chrome.webview.addEventListener("message", event => {
         return;
     }
 
+    if (event.data.type === "cost-warning") {
+        showCostWarning(event.data.text, event.data.blocked === true);
+        return;
+    }
+
+    if (event.data.type === "cost-limits") {
+        const s = event.data.sessionLimit;
+        const d = event.data.dailyLimit;
+        if (s != null) document.getElementById("cost-session-input").value = formatCost(s);
+        if (d != null) document.getElementById("cost-daily-input").value = formatCost(d);
+        document.getElementById("cost-block-toggle").checked = !!event.data.block;
+        localStorage.setItem("costBlock", !!event.data.block);
+        return;
+    }
+
     if (event.data.type === "timing") {
         appendTiming(event.data.text);
         return;
     }
 
     if (event.data.type === "stream-done") {
-        if (isUsageCapture) {
-            isUsageCapture = false;
-            removeLoading();
-        }
+        if (isUsageCapture) isUsageCapture = false;
+        removeLoading();
         if (currentStreamBubble) {
             const raw = currentStreamBubble.dataset.raw || "";
             applyMarkdown(currentStreamBubble, raw);
@@ -691,6 +704,95 @@ function clearWorkingDirectory() {
     workingDirInput.value = "";
     localStorage.setItem("workingDirectory", "");
     workingDirInput.focus();
+}
+
+// ── Cost limits ────────────────────────────────────────────────
+function parseCost(value) {
+    const n = parseFloat(String(value).replace(",", "."));
+    return isFinite(n) && n > 0 ? n : null;
+}
+
+function formatCost(value) {
+    const n = typeof value === "number" ? value : parseCost(value);
+    if (n == null) return "";
+    return n.toFixed(2).replace(".", ",");
+}
+
+function formatCostLimitInput(el) {
+    el.value = formatCost(el.value);
+}
+
+let _costLimitSaveTimer = null;
+function saveCostLimits() {
+    clearTimeout(_costLimitSaveTimer);
+    _costLimitSaveTimer = setTimeout(() => {
+        const sl = parseCost(localStorage.getItem("costSessionLimit"));
+        const dl = parseCost(localStorage.getItem("costDailyLimit"));
+        const block = localStorage.getItem("costBlock") === "true";
+        window.chrome.webview.postMessage({
+            type: "set-cost-limits",
+            sessionLimit: sl,
+            dailyLimit: dl,
+            block
+        });
+    }, 400);
+}
+
+function setCostLimit(which, value) {
+    const v = parseCost(value);
+    if (which === "session") localStorage.setItem("costSessionLimit", v ?? "");
+    else localStorage.setItem("costDailyLimit", v ?? "");
+    dismissCostWarning();
+    saveCostLimits();
+}
+
+function setCostBlock(checked) {
+    localStorage.setItem("costBlock", !!checked);
+    dismissCostWarning();
+    saveCostLimits();
+}
+
+function clearCostLimit(which) {
+    const id = which === "session" ? "cost-session-input" : "cost-daily-input";
+    const inp = document.getElementById(id);
+    inp.value = "";
+    setCostLimit(which, "");
+    inp.focus();
+}
+
+(function loadCostLimitsFromStorage() {
+    const s = localStorage.getItem("costSessionLimit");
+    const d = localStorage.getItem("costDailyLimit");
+    const block = localStorage.getItem("costBlock") === "true";
+    if (s) document.getElementById("cost-session-input").value = formatCost(s);
+    if (d) document.getElementById("cost-daily-input").value = formatCost(d);
+    document.getElementById("cost-block-toggle").checked = block;
+    // Sync with disk to handle edits from other VS instances
+    try { window.chrome.webview.postMessage({ type: "get-cost-limits" }); } catch (_) { }
+})();
+
+function showCostWarning(text, blocked) {
+    const el = document.getElementById("cost-warning");
+    const prefix = blocked ? "Message blocked — " : "Cost limit reached — ";
+    document.getElementById("cost-warning-text").textContent = prefix + text;
+    el.classList.toggle("blocked", !!blocked);
+    el.style.display = "flex";
+
+    if (blocked) {
+        const userMsgs = messages.querySelectorAll(".message.user");
+        const last = userMsgs[userMsgs.length - 1];
+        if (last && !last.classList.contains("blocked")) {
+            last.classList.add("blocked");
+            const badge = document.createElement("div");
+            badge.className = "blocked-badge";
+            badge.textContent = "🚫 blocked by cost limit";
+            last.appendChild(badge);
+        }
+    }
+}
+
+function dismissCostWarning() {
+    document.getElementById("cost-warning").style.display = "none";
 }
 
 // Ctrl+Scroll to resize textarea font

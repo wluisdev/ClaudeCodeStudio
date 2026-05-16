@@ -19,6 +19,7 @@ public partial class AgentToolWindowControl : UserControl
     private readonly AgentClient _agentClient = new();
     private bool _initialized;
     private string? _lastWorkingDir;
+    private DateTime _sessionStart = DateTime.Now;
 
     public AgentToolWindowControl()
     {
@@ -127,6 +128,33 @@ public partial class AgentToolWindowControl : UserControl
             if (request.Type == "clear")
             {
                 await _agentClient.StopAsync();
+                _sessionStart = DateTime.Now;
+                return;
+            }
+
+            if (request.Type == "get-cost-limits")
+            {
+                var limits = Usage.CostLimits.Load();
+                var dispatcher2 = System.Windows.Application.Current.Dispatcher;
+                dispatcher2.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new
+                    {
+                        type = "cost-limits",
+                        sessionLimit = limits.SessionLimit,
+                        dailyLimit = limits.DailyLimit,
+                        block = limits.Block
+                    })));
+                return;
+            }
+
+            if (request.Type == "set-cost-limits")
+            {
+                new Usage.CostLimits
+                {
+                    SessionLimit = request.SessionLimit,
+                    DailyLimit = request.DailyLimit,
+                    Block = request.Block
+                }.Save();
                 return;
             }
 
@@ -245,6 +273,33 @@ public partial class AgentToolWindowControl : UserControl
                 ? request.WorkingDirectory
                 : currentSolutionDir;
 
+            var preLimits = Usage.CostLimits.Load();
+            if (preLimits.Block && !preLimits.IsEmpty)
+            {
+                var (sCost, dCost) = await Task.Run(() => ComputeCosts(workingDir));
+                if (preLimits.ShouldBlock(sCost, dCost))
+                {
+                    var blockJson = JsonSerializer.Serialize(new
+                    {
+                        type = "cost-warning",
+                        text = preLimits.BuildWarning(sCost, dCost) ?? "limit reached",
+                        blocked = true,
+                        sessionCost = sCost,
+                        dailyCost = dCost,
+                        sessionLimit = preLimits.SessionLimit,
+                        dailyLimit = preLimits.DailyLimit
+                    });
+                    var disp = System.Windows.Application.Current.Dispatcher;
+                    disp.Invoke(() =>
+                    {
+                        Browser.CoreWebView2.PostWebMessageAsJson(blockJson);
+                        Browser.CoreWebView2.PostWebMessageAsJson(
+                            JsonSerializer.Serialize(new { type = "stream-done" }));
+                    });
+                    return;
+                }
+            }
+
             if (!string.Equals(workingDir, _lastWorkingDir, StringComparison.OrdinalIgnoreCase))
             {
                 await _agentClient.StopAsync();
@@ -277,6 +332,8 @@ public partial class AgentToolWindowControl : UserControl
                 Browser.CoreWebView2.PostWebMessageAsJson(
                     JsonSerializer.Serialize(new { type = "stream-done" }));
             });
+
+            _ = Task.Run(() => CheckCostLimitsAsync(workingDir));
         }
         catch (Exception ex)
         {
@@ -374,6 +431,55 @@ public partial class AgentToolWindowControl : UserControl
     {
         await _agentClient.StopAsync();
         _lastWorkingDir = null;
+        _sessionStart = DateTime.Now;
+    }
+
+    private (decimal sessionCost, decimal dailyCost) ComputeCosts(string? cwd)
+    {
+        var all = Usage.UsageReader.ReadAll();
+        var today = DateTime.Today;
+        decimal sessionCost = 0m;
+        decimal dailyCost = 0m;
+        foreach (var s in all)
+        {
+            if (s.LastTimestamp >= today)
+                dailyCost += s.Cost;
+
+            var inCwd = !string.IsNullOrEmpty(cwd) &&
+                        s.Cwd.Equals(cwd, StringComparison.OrdinalIgnoreCase);
+            if (inCwd && s.LastTimestamp >= _sessionStart)
+                sessionCost += s.Cost;
+        }
+        return (sessionCost, dailyCost);
+    }
+
+    private Task CheckCostLimitsAsync(string? cwd)
+    {
+        try
+        {
+            var limits = Usage.CostLimits.Load();
+            if (limits.IsEmpty) return Task.CompletedTask;
+
+            var (sessionCost, dailyCost) = ComputeCosts(cwd);
+
+            var warning = limits.BuildWarning(sessionCost, dailyCost);
+            if (warning == null) return Task.CompletedTask;
+
+            var json = JsonSerializer.Serialize(new
+            {
+                type = "cost-warning",
+                text = warning,
+                sessionCost,
+                dailyCost,
+                sessionLimit = limits.SessionLimit,
+                dailyLimit = limits.DailyLimit
+            });
+
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            dispatcher?.Invoke(() => Browser.CoreWebView2?.PostWebMessageAsJson(json));
+        }
+        catch { }
+        return Task.CompletedTask;
     }
 
     private async Task HandleGetSelectionAsync()
@@ -690,5 +796,14 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("path")]
         public string? Path { get; set; }
+
+        [JsonPropertyName("sessionLimit")]
+        public decimal? SessionLimit { get; set; }
+
+        [JsonPropertyName("dailyLimit")]
+        public decimal? DailyLimit { get; set; }
+
+        [JsonPropertyName("block")]
+        public bool Block { get; set; }
     }
 }

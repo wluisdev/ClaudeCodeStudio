@@ -133,6 +133,40 @@
                             <button type="button" class="settings-input-clear" title="Clear" onclick="clearWorkingDirectory()">✕</button>
                         </div>
 
+                        <div class="cmd-divider"></div>
+                        <div class="settings-row">
+                            <span class="settings-label">Cost limit warning ($)</span>
+                        </div>
+                        <div class="cost-limits-row">
+                            <label class="cost-limit-field">
+                                <span>Session</span>
+                                <div class="cost-limit-input-wrap">
+                                    <input type="text" inputmode="decimal" id="cost-session-input" class="settings-input" placeholder="off"
+                                        oninput="setCostLimit('session', this.value)"
+                                        onblur="formatCostLimitInput(this)"
+                                        onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" />
+                                    <button type="button" class="cost-input-clear" title="Clear" onclick="clearCostLimit('session')">✕</button>
+                                </div>
+                            </label>
+                            <label class="cost-limit-field">
+                                <span>Day</span>
+                                <div class="cost-limit-input-wrap">
+                                    <input type="text" inputmode="decimal" id="cost-daily-input" class="settings-input" placeholder="off"
+                                        oninput="setCostLimit('daily', this.value)"
+                                        onblur="formatCostLimitInput(this)"
+                                        onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" />
+                                    <button type="button" class="cost-input-clear" title="Clear" onclick="clearCostLimit('daily')">✕</button>
+                                </div>
+                            </label>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Block sending when reached</span>
+                            <label class="toggle">
+                                <input type="checkbox" id="cost-block-toggle" onchange="setCostBlock(this.checked)" />
+                                <span class="toggle-track"></span>
+                            </label>
+                        </div>
+
                         <div class="about-section">
                             <div class="about-name"><span class="logo">✺</span> Claude VS</div>
                             <div class="about-meta">v— · wluisdev</div>
@@ -183,9 +217,10 @@
             </div>
         </div>
 
-        <div class="notice" id="notice">
-            💻 <strong>Prefer the Terminal experience?</strong> Switch back in Settings.
-            <button class="notice-close" onclick="document.getElementById('notice').remove()">×</button>
+        <div class="cost-warning" id="cost-warning" style="display:none">
+            <span class="cost-warning-icon">⚠</span>
+            <span class="cost-warning-text" id="cost-warning-text"></span>
+            <button class="notice-close" onclick="dismissCostWarning()">×</button>
         </div>
 
         <div class="composer">
