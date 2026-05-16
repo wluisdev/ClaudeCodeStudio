@@ -20,7 +20,13 @@
                     <button class="action-btn" id="btn-layout" title="Toggle layout" onclick="toggleLayout()">◫</button>
                     <button class="action-btn" id="btn-permission" title="Permission mode" onclick="cyclePermission()">⚡</button>
                     <button class="action-btn" id="btn-diff" title="Git diff" onclick="openDiffModal()">⎇</button>
-                    <button class="action-btn" id="btn-usage" title="Usage & cost" onclick="openUsageWindow()">📊</button>
+                    <button class="action-btn" id="btn-usage" title="Usage & cost" onclick="openUsageWindow()">
+                        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
+                            <rect x="2" y="9.5"  width="3" height="4.5"/>
+                            <rect x="6.5" y="5.5" width="3" height="8.5"/>
+                            <rect x="11" y="2.5" width="3" height="11.5"/>
+                        </svg>
+                    </button>
                     <div class="cmd-wrap" id="history-wrap">
                         <button class="action-btn" title="Session history" onclick="toggleHistory()">◷</button>
                         <div class="cmd-menu" id="history-menu">
