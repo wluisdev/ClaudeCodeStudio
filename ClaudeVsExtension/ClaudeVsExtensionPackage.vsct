@@ -80,6 +80,12 @@
           <ButtonText>Send to Claude VS</ButtonText>
         </Strings>
       </Button>
+      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="UsageToolWindowCommandId" priority="0x0102" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_TOOLS_EXT_CUST"/>
+        <Strings>
+          <ButtonText>Claude VS Usage</ButtonText>
+        </Strings>
+      </Button>
     </Buttons>
 
     <!--The bitmaps section is used to define the bitmaps that are used for the commands.-->
@@ -107,6 +113,7 @@
       <IDSymbol name="FocusClaudeVsCommandId" value="0x0101" />
       <IDSymbol name="EditorSendSelectionCommandId" value="0x0102" />
       <IDSymbol name="SolutionExplorerSendFileCommandId" value="0x0103" />
+      <IDSymbol name="UsageToolWindowCommandId" value="0x0104" />
       <IDSymbol name="EditorContextMenuGroup" value="0x1020" />
       <IDSymbol name="SolutionExplorerContextMenuGroup" value="0x1021" />
     </GuidSymbol>

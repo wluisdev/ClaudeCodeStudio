@@ -28,6 +28,7 @@ namespace ClaudeVsExtension
     [InstalledProductRegistration("#110", "#112", "1.0", IconResourceID = 400)]
     [ProvideMenuResource("Menus.ctmenu", 1)]
     [ProvideToolWindow(typeof(AgentToolWindow))]
+    [ProvideToolWindow(typeof(Usage.UsageToolWindow), Transient = true)]
     [Guid(PackageGuidString)]
     public sealed class ClaudeVsExtensionPackage : AsyncPackage
     {
@@ -35,6 +36,8 @@ namespace ClaudeVsExtension
         /// ClaudeVsExtensionPackage GUID string.
         /// </summary>
         public const string PackageGuidString = "36a4617b-b537-4a28-bdd4-a18067f26ea2";
+
+        public static ClaudeVsExtensionPackage? Instance { get; private set; }
 
         private uint _solutionEventsCookie;
         private SolutionEventsHandler? _solutionEventsHandler;
@@ -51,6 +54,8 @@ namespace ClaudeVsExtension
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
             await this.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+
+            Instance = this;
 
             await AgentToolWindowCommand.InitializeAsync(this);
 

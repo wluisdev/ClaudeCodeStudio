@@ -986,33 +986,103 @@ function deleteSession(sessionId) {
     window.chrome.webview.postMessage({ type: "delete-session", sessionId });
 }
 
+// ── Open usage window ─────────────────────────────────────────
+function openUsageWindow() {
+    window.chrome.webview.postMessage({ type: "open-usage" });
+}
+
 // ── Diff viewer ───────────────────────────────────────────────
 function openDiffModal() {
     document.getElementById("diff-modal-overlay").classList.add("open");
     document.getElementById("diff-stat").textContent = "";
     document.getElementById("diff-body").innerHTML = '<span class="usage-loading">Running git diff…</span>';
-    window.chrome.webview.postMessage({ type: "get-diff" });
+    window.chrome.webview.postMessage({
+        type: "get-diff",
+        autoSave: autoSaveValues[+autoSaveSlider.value]
+    });
 }
 
 function closeDiffModal() {
     document.getElementById("diff-modal-overlay").classList.remove("open");
 }
 
+let _diffFiles = [];
+let _diffStat = "";
+let _diffActive = null;
+
 function renderDiff(stat, diff) {
-    document.getElementById("diff-stat").textContent = stat || "";
+    _diffStat = stat || "";
+    _diffFiles = parseDiffFiles(diff || "");
+    _diffActive = null;
+    paintDiffStat();
+    paintDiffBody();
+}
+
+function parseDiffFiles(diff) {
+    if (!diff) return [];
+    const out = [];
+    const parts = diff.split(/(?=^diff --git )/m);
+    for (const part of parts) {
+        if (!part.trim()) continue;
+        const m = part.match(/^diff --git a\/(\S+) b\/\S+/m);
+        if (m) out.push({ name: m[1], body: part.trimEnd() });
+    }
+    return out;
+}
+
+function paintDiffStat() {
+    const el = document.getElementById("diff-stat");
+    el.innerHTML = "";
+    if (!_diffStat) return;
+    const lines = _diffStat.split("\n");
+    for (const raw of lines) {
+        const line = raw.replace(/^\s+/, "");
+        if (!line) continue;
+        const m = line.match(/^([^\s|]+)\s*\|/);
+        const file = m && _diffFiles.find(f => f.name === m[1]);
+        if (file) {
+            const btn = document.createElement("div");
+            btn.className = "diff-file-link" + (_diffActive === m[1] ? " active" : "");
+            btn.textContent = line;
+            btn.onclick = () => toggleDiffFilter(m[1]);
+            el.appendChild(btn);
+        } else {
+            const span = document.createElement("div");
+            span.className = "diff-stat-line";
+            span.textContent = line;
+            el.appendChild(span);
+        }
+    }
+}
+
+function toggleDiffFilter(name) {
+    _diffActive = (_diffActive === name) ? null : name;
+    paintDiffStat();
+    paintDiffBody();
+}
+
+function paintDiffBody() {
     const body = document.getElementById("diff-body");
-    if (!diff) {
-        body.textContent = stat ? "" : "No changes.";
+    body.innerHTML = "";
+    if (_diffFiles.length === 0) {
+        body.textContent = _diffStat ? "" : "No changes.";
         return;
     }
-    const pre = document.createElement("pre");
-    const code = document.createElement("code");
-    code.className = "language-diff";
-    code.textContent = diff;
-    pre.appendChild(code);
-    body.innerHTML = "";
-    body.appendChild(pre);
-    if (typeof hljs !== "undefined") hljs.highlightElement(code);
+    const list = _diffActive ? _diffFiles.filter(f => f.name === _diffActive) : _diffFiles;
+    for (let i = 0; i < list.length; i++) {
+        if (i > 0) {
+            const sep = document.createElement("div");
+            sep.className = "diff-separator";
+            body.appendChild(sep);
+        }
+        const pre = document.createElement("pre");
+        const code = document.createElement("code");
+        code.className = "language-diff";
+        code.textContent = list[i].body;
+        pre.appendChild(code);
+        body.appendChild(pre);
+        if (typeof hljs !== "undefined") hljs.highlightElement(code);
+    }
 }
 
 renderCustomCommands();

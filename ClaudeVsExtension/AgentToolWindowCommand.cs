@@ -15,6 +15,7 @@ namespace ClaudeVsExtension
         public const int FocusCommandId = 0x0101;
         public const int SendSelectionCommandId = 0x0102;
         public const int SendFileCommandId = 0x0103;
+        public const int UsageWindowCommandId = 0x0104;
 
         public static readonly Guid CommandSet = new("dd63979a-7c8a-4d0c-b2f7-321ba5b6d8d2");
 
@@ -53,6 +54,20 @@ namespace ClaudeVsExtension
             var sendFileItem = new OleMenuCommand(this.ExecuteSendFile, sendFileCmdID);
             sendFileItem.BeforeQueryStatus += OnSendFileQueryStatus;
             commandService.AddCommand(sendFileItem);
+
+            var usageCmdID = new CommandID(CommandSet, UsageWindowCommandId);
+            var usageItem = new MenuCommand(this.ExecuteShowUsage, usageCmdID);
+            commandService.AddCommand(usageItem);
+        }
+
+        private void ExecuteShowUsage(object sender, EventArgs e)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            ToolWindowPane window = this.package.FindToolWindow(typeof(Usage.UsageToolWindow), 0, true);
+            if (window?.Frame is IVsWindowFrame frame)
+                Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(frame.Show());
+            if (window?.Content is Usage.UsageToolWindowControl ctrl)
+                ctrl.Refresh();
         }
 
         private static string? GetSelectedSolutionExplorerFile()

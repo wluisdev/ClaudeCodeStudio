@@ -9,6 +9,7 @@ using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using System.Text.Json.Serialization;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.PlatformUI;
 
 namespace ClaudeVsExtension;
@@ -118,20 +119,7 @@ public partial class AgentToolWindowControl : UserControl
                 if (!string.IsNullOrEmpty(solutionPath))
                     currentSolutionDir = Path.GetDirectoryName(solutionPath);
 
-                if (request.AutoSave == "active")
-                {
-                    try { dteForCwd?.ActiveDocument?.Save(); } catch { }
-                }
-                else if (request.AutoSave == "all")
-                {
-                    try
-                    {
-                        if (dteForCwd?.Documents != null)
-                            foreach (EnvDTE.Document doc in dteForCwd.Documents)
-                                try { if (!doc.Saved) doc.Save(); } catch { }
-                    }
-                    catch { }
-                }
+                ApplyAutoSave(dteForCwd, request.AutoSave);
             }
             catch { }
 #pragma warning restore VSTHRD010
@@ -173,7 +161,30 @@ public partial class AgentToolWindowControl : UserControl
 
             if (request.Type == "get-diff")
             {
+#pragma warning disable VSTHRD010
+                try
+                {
+                    var dteForSave = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+                    ApplyAutoSave(dteForSave, request.AutoSave);
+                }
+                catch { }
+#pragma warning restore VSTHRD010
                 await HandleGetDiffAsync();
+                return;
+            }
+
+            if (request.Type == "open-usage")
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                var pkg = ClaudeVsExtensionPackage.Instance;
+                if (pkg != null)
+                {
+                    var window = pkg.FindToolWindow(typeof(Usage.UsageToolWindow), 0, true);
+                    if (window?.Frame is IVsWindowFrame frame)
+                        Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(frame.Show());
+                    if (window?.Content is Usage.UsageToolWindowControl ctrl)
+                        ctrl.Refresh();
+                }
                 return;
             }
 
@@ -305,6 +316,27 @@ public partial class AgentToolWindowControl : UserControl
     }
 
     public Task SendActiveSelectionAsync() => HandleGetSelectionAsync();
+
+#pragma warning disable VSTHRD010
+    private static void ApplyAutoSave(EnvDTE.DTE? dte, string? mode)
+    {
+        if (dte == null || string.IsNullOrEmpty(mode) || mode == "none") return;
+        try
+        {
+            if (mode == "active")
+            {
+                dte.ActiveDocument?.Save();
+            }
+            else if (mode == "all")
+            {
+                if (dte.Documents == null) return;
+                foreach (EnvDTE.Document doc in dte.Documents)
+                    try { if (!doc.Saved) doc.Save(); } catch { }
+            }
+        }
+        catch { }
+    }
+#pragma warning restore VSTHRD010
 
     public void InsertFileReference(string fullPath)
     {
