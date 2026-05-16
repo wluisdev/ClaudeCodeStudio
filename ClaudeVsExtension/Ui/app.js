@@ -335,6 +335,7 @@ textarea.addEventListener("input", () => {
     } else {
         hideAutocomplete();
     }
+    updateTokenEstimate();
 });
 
 textarea.addEventListener("keydown", (e) => {
@@ -383,6 +384,7 @@ textarea.addEventListener("keydown", (e) => {
         if (historyIndex < promptHistory.length - 1) {
             historyIndex++;
             textarea.value = promptHistory[historyIndex];
+            updateTokenEstimate();
         }
         return;
     }
@@ -395,6 +397,7 @@ textarea.addEventListener("keydown", (e) => {
             historyIndex = -1;
             textarea.value = historyDraft;
         }
+        updateTokenEstimate();
         return;
     }
 
@@ -543,6 +546,7 @@ function sendMessage() {
     attachments.clear();
     attachmentsEl.innerHTML = "";
     textarea.value = "";
+    updateTokenEstimate();
 
     if (window.chrome?.webview) {
         setStreaming(true);
@@ -675,6 +679,38 @@ tokensToggle.checked = localStorage.getItem("showTokens") !== "false";
 
 function setShowTokens(checked) {
     localStorage.setItem("showTokens", checked);
+}
+
+// ── Token estimate ────────────────────────────────────────────
+const tokenEstimateToggle = document.getElementById("token-estimate-toggle");
+const tokenEstimateEl = document.getElementById("token-estimate");
+tokenEstimateToggle.checked = localStorage.getItem("showTokenEstimate") === "true";
+
+function setShowTokenEstimate(checked) {
+    localStorage.setItem("showTokenEstimate", checked);
+    updateTokenEstimate();
+}
+
+function estimateTokens(text) {
+    if (!text) return 0;
+    // Heurística: se predominantemente código (símbolos/whitespace alto), usa /3.5;
+    // senão texto natural, usa /5
+    const codeLike = (text.match(/[{}\[\]<>()=;:\/\\|@#$%^&*+\-_`"']/g) || []).length;
+    const ratio = codeLike / text.length;
+    const divisor = ratio > 0.08 ? 3.5 : 5;
+    return Math.ceil(text.length / divisor);
+}
+
+function updateTokenEstimate() {
+    if (!tokenEstimateToggle.checked) {
+        tokenEstimateEl.textContent = "";
+        return;
+    }
+    const tokens = estimateTokens(textarea.value);
+    if (tokens === 0) { tokenEstimateEl.textContent = ""; return; }
+    tokenEstimateEl.textContent = tokens >= 1000
+        ? `~${(tokens / 1000).toFixed(1)}k tok`
+        : `~${tokens} tok`;
 }
 
 const sendEnterToggle = document.getElementById("send-enter-toggle");
@@ -828,7 +864,10 @@ function formatMs(ms) {
 }
 
 function appendTokens(text) {
-    const [inp, out] = text.split("/").map(Number);
+    const parts = text.split("/").map(Number);
+    const inp = parts[0] || 0;
+    const out = parts[1] || 0;
+    const cacheRead = parts[2] || 0;
     sessionIn += inp;
     sessionOut += out;
     updateUsageSessionValues();
@@ -836,7 +875,8 @@ function appendTokens(text) {
     const fmt = n => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
     const el = document.createElement("div");
     el.className = "timing";
-    el.textContent = `tokens: ↑ ${fmt(inp)} in · ↓ ${fmt(out)} out`;
+    const cachePart = cacheRead > 0 ? ` · ↻ ${fmt(cacheRead)} cached` : "";
+    el.textContent = `tokens: ↑ ${fmt(inp)} in${cachePart} · ↓ ${fmt(out)} out`;
     messages.appendChild(el);
     autoScroll();
 }
@@ -1055,6 +1095,7 @@ function insertAtCursor(text) {
     textarea.value = textarea.value.substring(0, start) + text + textarea.value.substring(end);
     textarea.selectionStart = textarea.selectionEnd = start + text.length;
     textarea.focus();
+    updateTokenEstimate();
 }
 
 function renderHistory(sessions) {

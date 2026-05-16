@@ -946,6 +946,27 @@ textarea {
     gap: 10px;
 }
 
+.token-estimate {
+    font-size: 10px;
+    color: #666;
+    font-family: monospace;
+    white-space: nowrap;
+}
+
+.info-icon {
+    display: inline-block;
+    margin-left: 5px;
+    color: #777;
+    font-size: 12px;
+    cursor: help;
+    vertical-align: middle;
+}
+.info-icon:hover { color: #d88763; }
+html.light-theme .info-icon { color: #999; }
+html.light-theme .info-icon:hover { color: #b05c35; }
+.token-estimate:empty { display: none; }
+html.light-theme .token-estimate { color: #999; }
+
 .permission-select {
     background: #2a2a2a;
     border: 1px solid #444;

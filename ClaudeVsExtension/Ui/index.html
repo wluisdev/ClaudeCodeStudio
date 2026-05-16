@@ -70,6 +70,16 @@
                             </label>
                         </div>
                         <div class="settings-row">
+                            <span class="settings-label">
+                                Show token estimate
+                                <span class="info-icon" title="This is an approximate token cost for the message before sending. It's just a heuristic simulation (chars / 3.5 or 5) and may differ from the actual value charged by the API.">ⓘ</span>
+                            </span>
+                            <label class="toggle">
+                                <input type="checkbox" id="token-estimate-toggle" onchange="setShowTokenEstimate(this.checked)" />
+                                <span class="toggle-track"></span>
+                            </label>
+                        </div>
+                        <div class="settings-row">
                             <span class="settings-label">Send with Enter</span>
                             <label class="toggle">
                                 <input type="checkbox" id="send-enter-toggle" checked onchange="setSendWithEnter(this.checked)" />
@@ -237,6 +247,7 @@
                     </div>
 
                     <div class="right-buttons">
+                        <span class="token-estimate" id="token-estimate" title="Approximate input tokens"></span>
                         <select class="permission-select" title="Permission mode">
                             <option value="yolo">⚡ yolo</option>
                             <option value="plan">📋 plan</option>

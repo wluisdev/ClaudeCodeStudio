@@ -180,9 +180,12 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
 
                 if (evt.TryGetProperty("usage", out var usage))
                 {
-                    var inputTok  = usage.TryGetProperty("input_tokens",  out var inp) ? inp.GetInt32() : 0;
-                    var outputTok = usage.TryGetProperty("output_tokens", out var out_) ? out_.GetInt32() : 0;
-                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "tokens", Text = $"{inputTok}/{outputTok}" }));
+                    var inputTok    = usage.TryGetProperty("input_tokens",                out var inp)   ? inp.GetInt32()   : 0;
+                    var outputTok   = usage.TryGetProperty("output_tokens",               out var out_)  ? out_.GetInt32()  : 0;
+                    var cacheCreate = usage.TryGetProperty("cache_creation_input_tokens", out var cc)    ? cc.GetInt32()    : 0;
+                    var cacheRead   = usage.TryGetProperty("cache_read_input_tokens",     out var cr)    ? cr.GetInt32()    : 0;
+                    var newIn = inputTok + cacheCreate;
+                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "tokens", Text = $"{newIn}/{outputTok}/{cacheRead}" }));
                     Console.Out.Flush();
                 }
 
