@@ -61,7 +61,7 @@ public class AgentClient
         }
     }
 
-    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null)
+    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null)
     {
         var resumeId = PendingResumeSessionId;
         PendingResumeSessionId = null;
@@ -94,6 +94,12 @@ public class AgentClient
             if (chunk.Type == "timing")
             {
                 onTiming?.Invoke(chunk.Text);
+                continue;
+            }
+
+            if (chunk.Type == "tokens")
+            {
+                onTokens?.Invoke(chunk.Text);
                 continue;
             }
 

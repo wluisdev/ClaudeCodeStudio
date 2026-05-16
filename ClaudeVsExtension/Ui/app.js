@@ -87,10 +87,40 @@ function toggleCmdMenu() {
     menu.classList.toggle("open");
 }
 
+let isUsageCapture = false;
+let usageBuffer = "";
+let sessionIn = 0;
+let sessionOut = 0;
+
 function runCommand(cmd) {
     document.getElementById("cmd-menu").classList.remove("open");
+    if (cmd === "/usage") {
+        openUsageModal();
+        isUsageCapture = true;
+        usageBuffer = "";
+        document.getElementById("usage-raw").innerHTML = '<span class="usage-loading">Running /usage…</span>';
+        textarea.value = cmd;
+        sendMessage();
+        return;
+    }
     textarea.value = cmd;
     sendMessage();
+}
+
+function openUsageModal() {
+    document.getElementById("usage-modal-overlay").classList.add("open");
+    updateUsageSessionValues();
+}
+
+function closeUsageModal() {
+    document.getElementById("usage-modal-overlay").classList.remove("open");
+}
+
+function updateUsageSessionValues() {
+    const fmt = n => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
+    const el = document.getElementById("usage-session-values");
+    if (sessionIn === 0 && sessionOut === 0) { el.textContent = "—"; return; }
+    el.textContent = `↑ ${fmt(sessionIn)} in · ↓ ${fmt(sessionOut)} out`;
 }
 
 function openAddCommand() {
@@ -443,7 +473,17 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "chunk") {
-        appendChunk(event.data.text);
+        if (isUsageCapture) {
+            usageBuffer += event.data.text;
+            document.getElementById("usage-raw").textContent = usageBuffer;
+        } else {
+            appendChunk(event.data.text);
+        }
+        return;
+    }
+
+    if (event.data.type === "tokens") {
+        appendTokens(event.data.text);
         return;
     }
 
@@ -453,18 +493,64 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "stream-done") {
+        if (isUsageCapture) {
+            isUsageCapture = false;
+            removeLoading();
+        }
         currentStreamBubble = null;
         return;
     }
 });
 
+const tokensToggle = document.getElementById("tokens-toggle");
+tokensToggle.checked = localStorage.getItem("showTokens") !== "false";
+
+function setShowTokens(checked) {
+    localStorage.setItem("showTokens", checked);
+}
+
+let timeUnit = localStorage.getItem("timeUnit") || "s";
+(function () {
+    document.getElementById("unit-" + timeUnit).classList.add("active");
+})();
+
+function setTimeUnit(unit) {
+    timeUnit = unit;
+    localStorage.setItem("timeUnit", unit);
+    document.querySelectorAll(".unit-btn").forEach(b => b.classList.remove("active"));
+    document.getElementById("unit-" + unit).classList.add("active");
+}
+
+function formatMs(ms) {
+    if (timeUnit === "ms") return `${ms}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    const m = Math.floor(ms / 60000);
+    const s = ((ms % 60000) / 1000).toFixed(0);
+    return `${m}m ${s}s`;
+}
+
+function appendTokens(text) {
+    const [inp, out] = text.split("/").map(Number);
+    sessionIn += inp;
+    sessionOut += out;
+    updateUsageSessionValues();
+    if (!tokensToggle.checked) return;
+    const fmt = n => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
+    const el = document.createElement("div");
+    el.className = "timing";
+    el.textContent = `tokens: ↑ ${fmt(inp)} in · ↓ ${fmt(out)} out`;
+    messages.appendChild(el);
+    messages.scrollTop = messages.scrollHeight;
+}
+
 function appendTiming(text) {
     const mode = timingSelect.value;
     if (mode === "none") return;
     if (mode === "simple" && !text.startsWith("total:")) return;
+    const formatted = text.replace(/(\d+)ms/g, (_, n) => formatMs(Number(n)));
     const el = document.createElement("div");
     el.className = "timing";
-    el.textContent = `⏱ ${text}`;
+    el.textContent = `⏱ ${formatted}`;
     messages.appendChild(el);
     messages.scrollTop = messages.scrollHeight;
 }
@@ -484,15 +570,29 @@ function appendChunk(text) {
     messages.scrollTop = messages.scrollHeight;
 }
 
+let _loadingTimer = null;
+let _loadingStart = 0;
+
 function addLoading() {
     const el = document.createElement("div");
     el.className = "message assistant loading";
-    el.innerHTML = `<div class="bubble"><span class="dots"><span>.</span><span>.</span><span>.</span></span></div>`;
+    el.innerHTML = `<div class="bubble"><span class="dots"><span>.</span><span>.</span><span>.</span></span><span class="live-timer">0.0s</span></div>`;
     messages.appendChild(el);
     messages.scrollTop = messages.scrollHeight;
+    _loadingStart = Date.now();
+    _loadingTimer = setInterval(() => {
+        const timerEl = messages.querySelector(".live-timer");
+        if (!timerEl) return;
+        const ms = Date.now() - _loadingStart;
+        timerEl.textContent = ms < 60000
+            ? `${(ms / 1000).toFixed(1)}s`
+            : `${Math.floor(ms / 60000)}m ${((ms % 60000) / 1000).toFixed(0)}s`;
+    }, 100);
 }
 
 function removeLoading() {
+    clearInterval(_loadingTimer);
+    _loadingTimer = null;
     const el = messages.querySelector(".loading");
     if (el) el.remove();
 }
@@ -502,12 +602,13 @@ function clearChat() {
         <div class="welcome">
             <div class="hero"><span class="logo">✺</span> Claude VS</div>
             <div class="bot">🤖</div>
-            <div class="hint">Type /model to pick the right tool for the job.</div>
         </div>`;
 
     welcome = messages.querySelector(".welcome");
-
     textarea.value = "";
+    sessionIn = 0;
+    sessionOut = 0;
+    updateUsageSessionValues();
 
     window.chrome.webview.postMessage({ type: "clear" });
 }
@@ -588,11 +689,13 @@ function renderHistory(sessions) {
         list.innerHTML = '<div class="cmd-item" style="color:#555;font-family:inherit">No sessions found</div>';
         return;
     }
-    list.innerHTML = sessions.map(s => `
-<div class="cmd-item history-item" onclick="resumeSession('${escapeAttr(s.id)}')">
+    list.innerHTML = sessions.map(s => {
+        const tok = s.tokens > 1000 ? `${(s.tokens / 1000).toFixed(1)}k tok` : `${s.tokens} tok`;
+        return `<div class="cmd-item history-item" onclick="resumeSession('${escapeAttr(s.id)}')">
   <div class="history-preview">${escapeHtml(s.preview)}</div>
-  <div class="history-date">${escapeHtml(s.date)}</div>
-</div>`).join("");
+  <div class="history-date">${escapeHtml(s.date)} · ${tok}</div>
+</div>`;
+    }).join("");
 }
 
 function resumeSession(sessionId) {

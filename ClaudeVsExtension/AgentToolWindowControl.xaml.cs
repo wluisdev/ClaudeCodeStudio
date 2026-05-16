@@ -131,7 +131,10 @@ public partial class AgentToolWindowControl : UserControl
                         JsonSerializer.Serialize(new { type = "chunk", text = chunk }))),
                 timing => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = "timing", text = timing }))));
+                        JsonSerializer.Serialize(new { type = "timing", text = timing }))),
+                tokens => dispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "tokens", text = tokens }))));
 
             dispatcher.Invoke(() =>
             {
@@ -299,50 +302,64 @@ public partial class AgentToolWindowControl : UserControl
             {
                 var sessionId = System.IO.Path.GetFileNameWithoutExtension(file);
                 var preview = "";
-                var date = File.GetLastWriteTime(file).ToString("dd/MM/yyyy HH:mm");
+                var date = File.GetLastWriteTime(file).ToString("MM/dd/yyyy HH:mm");
+                var tokenCount = 0;
 
                 try
                 {
-                    using var sr = new StreamReader(file);
+                    using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var sr = new StreamReader(fs);
                     string? jsonLine;
                     while ((jsonLine = await sr.ReadLineAsync()) != null)
                     {
                         if (string.IsNullOrWhiteSpace(jsonLine)) continue;
                         using var doc = System.Text.Json.JsonDocument.Parse(jsonLine);
                         var root = doc.RootElement;
-                        if (!root.TryGetProperty("type", out var t) || t.GetString() != "user") continue;
-                        if (!root.TryGetProperty("message", out var msg)) continue;
-                        if (!msg.TryGetProperty("content", out var content)) continue;
+                        if (!root.TryGetProperty("type", out var t)) continue;
 
-                        if (content.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        var entryType = t.GetString();
+
+                        if (entryType == "user" && string.IsNullOrEmpty(preview))
                         {
-                            foreach (var item in content.EnumerateArray())
+                            if (!root.TryGetProperty("message", out var msg)) continue;
+                            if (!msg.TryGetProperty("content", out var content)) continue;
+
+                            if (content.ValueKind == System.Text.Json.JsonValueKind.Array)
                             {
-                                if (item.TryGetProperty("type", out var itemType) &&
-                                    itemType.GetString() == "text" &&
-                                    item.TryGetProperty("text", out var textEl))
+                                foreach (var item in content.EnumerateArray())
                                 {
-                                    preview = textEl.GetString() ?? "";
-                                    break;
+                                    if (item.TryGetProperty("type", out var itemType) &&
+                                        itemType.GetString() == "text" &&
+                                        item.TryGetProperty("text", out var textEl))
+                                    {
+                                        preview = textEl.GetString() ?? "";
+                                        break;
+                                    }
                                 }
                             }
-                        }
-                        else if (content.ValueKind == System.Text.Json.JsonValueKind.String)
-                        {
-                            preview = content.GetString() ?? "";
-                        }
+                            else if (content.ValueKind == System.Text.Json.JsonValueKind.String)
+                            {
+                                preview = content.GetString() ?? "";
+                            }
 
-                        if (!string.IsNullOrEmpty(preview))
-                        {
                             if (preview.Length > 80) preview = preview.Substring(0, 80) + "…";
-                            break;
+                        }
+                        else if (entryType == "assistant")
+                        {
+                            if (!root.TryGetProperty("message", out var msg)) continue;
+                            if (!msg.TryGetProperty("usage", out var usage)) continue;
+
+                            if (usage.TryGetProperty("input_tokens", out var inputTok))
+                                tokenCount += inputTok.GetInt32();
+                            if (usage.TryGetProperty("output_tokens", out var outputTok))
+                                tokenCount += outputTok.GetInt32();
                         }
                     }
                 }
                 catch { }
 
                 if (!string.IsNullOrEmpty(preview))
-                    sessions.Add(new { id = sessionId, preview, date });
+                    sessions.Add(new { id = sessionId, preview, date, tokens = tokenCount });
             }
         }
 

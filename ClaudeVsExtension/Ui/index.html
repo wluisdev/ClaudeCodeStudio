@@ -46,6 +46,14 @@
                     <div class="cmd-menu settings-menu" id="settings-menu">
                         <div class="cmd-section">Settings</div>
                         <div class="settings-row">
+                            <span class="settings-label">Show tokens</span>
+                            <label class="toggle">
+                                <input type="checkbox" id="tokens-toggle" checked onchange="setShowTokens(this.checked)" />
+                                <span class="toggle-track"></span>
+                            </label>
+                        </div>
+                        <div class="cmd-divider"></div>
+                        <div class="settings-row">
                             <span class="settings-label">Response log</span>
                         </div>
                         <input type="hidden" id="timing-select" value="simple" />
@@ -63,6 +71,13 @@
                                 <span class="timing-opt-ex">no log</span>
                             </div>
                         </div>
+                        <div class="settings-row" style="padding-top:6px">
+                            <span class="settings-label">Time unit</span>
+                            <div class="unit-toggle">
+                                <button class="unit-btn" id="unit-ms" onclick="setTimeUnit('ms')">ms</button>
+                                <button class="unit-btn" id="unit-s" onclick="setTimeUnit('s')">s</button>
+                            </div>
+                        </div>
                         <div class="cmd-divider"></div>
                         <div class="settings-row effort-row">
                             <span class="settings-label">Effort</span>
@@ -73,6 +88,12 @@
                             <div class="effort-ticks">
                                 <span>auto</span><span>low</span><span>med</span><span>high</span><span>max</span>
                             </div>
+                        </div>
+                        <div class="cmd-divider"></div>
+                        <div class="about-section">
+                            <div class="about-name"><span class="logo">✺</span> Claude VS</div>
+                            <div class="about-meta">v1.0.0 · wluisdev</div>
+                            <div class="about-desc">Claude Code integration for Visual Studio 2022</div>
                         </div>
                     </div>
                 </div>
@@ -105,11 +126,8 @@
 
                     <div class="bot">🤖</div>
 
-                    <div class="hint">
-                        Type /model to pick the right tool for the job.
-                    </div>
 
-                </div>
+</div>
 
             </div>
         </div>
@@ -141,6 +159,21 @@
                         <button class="send">↑</button>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="cmd-modal-overlay" id="usage-modal-overlay" onclick="if(event.target===this)closeUsageModal()">
+        <div class="cmd-modal usage-modal">
+            <div class="usage-modal-header">
+                <h3>Usage</h3>
+                <button class="usage-modal-close" onclick="closeUsageModal()">×</button>
+            </div>
+            <div class="usage-raw" id="usage-raw"><span class="usage-loading">Running /usage…</span></div>
+            <div class="usage-divider"></div>
+            <div class="usage-session">
+                <div class="usage-session-label">Session total</div>
+                <div class="usage-session-values" id="usage-session-values">—</div>
             </div>
         </div>
     </div>
