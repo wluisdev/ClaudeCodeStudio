@@ -722,6 +722,18 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
     color: #ccc;
 }
 
+.attachment-name.clickable {
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    text-underline-offset: 2px;
+    transition: color 0.15s, text-decoration-color 0.15s;
+}
+.attachment-name.clickable:hover {
+    color: #d88763;
+    text-decoration-color: #d88763;
+}
+
 .attachment-remove {
     background: none;
     border: none;
@@ -1173,6 +1185,63 @@ html.light-theme .settings-input-clear:hover { color: #333; }
     border-radius: 4px;
 }
 .history-delete:hover { color: #e05252; background: #2a2a2a; }
+
+/* ── Find in chat ──────────────────────────────────────────── */
+.find-bar {
+    display: none;
+    position: absolute;
+    top: 8px;
+    right: 16px;
+    z-index: 50;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 6px 8px;
+    align-items: center;
+    gap: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+.find-bar.open { display: flex; }
+.find-bar input {
+    background: #1f1f1f;
+    border: 1px solid #444;
+    color: #f4f4f4;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    width: 200px;
+    outline: none;
+    font-family: Segoe UI, sans-serif;
+}
+.find-bar input:focus { border-color: #d88763; }
+.find-count {
+    color: #888;
+    font-size: 11px;
+    padding: 0 4px;
+    font-family: Cascadia Code, Consolas, monospace;
+    min-width: 44px;
+    text-align: center;
+}
+.find-btn {
+    background: transparent;
+    border: none;
+    color: #aaa;
+    cursor: pointer;
+    padding: 4px 7px;
+    border-radius: 3px;
+    font-size: 11px;
+}
+.find-btn:hover { background: #3a3a3a; color: #fff; }
+.find-match { background: #5c4022; color: #f4f4f4; border-radius: 2px; }
+.find-match.current { background: #d88763; color: #1f1f1f; }
+
+html.light-theme .find-bar { background: #f0f0f0; border-color: #c8c8c8; }
+html.light-theme .find-bar input { background: #fff; border-color: #c8c8c8; color: #1e1e1e; }
+html.light-theme .find-count { color: #777; }
+html.light-theme .find-btn { color: #555; }
+html.light-theme .find-btn:hover { background: #ddd; color: #000; }
+html.light-theme .find-match { background: #ffd8a8; color: #1e1e1e; }
+html.light-theme .find-match.current { background: #d88763; color: #fff; }
 
 /* ── Diff modal ────────────────────────────────────────────── */
 .diff-modal {

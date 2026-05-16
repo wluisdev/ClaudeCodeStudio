@@ -173,6 +173,17 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "open-file")
+            {
+                if (!string.IsNullOrEmpty(request.Path) && File.Exists(request.Path))
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    var dteOpen = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+                    try { dteOpen?.ItemOperations.OpenFile(request.Path); } catch { }
+                }
+                return;
+            }
+
             if (request.Type == "open-usage")
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -676,5 +687,8 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("autoSave")]
         public string? AutoSave { get; set; }
+
+        [JsonPropertyName("path")]
+        public string? Path { get; set; }
     }
 }

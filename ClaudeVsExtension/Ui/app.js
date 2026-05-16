@@ -892,7 +892,13 @@ function addAttachment(filename, content, isBinary, filePath) {
     const chip = document.createElement("div");
     chip.className = "attachment-chip attachment-binary";
     chip.dataset.attId = id;
-    chip.innerHTML = `<span>${displayName}</span><button class="attachment-remove">×</button>`;
+    const nameClass = filePath ? "attachment-name clickable" : "attachment-name";
+    chip.innerHTML = `<span class="${nameClass}" title="${filePath ? "Click to open" : ""}">${displayName}</span><button class="attachment-remove" title="Remove">×</button>`;
+    if (filePath) {
+        chip.querySelector(".attachment-name").addEventListener("click", () => {
+            window.chrome.webview.postMessage({ type: "open-file", path: filePath });
+        });
+    }
     chip.querySelector(".attachment-remove").addEventListener("click", () => {
         attachments.delete(id);
         chip.remove();
@@ -990,6 +996,122 @@ function deleteSession(sessionId) {
 function openUsageWindow() {
     window.chrome.webview.postMessage({ type: "open-usage" });
 }
+
+// ── Find in chat (Ctrl+F) ─────────────────────────────────────
+let _findMatches = [];
+let _findIndex = -1;
+
+document.addEventListener("keydown", e => {
+    if (e.ctrlKey && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        openFindBar();
+        return;
+    }
+    if (e.key === "Escape" && document.getElementById("find-bar").classList.contains("open")) {
+        e.preventDefault();
+        closeFindBar();
+    }
+});
+
+function openFindBar() {
+    const bar = document.getElementById("find-bar");
+    bar.classList.add("open");
+    const input = document.getElementById("find-input");
+    input.focus();
+    input.select();
+    if (input.value) runFind(input.value);
+}
+
+function closeFindBar() {
+    document.getElementById("find-bar").classList.remove("open");
+    clearFindHighlights();
+    if (typeof textarea !== "undefined") textarea.focus();
+}
+
+function clearFindHighlights() {
+    document.querySelectorAll(".find-match").forEach(m => {
+        const text = document.createTextNode(m.textContent);
+        m.parentNode.replaceChild(text, m);
+    });
+    document.querySelectorAll(".bubble").forEach(b => b.normalize());
+    _findMatches = [];
+    _findIndex = -1;
+}
+
+function runFind(query) {
+    clearFindHighlights();
+    if (!query) { updateFindCount(); return; }
+    const q = query.toLowerCase();
+    document.querySelectorAll(".bubble").forEach(b => highlightInNode(b, q));
+    _findMatches = Array.from(document.querySelectorAll(".find-match"));
+    _findIndex = _findMatches.length > 0 ? 0 : -1;
+    setCurrentMatch();
+    updateFindCount();
+    if (_findIndex >= 0) scrollToMatch();
+}
+
+function highlightInNode(node, q) {
+    if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.nodeValue;
+        const lower = text.toLowerCase();
+        let idx = lower.indexOf(q);
+        if (idx === -1) return;
+        const frag = document.createDocumentFragment();
+        let cursor = 0;
+        while (idx !== -1) {
+            if (idx > cursor) frag.appendChild(document.createTextNode(text.substring(cursor, idx)));
+            const mark = document.createElement("span");
+            mark.className = "find-match";
+            mark.textContent = text.substring(idx, idx + q.length);
+            frag.appendChild(mark);
+            cursor = idx + q.length;
+            idx = lower.indexOf(q, cursor);
+        }
+        if (cursor < text.length) frag.appendChild(document.createTextNode(text.substring(cursor)));
+        node.parentNode.replaceChild(frag, node);
+    } else if (node.nodeType === Node.ELEMENT_NODE && !node.classList.contains("find-match")) {
+        Array.from(node.childNodes).forEach(c => highlightInNode(c, q));
+    }
+}
+
+function setCurrentMatch() {
+    _findMatches.forEach((m, i) => m.classList.toggle("current", i === _findIndex));
+}
+
+function updateFindCount() {
+    document.getElementById("find-count").textContent =
+        _findMatches.length === 0 ? "0/0" : `${_findIndex + 1}/${_findMatches.length}`;
+}
+
+function scrollToMatch() {
+    if (_findIndex < 0) return;
+    _findMatches[_findIndex].scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+function findNext() {
+    if (_findMatches.length === 0) return;
+    _findIndex = (_findIndex + 1) % _findMatches.length;
+    setCurrentMatch();
+    updateFindCount();
+    scrollToMatch();
+}
+
+function findPrev() {
+    if (_findMatches.length === 0) return;
+    _findIndex = (_findIndex - 1 + _findMatches.length) % _findMatches.length;
+    setCurrentMatch();
+    updateFindCount();
+    scrollToMatch();
+}
+
+document.getElementById("find-input").addEventListener("input", e => runFind(e.target.value));
+document.getElementById("find-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+        e.preventDefault();
+        if (e.shiftKey) findPrev();
+        else findNext();
+    }
+});
 
 // ── Diff viewer ───────────────────────────────────────────────
 function openDiffModal() {

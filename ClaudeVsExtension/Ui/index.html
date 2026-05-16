@@ -158,6 +158,13 @@
         </div>
 
         <div class="content">
+            <div id="find-bar" class="find-bar">
+                <input type="text" id="find-input" placeholder="Find in chat…" />
+                <span id="find-count" class="find-count">0/0</span>
+                <button class="find-btn" onclick="findPrev()" title="Previous (Shift+Enter)">▲</button>
+                <button class="find-btn" onclick="findNext()" title="Next (Enter)">▼</button>
+                <button class="find-btn" onclick="closeFindBar()" title="Close (Esc)">✕</button>
+            </div>
             <button class="scroll-bottom" id="btn-scroll-bottom" title="Scroll to bottom" onclick="scrollToBottom()">↓</button>
             <div id="messages" class="messages">
 
