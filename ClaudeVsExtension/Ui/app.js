@@ -384,7 +384,14 @@ textarea.addEventListener("keydown", (e) => {
         return;
     }
 
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter") {
+        if (e.shiftKey) {
+            if (sendEnterToggle.checked) return; // Shift+Enter = newline when send-on-enter is on
+            e.preventDefault();
+            sendMessage();
+            return;
+        }
+        if (!sendEnterToggle.checked) return; // Enter = newline when send-on-enter is off
         e.preventDefault();
         hideAutocomplete();
         sendMessage();
@@ -634,6 +641,25 @@ tokensToggle.checked = localStorage.getItem("showTokens") !== "false";
 function setShowTokens(checked) {
     localStorage.setItem("showTokens", checked);
 }
+
+const sendEnterToggle = document.getElementById("send-enter-toggle");
+sendEnterToggle.checked = localStorage.getItem("sendWithEnter") !== "false";
+
+function setSendWithEnter(checked) {
+    localStorage.setItem("sendWithEnter", checked);
+}
+
+// Ctrl+Scroll to resize textarea font
+let composerFontSize = parseFloat(localStorage.getItem("composerFontSize") || "13");
+textarea.style.fontSize = composerFontSize + "px";
+
+textarea.addEventListener("wheel", e => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    composerFontSize = Math.max(10, Math.min(24, composerFontSize + (e.deltaY < 0 ? 1 : -1)));
+    textarea.style.fontSize = composerFontSize + "px";
+    localStorage.setItem("composerFontSize", composerFontSize);
+}, { passive: false });
 
 let timeUnit = localStorage.getItem("timeUnit") || "s";
 (function () {

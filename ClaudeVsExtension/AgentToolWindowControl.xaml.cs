@@ -135,8 +135,8 @@ public partial class AgentToolWindowControl : UserControl
             if (request.Type == "unfocus")
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
-                dte?.ActiveDocument?.Activate();
+                var dteUnfocus = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+                dteUnfocus?.ActiveDocument?.Activate();
                 return;
             }
 
@@ -247,15 +247,46 @@ public partial class AgentToolWindowControl : UserControl
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
         var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
-        var selection = dte?.ActiveDocument?.Selection as EnvDTE.TextSelection;
-        var text = selection?.Text;
+        var doc = dte?.ActiveDocument;
+        var selection = doc?.Selection as EnvDTE.TextSelection;
+        var code = selection?.Text;
 
-        if (string.IsNullOrWhiteSpace(text))
+        if (string.IsNullOrWhiteSpace(code))
             return;
+
+        var filePath = doc?.FullName ?? "";
+        var startLine = selection?.TopLine ?? 0;
+        var endLine = selection?.BottomLine ?? 0;
+
+        var solutionDir = Path.GetDirectoryName(dte?.Solution?.FullName ?? "");
+        var displayPath = (!string.IsNullOrEmpty(solutionDir) && filePath.StartsWith(solutionDir, StringComparison.OrdinalIgnoreCase))
+            ? filePath.Substring(solutionDir.Length).TrimStart('\\', '/')
+            : filePath;
+
+        var lang = GetLanguageId(Path.GetExtension(filePath).ToLowerInvariant());
+        var lineInfo = startLine == endLine ? $"line {startLine}" : $"lines {startLine}-{endLine}";
+        var text = $"File: {displayPath} ({lineInfo})\n```{lang}\n{code.TrimEnd('\r', '\n')}\n```\n";
 
         var json = JsonSerializer.Serialize(new { type = "insert-text", text });
         Browser.CoreWebView2.PostWebMessageAsJson(json);
     }
+
+    private static string GetLanguageId(string ext) => ext switch
+    {
+        ".cs" => "csharp", ".vb" => "vb", ".fs" => "fsharp",
+        ".py" => "python", ".js" => "javascript", ".ts" => "typescript",
+        ".jsx" => "jsx", ".tsx" => "tsx",
+        ".java" => "java", ".kt" => "kotlin",
+        ".cpp" or ".cc" or ".cxx" => "cpp", ".c" => "c", ".h" => "c", ".hpp" => "cpp",
+        ".go" => "go", ".rs" => "rust", ".swift" => "swift",
+        ".rb" => "ruby", ".php" => "php",
+        ".html" or ".htm" => "html", ".css" => "css",
+        ".xml" or ".xaml" => "xml", ".json" => "json",
+        ".yaml" or ".yml" => "yaml", ".sql" => "sql",
+        ".sh" or ".bash" => "bash", ".ps1" or ".psm1" => "powershell",
+        ".bat" or ".cmd" => "batch", ".md" => "markdown",
+        _ => ""
+    };
 
     private static readonly string _tempDir = Path.Combine(Path.GetTempPath(), "ClaudeVsStudio");
 
