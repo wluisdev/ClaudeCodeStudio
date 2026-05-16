@@ -127,7 +127,18 @@ body {
 .settings-menu {
     min-width: 220px;
     padding: 8px 0;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #3a3a3a transparent;
 }
+.settings-menu::-webkit-scrollbar { width: 6px; }
+.settings-menu::-webkit-scrollbar-track { background: transparent; }
+.settings-menu::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
+.settings-menu::-webkit-scrollbar-thumb:hover { background: #555; }
+html.light-theme .settings-menu { scrollbar-color: #c0c0c0 transparent; }
+html.light-theme .settings-menu::-webkit-scrollbar-thumb { background: #c0c0c0; }
+html.light-theme .settings-menu::-webkit-scrollbar-thumb:hover { background: #a0a0a0; }
 
 .settings-row {
     display: flex;
@@ -1078,6 +1089,45 @@ textarea {
     box-shadow: 0 0 0 2px rgba(216, 135, 99, 0.2);
     background: #2d2020;
 }
+
+/* ── Settings input ────────────────────────────────────────── */
+.settings-input-wrap {
+    position: relative;
+    padding: 0 10px 4px;
+}
+.settings-input {
+    width: 100%;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 5px;
+    color: #ccc;
+    font-size: 11px;
+    padding: 5px 24px 5px 8px;
+    outline: none;
+    box-sizing: border-box;
+    font-family: Cascadia Code, Consolas, monospace;
+}
+.settings-input:focus { border-color: #d88763; }
+.settings-input::placeholder { color: #555; }
+.settings-input-clear {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    color: #777;
+    font-size: 11px;
+    cursor: pointer;
+    padding: 2px 6px;
+    line-height: 1;
+    margin-top: -2px;
+}
+.settings-input-clear:hover { color: #ccc; }
+html.light-theme .settings-input { background: #fff; border-color: #bbb; color: #333; }
+html.light-theme .settings-input::placeholder { color: #aaa; }
+html.light-theme .settings-input-clear { color: #999; }
+html.light-theme .settings-input-clear:hover { color: #333; }
 
 /* ── History delete button ─────────────────────────────────── */
 .history-item {

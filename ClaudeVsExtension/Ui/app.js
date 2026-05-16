@@ -533,7 +533,8 @@ function sendMessage() {
             text: fullMessage,
             model: modelSelect.value,
             effort: effortSelect.value || null,
-            permissionMode: permissionSelect.value
+            permissionMode: permissionSelect.value,
+            workingDirectory: localStorage.getItem("workingDirectory") || null
         });
     }
 }
@@ -647,6 +648,20 @@ sendEnterToggle.checked = localStorage.getItem("sendWithEnter") !== "false";
 
 function setSendWithEnter(checked) {
     localStorage.setItem("sendWithEnter", checked);
+}
+
+// Working directory
+const workingDirInput = document.getElementById("working-dir-input");
+workingDirInput.value = localStorage.getItem("workingDirectory") || "";
+
+function setWorkingDirectory(value) {
+    localStorage.setItem("workingDirectory", value.trim());
+}
+
+function clearWorkingDirectory() {
+    workingDirInput.value = "";
+    localStorage.setItem("workingDirectory", "");
+    workingDirInput.focus();
 }
 
 // Ctrl+Scroll to resize textarea font

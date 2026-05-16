@@ -39,7 +39,7 @@ try
         var effort = request.Effort;
         var permissionMode = request.PermissionMode ?? "auto";
 
-        sessionId = await StreamClaudeAsync(message, model, effort, permissionMode, sessionId);
+        sessionId = await StreamClaudeAsync(message, model, effort, permissionMode, request.WorkingDirectory, sessionId);
     }
 }
 catch (Exception ex)
@@ -54,7 +54,7 @@ static void EmitTiming(string label, long ms)
     Console.Out.Flush();
 }
 
-static async Task<string?> StreamClaudeAsync(string message, string model, string? effort, string permissionMode, string? sessionId)
+static async Task<string?> StreamClaudeAsync(string message, string model, string? effort, string permissionMode, string? workingDirectory, string? sessionId)
 {
     var sw = Stopwatch.StartNew();
     string? newSessionId = null;
@@ -73,6 +73,9 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
         UseShellExecute = false,
         CreateNoWindow = true
     };
+
+    if (!string.IsNullOrEmpty(workingDirectory) && Directory.Exists(workingDirectory))
+        psi.WorkingDirectory = workingDirectory;
 
     psi.ArgumentList.Add("--output-format");
     psi.ArgumentList.Add("stream-json");

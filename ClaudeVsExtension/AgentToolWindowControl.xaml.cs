@@ -16,6 +16,8 @@ namespace ClaudeVsExtension;
 public partial class AgentToolWindowControl : UserControl
 {
     private readonly AgentClient _agentClient = new();
+    private bool _initialized;
+    private string? _lastWorkingDir;
 
     public AgentToolWindowControl()
     {
@@ -23,8 +25,17 @@ public partial class AgentToolWindowControl : UserControl
 
         Loaded += AgentToolWindowControl_Loaded;
         Unloaded += AgentToolWindowControl_Unloaded;
+        IsVisibleChanged += AgentToolWindowControl_IsVisibleChanged;
 
         AgentToolWindowCommand.ActiveControl = this;
+    }
+
+    private void AgentToolWindowControl_IsVisibleChanged(
+        object sender,
+        System.Windows.DependencyPropertyChangedEventArgs e)
+    {
+        if ((bool)e.NewValue && Browser?.CoreWebView2 != null)
+            FocusTextarea();
     }
 
     public void FocusTextarea()
@@ -38,6 +49,9 @@ public partial class AgentToolWindowControl : UserControl
         object sender,
         System.Windows.RoutedEventArgs e)
     {
+        if (_initialized) return;
+        _initialized = true;
+
         var userDataFolder = System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "ClaudeVsStudio",
@@ -74,11 +88,10 @@ public partial class AgentToolWindowControl : UserControl
         };
     }
 
-    private async void AgentToolWindowControl_Unloaded(
+    private void AgentToolWindowControl_Unloaded(
         object sender,
         System.Windows.RoutedEventArgs e)
     {
-        await _agentClient.StopAsync();
     }
 
     private async void CoreWebView2_WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -91,6 +104,18 @@ public partial class AgentToolWindowControl : UserControl
 
             if (request == null)
                 return;
+
+            string? currentSolutionDir = null;
+#pragma warning disable VSTHRD010
+            try
+            {
+                var dteForCwd = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+                var solutionPath = dteForCwd?.Solution?.FullName;
+                if (!string.IsNullOrEmpty(solutionPath))
+                    currentSolutionDir = Path.GetDirectoryName(solutionPath);
+            }
+            catch { }
+#pragma warning restore VSTHRD010
 
             if (request.Type == "clear")
             {
@@ -174,6 +199,16 @@ public partial class AgentToolWindowControl : UserControl
             if (string.IsNullOrWhiteSpace(request.Text))
                 return;
 
+            var workingDir = (!string.IsNullOrEmpty(request.WorkingDirectory) && Directory.Exists(request.WorkingDirectory))
+                ? request.WorkingDirectory
+                : currentSolutionDir;
+
+            if (!string.Equals(workingDir, _lastWorkingDir, StringComparison.OrdinalIgnoreCase))
+            {
+                await _agentClient.StopAsync();
+                _lastWorkingDir = workingDir;
+            }
+
             await _agentClient.StartAsync();
 
             var dispatcher = System.Windows.Application.Current.Dispatcher;
@@ -187,7 +222,8 @@ public partial class AgentToolWindowControl : UserControl
                         JsonSerializer.Serialize(new { type = "timing", text = timing }))),
                 tokens => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = "tokens", text = tokens }))));
+                        JsonSerializer.Serialize(new { type = "tokens", text = tokens }))),
+                workingDirectory: workingDir);
 
             dispatcher.Invoke(() =>
             {
@@ -544,5 +580,8 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("data")]
         public string? Data { get; set; }
+
+        [JsonPropertyName("workingDirectory")]
+        public string? WorkingDirectory { get; set; }
     }
 }

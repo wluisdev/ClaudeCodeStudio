@@ -65,7 +65,7 @@ public class AgentClient
         }
     }
 
-    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null)
+    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null)
     {
         var resumeId = PendingResumeSessionId;
         PendingResumeSessionId = null;
@@ -76,7 +76,8 @@ public class AgentClient
             Model = model,
             Effort = effort,
             PermissionMode = permissionMode,
-            ResumeSessionId = resumeId
+            ResumeSessionId = resumeId,
+            WorkingDirectory = workingDirectory
         };
         var json = JsonSerializer.Serialize(request);
 

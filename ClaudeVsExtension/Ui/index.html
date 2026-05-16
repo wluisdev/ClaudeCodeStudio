@@ -99,6 +99,14 @@
                             </div>
                         </div>
                         <div class="cmd-divider"></div>
+                        <div class="settings-row">
+                            <span class="settings-label">Working directory</span>
+                        </div>
+                        <div class="settings-input-wrap">
+                            <input type="text" id="working-dir-input" class="settings-input" placeholder="Auto (solution directory)" oninput="setWorkingDirectory(this.value)" />
+                            <button type="button" class="settings-input-clear" title="Clear" onclick="clearWorkingDirectory()">✕</button>
+                        </div>
+
                         <div class="about-section">
                             <div class="about-name"><span class="logo">✺</span> Claude VS</div>
                             <div class="about-meta">v— · wluisdev</div>

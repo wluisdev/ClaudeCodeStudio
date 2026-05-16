@@ -8,6 +8,7 @@ public class ChatRequest
     public string PermissionMode { get; set; } = "auto";
     public bool ResetSession { get; set; }
     public string? ResumeSessionId { get; set; }
+    public string? WorkingDirectory { get; set; }
 }
 
 public class ChatChunk
