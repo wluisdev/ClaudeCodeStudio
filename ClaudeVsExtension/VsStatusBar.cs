@@ -13,6 +13,7 @@ internal static class VsStatusBar
 
 #pragma warning disable VSTHRD010
     public static void ShowThinking() => Post("⟳ Claude thinking…");
+    public static void SetText(string text) => Post(text);
 #pragma warning restore VSTHRD010
 
     public static void Clear()

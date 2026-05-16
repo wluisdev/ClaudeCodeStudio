@@ -235,6 +235,22 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "set-caption")
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                var pkg = ClaudeVsExtensionPackage.Instance;
+                var pane = pkg?.FindToolWindow(typeof(AgentToolWindow), 0, false) as AgentToolWindow;
+                if (pane != null && !string.IsNullOrEmpty(request.Text))
+                    pane.Caption = request.Text;
+                return;
+            }
+
+            if (request.Type == "export-markdown")
+            {
+                await HandleExportMarkdownAsync(request.Content);
+                return;
+            }
+
             if (request.Type == "add-file")
             {
                 await HandleAddFileAsync();
@@ -356,6 +372,40 @@ public partial class AgentToolWindowControl : UserControl
             ".exe", ".dll", ".bin", ".dat", ".pdb",
             ".mp3", ".mp4", ".wav", ".avi", ".mov"
         };
+
+    private async Task HandleExportMarkdownAsync(string? content)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        if (string.IsNullOrEmpty(content))
+        {
+            VsStatusBar.SetText("Nothing to export — chat is empty.");
+            return;
+        }
+
+        var ts = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Export chat to Markdown",
+            Filter = "Markdown (*.md)|*.md|All files (*.*)|*.*",
+            FileName = $"claude-chat-{ts}.md",
+            DefaultExt = ".md",
+            AddExtension = true
+        };
+
+        if (dialog.ShowDialog() != true)
+            return;
+
+        try
+        {
+            File.WriteAllText(dialog.FileName, content);
+            VsStatusBar.SetText($"Chat exported to {dialog.FileName}");
+        }
+        catch (Exception ex)
+        {
+            VsStatusBar.SetText($"Export failed: {ex.Message}");
+        }
+    }
 
     private async Task HandleAddFileAsync()
     {
@@ -805,5 +855,8 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("block")]
         public bool Block { get; set; }
+
+        [JsonPropertyName("content")]
+        public string? Content { get; set; }
     }
 }

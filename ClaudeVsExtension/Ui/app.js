@@ -156,6 +156,40 @@ function toggleCmdMenu() {
     menu.classList.toggle("open");
 }
 
+function exportChatToMarkdown() {
+    document.getElementById("cmd-menu").classList.remove("open");
+    const messagesEl = document.getElementById("messages");
+    const items = messagesEl.querySelectorAll(".message");
+    if (items.length === 0) {
+        window.chrome.webview.postMessage({ type: "export-markdown", content: "", empty: true });
+        return;
+    }
+
+    const modelLabel = modelSelect.options[modelSelect.selectedIndex]?.text || modelSelect.value;
+    const now = new Date();
+    const pad = n => String(n).padStart(2, "0");
+    const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+    let md = `# Claude VS — Chat Export\n\n_Exported ${ts}_\n_Model: ${modelLabel}_\n\n---\n\n`;
+    let lastRole = null;
+    for (const msg of items) {
+        const bubble = msg.querySelector(".bubble");
+        if (!bubble) continue;
+        const isUser = msg.classList.contains("user");
+        const isAssistant = msg.classList.contains("assistant");
+        if (!isUser && !isAssistant) continue;
+        const role = isUser ? "You" : "Claude";
+        const raw = bubble.dataset.raw;
+        let text = (raw && raw.length > 0) ? raw : (bubble.textContent || "").trim();
+        if (!text) continue;
+        if (lastRole !== null) md += "\n---\n\n";
+        md += `## ${role}\n\n${text.trim()}\n\n`;
+        lastRole = role;
+    }
+
+    window.chrome.webview.postMessage({ type: "export-markdown", content: md });
+}
+
 let isUsageCapture = false;
 let usageBuffer = "";
 let sessionIn = 0;
@@ -229,6 +263,16 @@ const textarea = document.querySelector("textarea");
 const sendButton = null; // replaced by btnSend with streaming toggle
 const newChatButton = document.querySelector(".new-chat");
 const modelSelect = document.querySelector(".model-select");
+
+function updateCaption() {
+    const label = modelSelect.options[modelSelect.selectedIndex]?.text || modelSelect.value;
+    try {
+        window.chrome.webview.postMessage({ type: "set-caption", text: `Claude VS — ${label}` });
+    } catch (e) { /* webview not ready yet */ }
+}
+modelSelect.addEventListener("change", updateCaption);
+window.addEventListener("DOMContentLoaded", updateCaption);
+updateCaption();
 const effortSlider = document.getElementById("effort-slider");
 const effortLabel = document.getElementById("effort-label");
 const effortValues = ["", "low", "medium", "high", "max"];
@@ -502,8 +546,9 @@ function showModelPicker() {
 function selectModel(id, card) {
     modelSelect.value = id;
     const label = modelSelect.options[modelSelect.selectedIndex]?.text || id;
-    card.innerHTML = `<div class="question-text">🤖 Modelo: <strong>${escapeHtml(label)}</strong></div>`;
+    card.innerHTML = `<div class="question-text">🤖 Model: <strong>${escapeHtml(label)}</strong></div>`;
     card.classList.add("question-answered");
+    updateCaption();
 }
 
 // ── Drag & drop ───────────────────────────────────────────────
