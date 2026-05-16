@@ -1,9 +1,9 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="ClaudeVsExtension.8a6dcdda-70c0-43d0-af04-1e6a25bca67f" Version="1.0" Language="en-US" Publisher="ClaudeVsExtension" />
-    <DisplayName>ClaudeVsExtension</DisplayName>
-    <Description>Empty VSIX Project.</Description>
+    <Identity Id="ClaudeVsExtension.8a6dcdda-70c0-43d0-af04-1e6a25bca67f" Version="1.0" Language="en-US" Publisher="wluisdev" />
+    <DisplayName>Claude VS</DisplayName>
+    <Description>Claude Code integration for Visual Studio 2022 — chat interface powered by WebView2 with streaming responses, session history, and file attachments.</Description>
   </Metadata>
   <Installation>
     <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.14, )">

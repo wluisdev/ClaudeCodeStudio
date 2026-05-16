@@ -566,6 +566,7 @@ body {
     border-radius: 6px;
     cursor: pointer;
     outline: none;
+    height: 34px;
 }
 
 .model-select:hover,
@@ -615,7 +616,7 @@ body {
 }
 
 .notice {
-    padding: 8px 16px;
+    padding: 3px 6px;
     font-size: 13px;
     border-top: 1px solid #333;
     color: #ccc;
@@ -788,6 +789,7 @@ textarea {
     border-radius: 6px;
     cursor: pointer;
     outline: none;
+    height: 34px;
 }
 
 .permission-select:hover {
@@ -867,22 +869,17 @@ textarea {
 }
 .assistant .bubble li { margin-bottom: 2px; }
 .assistant .bubble pre {
-    background: #1a1a1a;
     border: 1px solid #333;
     border-radius: 6px;
-    padding: 10px 12px;
     overflow-x: auto;
     margin: 6px 0;
-}
-.assistant .bubble code {
-    font-family: Cascadia Code, Consolas, monospace;
     font-size: 12px;
+    white-space: pre;
 }
 .assistant .bubble pre code {
-    background: none;
-    padding: 0;
-    color: #ccc;
-    display: block;
+    font-family: Cascadia Code, Consolas, monospace;
+    font-size: 12px;
+    white-space: pre;
 }
 .assistant .bubble :not(pre) > code {
     background: #1e1e1e;

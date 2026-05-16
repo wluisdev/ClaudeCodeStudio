@@ -234,8 +234,9 @@ btnSend.addEventListener("click", () => {
         removeLoading();
         if (currentStreamBubble) {
             const raw = currentStreamBubble.dataset.raw || "";
-            currentStreamBubble.innerHTML = (raw ? renderMarkdown(raw) + "<br>" : "") +
-                '<span class="cancelled">⊘ cancelled</span>';
+            applyMarkdown(currentStreamBubble, raw);
+            if (raw) currentStreamBubble.innerHTML += "<br>";
+            currentStreamBubble.innerHTML += '<span class="cancelled">⊘ cancelled</span>';
             currentStreamBubble = null;
         } else {
             const msg = document.createElement("div");
@@ -554,7 +555,7 @@ window.chrome.webview.addEventListener("message", event => {
         }
         if (currentStreamBubble) {
             const raw = currentStreamBubble.dataset.raw || "";
-            currentStreamBubble.innerHTML = renderMarkdown(raw);
+            applyMarkdown(currentStreamBubble, raw);
             currentStreamBubble = null;
         }
         setStreaming(false);
@@ -615,12 +616,24 @@ function appendTiming(text) {
     autoScroll();
 }
 
+function applyMarkdown(bubble, raw) {
+    bubble.innerHTML = renderMarkdown(raw);
+    bubble.querySelectorAll("pre code").forEach(el => {
+        if (typeof hljs !== "undefined") hljs.highlightElement(el);
+    });
+}
+
+function escapeHtmlRaw(text) {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function renderMarkdown(raw) {
     // Protect fenced code blocks
     const blocks = [];
     let text = raw.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
         const i = blocks.length;
-        blocks.push(`<pre><code>${escapeHtml(code.trimEnd())}</code></pre>`);
+        const cls = lang ? ` class="language-${lang}"` : '';
+        blocks.push(`<pre><code${cls}>${escapeHtmlRaw(code.trimEnd())}</code></pre>`);
         return `\x00B${i}\x00`;
     });
 
@@ -661,7 +674,7 @@ function renderMarkdown(raw) {
     text = text.split(/\n{2,}/).map(block => {
         block = block.trim();
         if (!block) return '';
-        if (/^<(h[1-3]|ul|ol|pre|\x00B)/.test(block)) return block;
+        if (/^(<(h[1-3]|ul|ol|pre)|\x00B)/.test(block)) return block;
         return `<p>${block.replace(/\n/g, '<br>')}</p>`;
     }).join('');
 

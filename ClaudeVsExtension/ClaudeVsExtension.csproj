@@ -15,6 +15,8 @@
     <None Remove="Ui\app.js" />
     <None Remove="Ui\index.html" />
     <None Remove="Ui\styles.css" />
+    <None Remove="Ui\highlight.min.js" />
+    <None Remove="Ui\highlight.css" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Ui\app.js">
@@ -24,6 +26,12 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Ui\styles.css">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Ui\highlight.min.js">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Ui\highlight.css">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
