@@ -127,6 +127,7 @@ public partial class AgentToolWindowControl : UserControl
 
             if (request.Type == "clear")
             {
+                OutputLog.Info("ui: clear");
                 await _agentClient.StopAsync();
                 _sessionStart = DateTime.Now;
                 return;
@@ -160,6 +161,7 @@ public partial class AgentToolWindowControl : UserControl
 
             if (request.Type == "cancel")
             {
+                OutputLog.Info("ui: cancel");
                 _agentClient.CancelCurrent();
                 VsStatusBar.Clear();
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
@@ -176,6 +178,7 @@ public partial class AgentToolWindowControl : UserControl
 
             if (request.Type == "resume-session")
             {
+                OutputLog.Info($"ui: resume session {request.SessionId}");
                 await _agentClient.StopAsync();
                 _agentClient.PendingResumeSessionId = request.SessionId;
                 return;
@@ -318,6 +321,7 @@ public partial class AgentToolWindowControl : UserControl
 
             if (!string.Equals(workingDir, _lastWorkingDir, StringComparison.OrdinalIgnoreCase))
             {
+                OutputLog.Info($"working dir changed: {_lastWorkingDir ?? "-"} → {workingDir ?? "-"} (restarting agent)");
                 await _agentClient.StopAsync();
                 _lastWorkingDir = workingDir;
             }
@@ -353,6 +357,7 @@ public partial class AgentToolWindowControl : UserControl
         }
         catch (Exception ex)
         {
+            OutputLog.Error($"unhandled in WebMessageReceived: {ex}");
             VsStatusBar.Clear();
             var responseJson = JsonSerializer.Serialize(new
             {

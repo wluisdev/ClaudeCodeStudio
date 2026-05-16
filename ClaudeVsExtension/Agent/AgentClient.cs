@@ -20,7 +20,11 @@ public class AgentClient
 
     public string? PendingResumeSessionId { get; set; }
 
-    public void CancelCurrent() => _cancelTcs?.TrySetResult(true);
+    public void CancelCurrent()
+    {
+        OutputLog.Info("request cancel requested");
+        _cancelTcs?.TrySetResult(true);
+    }
 
     public async Task StartAsync()
     {
@@ -28,6 +32,7 @@ public class AgentClient
             return;
 
         var agentPath = GetAgentPath();
+        OutputLog.Info($"starting agent: {agentPath}");
 
         _process = new Process
         {
@@ -47,7 +52,14 @@ public class AgentClient
             }
         };
 
+        _process.ErrorDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(e.Data))
+                OutputLog.Warn($"agent stderr: {e.Data}");
+        };
+
         _process.Start();
+        _process.BeginErrorReadLine();
 
         _writer = _process.StandardInput;
         _reader = _process.StandardOutput;
@@ -56,13 +68,13 @@ public class AgentClient
 
         if (ready != "READY")
         {
-            var error = await _process.StandardError.ReadToEndAsync();
-
+            OutputLog.Error($"agent failed to signal READY (got: {ready ?? "NULL"})");
             throw new Exception(
                 $"ClaudeVsAgent failed to start.\n" +
-                $"Response: {ready ?? "NULL"}\n" +
-                $"Error: {error}");
+                $"Response: {ready ?? "NULL"}");
         }
+
+        OutputLog.Info($"agent started (pid {_process.Id})");
     }
 
     public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false)
@@ -81,6 +93,8 @@ public class AgentClient
             AutoResume = autoResume
         };
         var json = JsonSerializer.Serialize(request);
+
+        OutputLog.Info($"request → model={model} effort={effort ?? "-"} perm={permissionMode} cwd={workingDirectory ?? "-"} resume={resumeId ?? "-"} autoResume={autoResume} bytes={message?.Length ?? 0}");
 
         await _writer!.WriteLineAsync(json);
         await _writer.FlushAsync();
@@ -102,25 +116,32 @@ public class AgentClient
 
             if (chunk == null) continue;
 
-            if (chunk.Type == "done") break;
+            if (chunk.Type == "done")
+            {
+                OutputLog.Info(cancelled ? "request done (after cancel)" : "request done");
+                break;
+            }
 
             // Drain silently after cancel — don't forward any callbacks
             if (cancelled) continue;
 
             if (chunk.Type == "timing")
             {
+                OutputLog.Info($"timing: {chunk.Text}");
                 onTiming?.Invoke(chunk.Text);
                 continue;
             }
 
             if (chunk.Type == "tokens")
             {
+                OutputLog.Info($"tokens: {chunk.Text}");
                 onTokens?.Invoke(chunk.Text);
                 continue;
             }
 
             if (chunk.Type == "error")
             {
+                OutputLog.Error($"agent error: {chunk.Text}");
                 if (!string.IsNullOrEmpty(chunk.Text))
                     onChunk(chunk.Text);
                 break;
@@ -138,6 +159,9 @@ public class AgentClient
         if (_process == null)
             return;
 
+        var pid = _process.Id;
+        OutputLog.Info($"stopping agent (pid {pid})");
+
         try
         {
             if (!_process.HasExited)
@@ -149,6 +173,7 @@ public class AgentClient
 
                 if (!exited && !_process.HasExited)
                 {
+                    OutputLog.Warn($"agent (pid {pid}) didn't exit in 2s, killing");
                     _process.Kill();
                     _process.WaitForExit();
                 }
@@ -163,6 +188,7 @@ public class AgentClient
             _reader = null;
             _writer = null;
             _process = null;
+            OutputLog.Info($"agent (pid {pid}) stopped");
         }
     }
 
