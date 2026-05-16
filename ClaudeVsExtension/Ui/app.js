@@ -434,7 +434,7 @@ function showModelPicker() {
     const current = modelSelect.value;
     const card = document.createElement("div");
     card.className = "question-card";
-    card.innerHTML = `<div class="question-text">🤖 Escolha o modelo:</div>
+    card.innerHTML = `<div class="question-text">🤖 Choose the model:</div>
         <div class="question-buttons" style="flex-wrap:wrap;gap:6px">
         ${modelList.map(m =>
             `<button class="q-btn${m.id === current ? " q-yes" : ""}" onclick="selectModel('${m.id}',this.closest('.question-card'))">${escapeHtml(m.label)}</button>`
@@ -493,7 +493,7 @@ function handleDroppedFile(file) {
 }
 
 // ── Clipboard paste (Ctrl+V) ─────────────────────────────────
-// Sempre roteia pelo C# — ele decide se é arquivo, imagem ou texto
+// Always routes through C# — it decides whether it's a file, image, or text
 textarea.addEventListener("paste", e => {
     e.preventDefault();
     window.chrome.webview.postMessage({ type: "get-clipboard-files" });
@@ -532,7 +532,7 @@ function sendMessage() {
     if (filePaths.length > 0)
         fullMessage += "\n\nFiles attached:\n" + filePaths.map(p => `  - ${p}`).join("\n");
 
-    // Fecha cards pendentes não confirmados
+    // Close pending unconfirmed cards
     for (const [id, att] of attachments) {
         if (!att.includeFile) {
             const card = document.getElementById(`q-card-${id}`);
@@ -693,8 +693,8 @@ function setShowTokenEstimate(checked) {
 
 function estimateTokens(text) {
     if (!text) return 0;
-    // Heurística: se predominantemente código (símbolos/whitespace alto), usa /3.5;
-    // senão texto natural, usa /5
+    // Heuristic: if predominantly code (high symbol/whitespace ratio), use /3.5;
+    // otherwise natural text, use /5
     const codeLike = (text.match(/[{}\[\]<>()=;:\/\\|@#$%^&*+\-_`"']/g) || []).length;
     const ratio = codeLike / text.length;
     const divisor = ratio > 0.08 ? 3.5 : 5;
@@ -1026,7 +1026,7 @@ function addAttachment(filename, content, isBinary, filePath) {
     const ext = filename.split(".").pop().toLowerCase();
     const isImage = imageExts.includes(ext);
 
-    const displayName = isImage ? `imagem${++imageCounter}.${ext}` : filename;
+    const displayName = isImage ? `image${++imageCounter}.${ext}` : filename;
 
     const id = attachmentIdCounter++;
     attachments.set(id, { displayName, content: isBinary ? null : content, filePath: filePath || null, includeFile: false });
@@ -1061,7 +1061,7 @@ function showFileQuestion(id, displayName) {
     card.className = "question-card";
     card.id = `q-card-${id}`;
     card.innerHTML = `
-<div class="question-text">📎 <strong>${escapeHtml(displayName)}</strong> — Deseja que o Claude leia este arquivo?</div>
+<div class="question-text">📎 <strong>${escapeHtml(displayName)}</strong> — Do you want Claude to read this file?</div>
 <div class="question-buttons">
 <button class="q-btn q-yes" onclick="confirmFile(${id}, true)">Yes</button>
 <button class="q-btn q-no" onclick="confirmFile(${id}, false)">No</button>

@@ -363,8 +363,8 @@ public partial class AgentToolWindowControl : UserControl
 
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Selecionar arquivo",
-            Filter = "Todos os arquivos (*.*)|*.*|Arquivos de texto|*.txt;*.cs;*.js;*.ts;*.html;*.css;*.json;*.xml;*.md;*.py;*.cpp;*.h"
+            Title = "Select file",
+            Filter = "All files (*.*)|*.*|Text files|*.txt;*.cs;*.js;*.ts;*.html;*.css;*.json;*.xml;*.md;*.py;*.cpp;*.h"
         };
 
         if (dialog.ShowDialog() != true)
@@ -536,7 +536,7 @@ public partial class AgentToolWindowControl : UserControl
 
         var dispatcher = System.Windows.Application.Current.Dispatcher;
 
-        // Arquivos copiados do Explorer
+        // Files copied from Explorer
         if (System.Windows.Clipboard.ContainsFileDropList())
         {
             var files = System.Windows.Clipboard.GetFileDropList();
@@ -553,14 +553,14 @@ public partial class AgentToolWindowControl : UserControl
             return;
         }
 
-        // Imagem
+        // Image
         if (System.Windows.Clipboard.ContainsImage())
         {
             await HandleGetClipboardImageAsync();
             return;
         }
 
-        // Texto
+        // Text
         if (System.Windows.Clipboard.ContainsText())
         {
             var text = System.Windows.Clipboard.GetText();

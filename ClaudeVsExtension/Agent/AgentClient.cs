@@ -59,9 +59,9 @@ public class AgentClient
             var error = await _process.StandardError.ReadToEndAsync();
 
             throw new Exception(
-                $"ClaudeVsAgent falhou ao iniciar.\n" +
-                $"Resposta: {ready ?? "NULL"}\n" +
-                $"Erro: {error}");
+                $"ClaudeVsAgent failed to start.\n" +
+                $"Response: {ready ?? "NULL"}\n" +
+                $"Error: {error}");
         }
     }
 
@@ -180,7 +180,7 @@ public class AgentClient
             return agentPath;
 
         throw new FileNotFoundException(
-            $"ClaudeVsAgent.exe não encontrado em: {agentPath}");
+            $"ClaudeVsAgent.exe not found at: {agentPath}");
     }
 
     //private static string GetAgentPath()
@@ -213,6 +213,6 @@ public class AgentClient
     //    }
 
     //    throw new FileNotFoundException(
-    //        "ClaudeVsAgent.exe não encontrado. Compile o projeto ClaudeVsAgent primeiro.");
+    //        "ClaudeVsAgent.exe not found. Build the ClaudeVsAgent project first.");
     //}
 }

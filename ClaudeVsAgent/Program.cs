@@ -91,9 +91,9 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
     }
     else if (permissionMode == "ask")
     {
-        // sem flag extra — comportamento padrão do claude
+        // no extra flag — default claude behavior
     }
-    else // "yolo" (padrão)
+    else // "yolo" (default)
     {
         psi.ArgumentList.Add("--dangerously-skip-permissions");
     }
@@ -118,7 +118,7 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
 
     if (process == null)
     {
-        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = "Não foi possível iniciar Claude." }));
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = "Could not start Claude." }));
         Console.Out.Flush();
         return sessionId;
     }
@@ -240,6 +240,6 @@ static string FindClaude()
             return path;
 
     throw new FileNotFoundException(
-        "claude.exe não encontrado. Verifique se o Claude Code está instalado e no PATH.");
+        "claude.exe not found. Verify that Claude Code is installed and on PATH.");
 }
 
