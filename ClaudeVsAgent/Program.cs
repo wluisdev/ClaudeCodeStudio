@@ -80,6 +80,7 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
     psi.ArgumentList.Add("--output-format");
     psi.ArgumentList.Add("stream-json");
     psi.ArgumentList.Add("--verbose");
+    psi.ArgumentList.Add("--include-partial-messages");
     psi.ArgumentList.Add("-p");
     psi.ArgumentList.Add(message);
     psi.ArgumentList.Add("--model");
@@ -166,43 +167,83 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
                     Console.Out.Flush();
                 }
 
+                // Text content is emitted incrementally via stream_event deltas
+                // (see --include-partial-messages). Only tool_use is parsed here
+                // because the final assistant event carries the fully-resolved input JSON.
                 var content = msgObj.GetProperty("content");
                 foreach (var item in content.EnumerateArray())
                 {
                     if (!item.TryGetProperty("type", out var itemType)) continue;
-                    var itemTypeStr = itemType.GetString();
+                    if (itemType.GetString() != "tool_use") continue;
 
-                    if (itemTypeStr == "text" && item.TryGetProperty("text", out var textProp))
-                    {
-                        var text = textProp.GetString();
-                        if (!string.IsNullOrEmpty(text))
-                        {
-                            if (firstChunk)
-                            {
-                                EmitTiming("first chunk", sw.ElapsedMilliseconds);
-                                firstChunk = false;
-                            }
-                            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "chunk", Text = text }));
-                            Console.Out.Flush();
-                        }
-                    }
-                    else if (itemTypeStr == "tool_use")
-                    {
-                        var name = item.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
-                        var id = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
-                        string? inputJson = null;
-                        if (item.TryGetProperty("input", out var inputProp))
-                            inputJson = inputProp.GetRawText();
+                    var name = item.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
+                    var id = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+                    string? inputJson = null;
+                    if (item.TryGetProperty("input", out var inputProp))
+                        inputJson = inputProp.GetRawText();
 
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
-                        {
-                            Type = "tool_use",
-                            Tool = name,
-                            ToolInput = inputJson,
-                            ToolId = id
-                        }));
-                        Console.Out.Flush();
+                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+                    {
+                        Type = "tool_use",
+                        Tool = name,
+                        ToolInput = inputJson,
+                        ToolId = id
+                    }));
+                    Console.Out.Flush();
+                }
+            }
+            else if (type == "stream_event")
+            {
+                if (!evt.TryGetProperty("event", out var streamEvt)) continue;
+                if (!streamEvt.TryGetProperty("type", out var evtType)) continue;
+                var evtTypeStr = evtType.GetString();
+
+                if (evtTypeStr == "content_block_delta")
+                {
+                    if (!streamEvt.TryGetProperty("delta", out var delta)) continue;
+                    if (!delta.TryGetProperty("type", out var deltaType)) continue;
+                    if (deltaType.GetString() != "text_delta") continue;
+                    if (!delta.TryGetProperty("text", out var deltaText)) continue;
+
+                    var text = deltaText.GetString();
+                    if (string.IsNullOrEmpty(text)) continue;
+
+                    if (firstChunk)
+                    {
+                        EmitTiming("first chunk", sw.ElapsedMilliseconds);
+                        firstChunk = false;
                     }
+                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "chunk", Text = text }));
+                    Console.Out.Flush();
+                }
+                else if (evtTypeStr == "message_delta")
+                {
+                    if (!streamEvt.TryGetProperty("usage", out var deltaUsage)) continue;
+                    var inTok = deltaUsage.TryGetProperty("input_tokens", out var iD) ? iD.GetInt32() : 0;
+                    var outTok = deltaUsage.TryGetProperty("output_tokens", out var oD) ? oD.GetInt32() : 0;
+                    var cacheRead = deltaUsage.TryGetProperty("cache_read_input_tokens", out var crD) ? crD.GetInt32() : 0;
+                    var cacheCreate = deltaUsage.TryGetProperty("cache_creation_input_tokens", out var ccD) ? ccD.GetInt32() : 0;
+                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+                    {
+                        Type = "tokens-live",
+                        Text = $"{inTok + cacheCreate}/{outTok}/{cacheRead}"
+                    }));
+                    Console.Out.Flush();
+                }
+                else if (evtTypeStr == "message_start")
+                {
+                    if (!streamEvt.TryGetProperty("message", out var startMsg)) continue;
+                    if (!startMsg.TryGetProperty("usage", out var startUsage)) continue;
+                    var inTok = startUsage.TryGetProperty("input_tokens", out var iS) ? iS.GetInt32() : 0;
+                    var outTok = startUsage.TryGetProperty("output_tokens", out var oS) ? oS.GetInt32() : 0;
+                    var cacheRead = startUsage.TryGetProperty("cache_read_input_tokens", out var crS) ? crS.GetInt32() : 0;
+                    var cacheCreate = startUsage.TryGetProperty("cache_creation_input_tokens", out var ccS) ? ccS.GetInt32() : 0;
+                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+                    {
+                        Type = "tokens-live",
+                        Text = $"{inTok + cacheCreate}/{outTok}/{cacheRead}"
+                    }));
+                    Console.Out.Flush();
                 }
             }
             else if (type == "user")

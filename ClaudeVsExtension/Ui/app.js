@@ -1248,6 +1248,27 @@ function appendToolEvent(kind, name, inputJson, text, id) {
     const bubble = ensureStreamBubble();
 
     if (kind === "tool_use") {
+        // Dedupe by id — JSONL watcher may emit the same tool_use after stream-json already did
+        if (id) {
+            const existing = bubble.querySelector(`.tool-chip[data-tool-id="${CSS.escape(id)}"]`);
+            if (existing) {
+                // Refresh the arg in case the watcher has richer input
+                const arg = summarizeToolInput(name, inputJson);
+                let argEl = existing.querySelector(".tool-arg");
+                if (arg) {
+                    if (!argEl) {
+                        argEl = document.createElement("span");
+                        argEl.className = "tool-arg";
+                        existing.appendChild(argEl);
+                    }
+                    argEl.textContent = `(${arg})`;
+                }
+                if (isStreaming) ensureLiveTimer();
+                autoScroll();
+                return;
+            }
+        }
+
         finalizeActiveSeg(bubble);
         const chip = document.createElement("div");
         chip.className = "tool-chip";
@@ -1284,11 +1305,15 @@ function appendToolEvent(kind, name, inputJson, text, id) {
         if (kind === "tool_error") chip.classList.add("tool-error");
 
         if (text && text.trim()) {
-            const summary = document.createElement("div");
-            summary.className = "tool-summary";
             const firstLine = text.split(/\r?\n/)[0];
-            summary.textContent = "↳ " + (firstLine.length > 160 ? firstLine.slice(0, 160) + "…" : firstLine);
-            chip.appendChild(summary);
+            const summaryText = "↳ " + (firstLine.length > 160 ? firstLine.slice(0, 160) + "…" : firstLine);
+            let summary = chip.querySelector(".tool-summary");
+            if (!summary) {
+                summary = document.createElement("div");
+                summary.className = "tool-summary";
+                chip.appendChild(summary);
+            }
+            summary.textContent = summaryText;
         }
     }
     if (isStreaming) ensureLiveTimer();
@@ -1377,13 +1402,19 @@ function ensureLiveTimer() {
 
 function updateLiveTokens(text) {
     const parts = (text || "").split("/").map(Number);
-    _liveTokens.in = parts[0] || 0;
+    const newIn = parts[0] || 0;
     const newOut = parts[1] || 0;
-    _liveTokens.cached = parts[2] || 0;
+    const newCached = parts[2] || 0;
+    // Don't overwrite in/cached with zeros — message_delta events carry partial
+    // usage (output only); message_start carries the real input numbers.
+    if (newIn > 0) _liveTokens.in = newIn;
+    if (newCached > 0) _liveTokens.cached = newCached;
+    // Only recalibrate output when it grows. Duplicate events with the same
+    // cumulative usage would otherwise wipe out chars accumulated by
+    // bumpEstimatedOut between events.
     if (newOut > _realOutTokens) {
         _realOutTokens = newOut;
-        // Recalibrate estimate so chars added after this point still inflate it correctly
-        _estimatedOutChars = _realOutTokens * 3.7;
+        _estimatedOutChars = Math.max(_estimatedOutChars, _realOutTokens * 3.7);
     }
     _liveTokens.out = _realOutTokens;
     if (isStreaming) ensureLiveTimer();
