@@ -254,6 +254,21 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "open-mcp")
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                var pkg = ClaudeVsExtensionPackage.Instance;
+                if (pkg != null)
+                {
+                    var window = pkg.FindToolWindow(typeof(Mcp.McpToolWindow), 0, true);
+                    if (window?.Frame is IVsWindowFrame frame)
+                        Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(frame.Show());
+                    if (window?.Content is Mcp.McpToolWindowControl ctrl)
+                        ctrl.Refresh();
+                }
+                return;
+            }
+
             if (request.Type == "unfocus")
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();

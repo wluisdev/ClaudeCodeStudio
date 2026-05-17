@@ -1,0 +1,247 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
+
+namespace ClaudeVsExtension.Mcp;
+
+public enum McpScope { Project, User }
+
+public enum McpTransport { Stdio, Http, Sse }
+
+public class McpServer
+{
+    public string Name { get; set; } = "";
+    public McpTransport Transport { get; set; } = McpTransport.Stdio;
+    public string Command { get; set; } = "";
+    public List<string> Args { get; set; } = new();
+    public Dictionary<string, string> Env { get; set; } = new();
+    public string Url { get; set; } = "";
+    public Dictionary<string, string> Headers { get; set; } = new();
+
+    public McpServer Clone() => new()
+    {
+        Name = Name,
+        Transport = Transport,
+        Command = Command,
+        Args = new List<string>(Args),
+        Env = new Dictionary<string, string>(Env),
+        Url = Url,
+        Headers = new Dictionary<string, string>(Headers),
+    };
+}
+
+public static class McpConfigStore
+{
+    public static string GetPath(McpScope scope, string? projectDir)
+    {
+        if (scope == McpScope.User)
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude.json");
+        if (string.IsNullOrEmpty(projectDir))
+            throw new InvalidOperationException("Project scope requires a project directory");
+        return Path.Combine(projectDir, ".mcp.json");
+    }
+
+    public static List<McpServer> Load(McpScope scope, string? projectDir)
+    {
+        var path = GetPath(scope, projectDir);
+        if (!File.Exists(path)) return new List<McpServer>();
+
+        var text = File.ReadAllText(path);
+        if (string.IsNullOrWhiteSpace(text)) return new List<McpServer>();
+
+        using var doc = JsonDocument.Parse(text);
+        if (!doc.RootElement.TryGetProperty("mcpServers", out var serversEl) ||
+            serversEl.ValueKind != JsonValueKind.Object)
+            return new List<McpServer>();
+
+        var list = new List<McpServer>();
+        foreach (var prop in serversEl.EnumerateObject())
+            list.Add(ParseServer(prop.Name, prop.Value));
+        return list;
+    }
+
+    private static McpServer ParseServer(string name, JsonElement el)
+    {
+        var s = new McpServer { Name = name };
+
+        string? type = null;
+        if (el.TryGetProperty("type", out var typeEl) && typeEl.ValueKind == JsonValueKind.String)
+            type = typeEl.GetString();
+
+        if (el.TryGetProperty("url", out var urlEl) && urlEl.ValueKind == JsonValueKind.String)
+            s.Url = urlEl.GetString() ?? "";
+
+        bool hasUrl = !string.IsNullOrEmpty(s.Url);
+
+        if (type == "sse") s.Transport = McpTransport.Sse;
+        else if (type == "http" || type == "streamable-http" || (hasUrl && type == null)) s.Transport = McpTransport.Http;
+        else s.Transport = McpTransport.Stdio;
+
+        if (el.TryGetProperty("command", out var cmdEl) && cmdEl.ValueKind == JsonValueKind.String)
+            s.Command = cmdEl.GetString() ?? "";
+
+        if (el.TryGetProperty("args", out var argsEl) && argsEl.ValueKind == JsonValueKind.Array)
+            foreach (var a in argsEl.EnumerateArray())
+                if (a.ValueKind == JsonValueKind.String) s.Args.Add(a.GetString() ?? "");
+
+        if (el.TryGetProperty("env", out var envEl) && envEl.ValueKind == JsonValueKind.Object)
+            foreach (var p in envEl.EnumerateObject())
+                if (p.Value.ValueKind == JsonValueKind.String) s.Env[p.Name] = p.Value.GetString() ?? "";
+
+        if (el.TryGetProperty("headers", out var hdrEl) && hdrEl.ValueKind == JsonValueKind.Object)
+            foreach (var p in hdrEl.EnumerateObject())
+                if (p.Value.ValueKind == JsonValueKind.String) s.Headers[p.Name] = p.Value.GetString() ?? "";
+
+        return s;
+    }
+
+    public static void Save(McpScope scope, string? projectDir, List<McpServer> servers)
+    {
+        var path = GetPath(scope, projectDir);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+
+        if (scope == McpScope.Project)
+        {
+            WriteProjectFile(path, servers);
+        }
+        else
+        {
+            WriteUserFile(path, servers);
+        }
+    }
+
+    private static void WriteProjectFile(string path, List<McpServer> servers)
+    {
+        using var ms = new MemoryStream();
+        using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true }))
+        {
+            w.WriteStartObject();
+            w.WritePropertyName("mcpServers");
+            WriteServersObject(w, servers);
+            w.WriteEndObject();
+        }
+        AtomicWrite(path, ms.ToArray());
+    }
+
+    private static void WriteUserFile(string path, List<McpServer> servers)
+    {
+        Dictionary<string, JsonElement>? existing = null;
+        if (File.Exists(path))
+        {
+            var text = File.ReadAllText(path);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                using var doc = JsonDocument.Parse(text);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    existing = new Dictionary<string, JsonElement>();
+                    foreach (var prop in doc.RootElement.EnumerateObject())
+                        existing[prop.Name] = prop.Value.Clone();
+                }
+            }
+        }
+
+        using var ms = new MemoryStream();
+        using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true }))
+        {
+            w.WriteStartObject();
+            bool wroteServers = false;
+            if (existing != null)
+            {
+                foreach (var kv in existing)
+                {
+                    if (kv.Key == "mcpServers")
+                    {
+                        w.WritePropertyName("mcpServers");
+                        WriteServersObject(w, servers);
+                        wroteServers = true;
+                    }
+                    else
+                    {
+                        w.WritePropertyName(kv.Key);
+                        kv.Value.WriteTo(w);
+                    }
+                }
+            }
+            if (!wroteServers)
+            {
+                w.WritePropertyName("mcpServers");
+                WriteServersObject(w, servers);
+            }
+            w.WriteEndObject();
+        }
+        AtomicWrite(path, ms.ToArray());
+    }
+
+    private static void WriteServersObject(Utf8JsonWriter w, List<McpServer> servers)
+    {
+        w.WriteStartObject();
+        foreach (var s in servers)
+        {
+            w.WritePropertyName(s.Name);
+            w.WriteStartObject();
+
+            if (s.Transport == McpTransport.Stdio)
+            {
+                w.WriteString("type", "stdio");
+                w.WriteString("command", s.Command);
+                w.WriteStartArray("args");
+                foreach (var a in s.Args) w.WriteStringValue(a);
+                w.WriteEndArray();
+                if (s.Env.Count > 0)
+                {
+                    w.WriteStartObject("env");
+                    foreach (var kv in s.Env) w.WriteString(kv.Key, kv.Value);
+                    w.WriteEndObject();
+                }
+            }
+            else
+            {
+                w.WriteString("type", s.Transport == McpTransport.Sse ? "sse" : "http");
+                w.WriteString("url", s.Url);
+                if (s.Headers.Count > 0)
+                {
+                    w.WriteStartObject("headers");
+                    foreach (var kv in s.Headers) w.WriteString(kv.Key, kv.Value);
+                    w.WriteEndObject();
+                }
+            }
+
+            w.WriteEndObject();
+        }
+        w.WriteEndObject();
+    }
+
+    private static void AtomicWrite(string path, byte[] bytes)
+    {
+        var tmp = path + ".tmp";
+        File.WriteAllBytes(tmp, bytes);
+        if (File.Exists(path))
+        {
+            var bak = path + ".bak";
+            try { File.Replace(tmp, path, bak); File.Delete(bak); }
+            catch
+            {
+                File.Delete(path);
+                File.Move(tmp, path);
+            }
+        }
+        else
+        {
+            File.Move(tmp, path);
+        }
+    }
+
+    public static string ValidateName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "Name is required";
+        if (name.Length > 64) return "Name too long";
+        foreach (var c in name)
+            if (!char.IsLetterOrDigit(c) && c != '-' && c != '_')
+                return "Name can only contain letters, digits, '-' and '_'";
+        return "";
+    }
+}

@@ -1614,6 +1614,11 @@ function openUsageWindow() {
     window.chrome.webview.postMessage({ type: "open-usage" });
 }
 
+// ── Open MCP servers window ───────────────────────────────────
+function openMcpWindow() {
+    window.chrome.webview.postMessage({ type: "open-mcp" });
+}
+
 // ── Find in chat (Ctrl+F) ─────────────────────────────────────
 let _findMatches = [];
 let _findIndex = -1;

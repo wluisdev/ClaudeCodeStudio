@@ -10,12 +10,14 @@ public class SolutionEventsHandler : IVsSolutionEvents
     public int OnAfterOpenSolution(object pUnkReserved, int fNewSolution)
     {
         ResetActiveControlSession();
+        RefreshMcpControl();
         return VSConstants.S_OK;
     }
 
     public int OnAfterCloseSolution(object pUnkReserved)
     {
         ResetActiveControlSession();
+        RefreshMcpControl();
         return VSConstants.S_OK;
     }
 
@@ -28,6 +30,13 @@ public class SolutionEventsHandler : IVsSolutionEvents
         {
             await control.ResetSessionAsync();
         });
+    }
+
+    private static void RefreshMcpControl()
+    {
+        var mcp = Mcp.McpToolWindowControl.ActiveControl;
+        if (mcp == null) return;
+        mcp.Dispatcher.BeginInvoke(new Action(() => mcp.Refresh()));
     }
 
     public int OnAfterOpenProject(IVsHierarchy pHierarchy, int fAdded) => VSConstants.S_OK;

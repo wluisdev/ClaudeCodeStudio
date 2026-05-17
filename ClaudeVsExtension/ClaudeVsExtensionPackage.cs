@@ -29,6 +29,7 @@ namespace ClaudeVsExtension
     [ProvideMenuResource("Menus.ctmenu", 1)]
     [ProvideToolWindow(typeof(AgentToolWindow))]
     [ProvideToolWindow(typeof(Usage.UsageToolWindow), Transient = true)]
+    [ProvideToolWindow(typeof(Mcp.McpToolWindow), Transient = true)]
     [Guid(PackageGuidString)]
     public sealed class ClaudeVsExtensionPackage : AsyncPackage
     {

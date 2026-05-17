@@ -31,12 +31,25 @@
     group; your package should define its own command set in order to avoid collisions
     with command ids defined by other packages. -->
 
+    <Menus>
+      <Menu guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenu" priority="0x0102" type="Menu">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_TOOLS_EXT_CUST"/>
+        <Strings>
+          <ButtonText>Claude VS</ButtonText>
+          <CommandName>Claude VS</CommandName>
+        </Strings>
+      </Menu>
+    </Menus>
+
     <Groups>
       <Group guid="guidClaudeVsExtensionPackageCmdSet" id="EditorContextMenuGroup" priority="0x0600">
         <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN"/>
       </Group>
       <Group guid="guidClaudeVsExtensionPackageCmdSet" id="SolutionExplorerContextMenuGroup" priority="0x0600">
         <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_ITEMNODE"/>
+      </Group>
+      <Group guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenuGroup" priority="0x0100">
+        <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenu"/>
       </Group>
     </Groups>
 
@@ -80,10 +93,16 @@
           <ButtonText>Send to Claude VS</ButtonText>
         </Strings>
       </Button>
-      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="UsageToolWindowCommandId" priority="0x0102" type="Button">
-        <Parent guid="guidSHLMainMenu" id="IDG_VS_TOOLS_EXT_CUST"/>
+      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="UsageToolWindowCommandId" priority="0x0100" type="Button">
+        <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenuGroup"/>
         <Strings>
-          <ButtonText>Claude VS Usage</ButtonText>
+          <ButtonText>Usage</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="McpToolWindowCommandId" priority="0x0101" type="Button">
+        <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenuGroup"/>
+        <Strings>
+          <ButtonText>MCP Servers</ButtonText>
         </Strings>
       </Button>
     </Buttons>
@@ -114,6 +133,9 @@
       <IDSymbol name="EditorSendSelectionCommandId" value="0x0102" />
       <IDSymbol name="SolutionExplorerSendFileCommandId" value="0x0103" />
       <IDSymbol name="UsageToolWindowCommandId" value="0x0104" />
+      <IDSymbol name="McpToolWindowCommandId" value="0x0105" />
+      <IDSymbol name="ClaudeVsSubMenu" value="0x1100" />
+      <IDSymbol name="ClaudeVsSubMenuGroup" value="0x1101" />
       <IDSymbol name="EditorContextMenuGroup" value="0x1020" />
       <IDSymbol name="SolutionExplorerContextMenuGroup" value="0x1021" />
     </GuidSymbol>
