@@ -18,6 +18,8 @@ public class AgentClient
 
     private TaskCompletionSource<bool>? _cancelTcs;
 
+    private readonly JsonlWatcher _jsonlWatcher = new();
+
     public string? PendingResumeSessionId { get; set; }
     public string? CurrentSessionId { get; private set; }
 
@@ -82,6 +84,11 @@ public class AgentClient
     {
         var resumeId = PendingResumeSessionId;
         PendingResumeSessionId = null;
+
+        // If we already know the session id from a resume or prior turn, start the JSONL watcher early
+        var preKnownSessionId = resumeId ?? CurrentSessionId;
+        if (!string.IsNullOrEmpty(preKnownSessionId))
+            StartJsonlWatcher(workingDirectory, preKnownSessionId, onTool);
 
         var request = new ChatRequest
         {
@@ -151,6 +158,7 @@ public class AgentClient
                 CurrentSessionId = chunk.Text;
                 OutputLog.Info($"session: {chunk.Text}");
                 onSession?.Invoke(chunk.Text);
+                StartJsonlWatcher(workingDirectory, chunk.Text, onTool);
                 continue;
             }
 
@@ -175,8 +183,21 @@ public class AgentClient
         _cancelTcs = null;
     }
 
+    private string? _watcherSessionId;
+    private void StartJsonlWatcher(string? cwd, string sessionId, Action<string, string, string?, string?, string?>? onTool)
+    {
+        if (onTool == null) return;
+        if (_watcherSessionId == sessionId) return; // already watching this session
+        _watcherSessionId = sessionId;
+        _jsonlWatcher.OnEvent = onTool;
+        _jsonlWatcher.Start(cwd, sessionId);
+    }
+
     public async Task StopAsync()
     {
+        _jsonlWatcher.Stop();
+        _watcherSessionId = null;
+
         if (_process == null)
             return;
 
