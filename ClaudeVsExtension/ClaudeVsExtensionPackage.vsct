@@ -100,7 +100,7 @@
   </Commands>
 
   <KeyBindings>
-    <KeyBinding guid="guidClaudeVsExtensionPackageCmdSet" id="FocusClaudeVsCommandId" editor="guidVSStd97" key1="VK_F12" mod1="Alt" />
+    <KeyBinding guid="guidClaudeVsExtensionPackageCmdSet" id="FocusClaudeVsCommandId" editor="guidVSStd97" key1="J" mod1="Control Shift" />
   </KeyBindings>
 
   <Symbols>

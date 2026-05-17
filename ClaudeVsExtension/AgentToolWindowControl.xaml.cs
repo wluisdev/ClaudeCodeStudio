@@ -86,18 +86,41 @@ public partial class AgentToolWindowControl : UserControl
             Browser.CoreWebView2.PostWebMessageAsJson(
                 JsonSerializer.Serialize(new { type = "version", text = versionString }));
 
+            SendCurrentTheme();
+        };
+
+        VSColorTheme.ThemeChanged += OnVsThemeChanged;
+    }
+
+    private void OnVsThemeChanged(ThemeChangedEventArgs e)
+    {
+        SendCurrentTheme();
+    }
+
+    private void SendCurrentTheme()
+    {
+        try
+        {
+            if (Browser?.CoreWebView2 == null) return;
             var bgColor = VSColorTheme.GetThemedColor(EnvironmentColors.ToolWindowBackgroundColorKey);
             var brightness = bgColor.R * 0.299 + bgColor.G * 0.587 + bgColor.B * 0.114;
             var isDark = brightness < 128;
-            Browser.CoreWebView2.PostWebMessageAsJson(
-                JsonSerializer.Serialize(new { type = "theme", isDark }));
-        };
+            var dispatcher = System.Windows.Application.Current.Dispatcher;
+            dispatcher.Invoke(() =>
+                Browser.CoreWebView2.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new { type = "theme", isDark })));
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"theme change propagation failed: {ex.Message}");
+        }
     }
 
     private void AgentToolWindowControl_Unloaded(
         object sender,
         System.Windows.RoutedEventArgs e)
     {
+        VSColorTheme.ThemeChanged -= OnVsThemeChanged;
     }
 
     private async void CoreWebView2_WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -181,6 +204,7 @@ public partial class AgentToolWindowControl : UserControl
                 OutputLog.Info($"ui: resume session {request.SessionId}");
                 await _agentClient.StopAsync();
                 _agentClient.PendingResumeSessionId = request.SessionId;
+                await HandleResumeSessionAsync(request.SessionId);
                 return;
             }
 
@@ -235,6 +259,12 @@ public partial class AgentToolWindowControl : UserControl
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 var dteUnfocus = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
                 dteUnfocus?.ActiveDocument?.Activate();
+                return;
+            }
+
+            if (request.Type == "apply-to-editor")
+            {
+                await HandleApplyToEditorAsync(request.Code, request.Language);
                 return;
             }
 
@@ -352,7 +382,10 @@ public partial class AgentToolWindowControl : UserControl
                 autoResume: request.AutoResume,
                 onSession: sid => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = "session-info", sessionId = sid }))));
+                        JsonSerializer.Serialize(new { type = "session-info", sessionId = sid }))),
+                onTool: (kind, name, input, text, id) => dispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = kind, name, input, text, id }))));
 
             VsStatusBar.Clear();
 
@@ -544,6 +577,43 @@ public partial class AgentToolWindowControl : UserControl
         }
         catch { }
         return Task.CompletedTask;
+    }
+
+    private async Task HandleApplyToEditorAsync(string? code, string? language)
+    {
+        if (string.IsNullOrEmpty(code))
+            return;
+
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        try
+        {
+            var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+            var doc = dte?.ActiveDocument;
+            if (doc == null)
+            {
+                OutputLog.Warn("apply-to-editor: no active document");
+                Browser.CoreWebView2.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new { type = "toast", text = "No active editor — open a file first." }));
+                return;
+            }
+
+            doc.Activate();
+            var selection = doc.Selection as EnvDTE.TextSelection;
+            if (selection == null)
+            {
+                OutputLog.Warn("apply-to-editor: active document has no text selection");
+                return;
+            }
+
+            var insert = code.Replace("\r\n", "\n").Replace("\n", Environment.NewLine);
+            selection.Insert(insert, (int)EnvDTE.vsInsertFlags.vsInsertFlagsContainNewText);
+            OutputLog.Info($"apply-to-editor: inserted {insert.Length} chars ({language ?? "?"}) into {doc.Name}");
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Error($"apply-to-editor failed: {ex.Message}");
+        }
     }
 
     private async Task HandleGetSelectionAsync()
@@ -761,6 +831,92 @@ public partial class AgentToolWindowControl : UserControl
         }
 
         var json = JsonSerializer.Serialize(new { type = "history", sessions });
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
+    }
+
+    private async Task HandleResumeSessionAsync(string? sessionId)
+    {
+        if (string.IsNullOrEmpty(sessionId)) return;
+
+        var claudeDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".claude", "projects");
+
+        if (!Directory.Exists(claudeDir))
+        {
+            OutputLog.Warn("resume ignored: ~/.claude/projects not found");
+            return;
+        }
+
+        var sourceFile = Directory.GetFiles(claudeDir, $"{sessionId}.jsonl", SearchOption.AllDirectories).FirstOrDefault();
+        if (sourceFile == null)
+        {
+            OutputLog.Warn($"resume ignored: session file {sessionId}.jsonl not found");
+            return;
+        }
+
+        var msgs = new System.Collections.Generic.List<object>();
+
+        try
+        {
+            using var fs = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var sr = new StreamReader(fs);
+            string? line;
+            while ((line = await sr.ReadLineAsync()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+                string? role = null;
+                string? text = null;
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    var root = doc.RootElement;
+                    if (!root.TryGetProperty("type", out var tEl)) continue;
+                    var entryType = tEl.GetString();
+                    if (entryType != "user" && entryType != "assistant") continue;
+                    if (!root.TryGetProperty("message", out var msg)) continue;
+                    if (!msg.TryGetProperty("content", out var content)) continue;
+
+                    if (content.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in content.EnumerateArray())
+                        {
+                            if (item.TryGetProperty("type", out var itEl) && itEl.GetString() == "text" &&
+                                item.TryGetProperty("text", out var txEl))
+                            {
+                                text = (text ?? "") + (txEl.GetString() ?? "");
+                            }
+                        }
+                    }
+                    else if (content.ValueKind == JsonValueKind.String)
+                    {
+                        text = content.GetString();
+                    }
+
+                    if (string.IsNullOrEmpty(text)) continue;
+                    role = entryType;
+                }
+                catch { continue; }
+
+                msgs.Add(new { role, text });
+            }
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Error($"resume read failed: {ex.Message}");
+            return;
+        }
+
+        OutputLog.Info($"resume: loaded {msgs.Count} messages from {sessionId}");
+
+        var json = JsonSerializer.Serialize(new
+        {
+            type = "branched",
+            sessionId,
+            messages = msgs
+        });
         var dispatcher = System.Windows.Application.Current.Dispatcher;
         dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
     }
@@ -1044,5 +1200,11 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("msgIndex")]
         public int MsgIndex { get; set; }
+
+        [JsonPropertyName("code")]
+        public string? Code { get; set; }
+
+        [JsonPropertyName("language")]
+        public string? Language { get; set; }
     }
 }

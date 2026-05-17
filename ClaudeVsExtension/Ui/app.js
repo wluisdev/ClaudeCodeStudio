@@ -331,10 +331,42 @@ messages.addEventListener("scroll", () => {
     btnScrollBottom.classList.toggle("visible", _userScrolledUp);
 });
 
+messages.addEventListener("click", e => {
+    const btn = e.target.closest(".apply-btn");
+    if (!btn) return;
+    const pre = btn.closest("pre");
+    const codeEl = pre?.querySelector("code");
+    if (!codeEl) return;
+    const code = codeEl.innerText.replace(/\r\n/g, "\n");
+    const langMatch = (codeEl.className || "").match(/language-([\w-]+)/);
+    const language = langMatch ? langMatch[1] : "";
+    window.chrome.webview.postMessage({ type: "apply-to-editor", code, language });
+    const orig = btn.textContent;
+    btn.textContent = "Applied";
+    btn.classList.add("applied");
+    setTimeout(() => { btn.textContent = orig; btn.classList.remove("applied"); }, 1200);
+});
+
 function scrollToBottom() {
     _userScrolledUp = false;
     btnScrollBottom.classList.remove("visible");
     messages.scrollTop = messages.scrollHeight;
+}
+
+let _toastTimer = null;
+function showToast(text) {
+    if (!text) return;
+    let el = document.getElementById("toast");
+    if (!el) {
+        el = document.createElement("div");
+        el.id = "toast";
+        el.className = "toast";
+        document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.classList.add("visible");
+    if (_toastTimer) clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => el.classList.remove("visible"), 2400);
 }
 
 function autoScroll() {
@@ -377,11 +409,13 @@ btnSend.addEventListener("click", () => {
         window.chrome.webview.postMessage({ type: "cancel" });
         setStreaming(false);
         removeLoading();
+        removeLiveTimer();
         if (currentStreamBubble) {
-            const raw = currentStreamBubble.dataset.raw || "";
-            applyMarkdown(currentStreamBubble, raw);
-            if (raw) currentStreamBubble.innerHTML += "<br>";
-            currentStreamBubble.innerHTML += '<span class="cancelled">⊘ cancelled</span>';
+            finalizeBubbleStream(currentStreamBubble);
+            const cancelled = document.createElement("span");
+            cancelled.className = "cancelled";
+            cancelled.textContent = "⊘ cancelled";
+            currentStreamBubble.appendChild(cancelled);
             currentStreamBubble = null;
         } else {
             const msg = document.createElement("div");
@@ -717,6 +751,11 @@ window.chrome.webview.addEventListener("message", event => {
         return;
     }
 
+    if (event.data.type === "toast") {
+        showToast(event.data.text || "");
+        return;
+    }
+
     if (event.data.type === "history") {
         renderHistory(event.data.sessions);
         return;
@@ -735,6 +774,7 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "branched") {
         renderBranchedMessages(event.data.sessionId, event.data.messages || []);
+        hideResumeOverlay();
         return;
     }
 
@@ -791,12 +831,22 @@ window.chrome.webview.addEventListener("message", event => {
     if (event.data.type === "stream-done") {
         if (isUsageCapture) isUsageCapture = false;
         removeLoading();
+        removeLiveTimer();
         if (currentStreamBubble) {
-            const raw = currentStreamBubble.dataset.raw || "";
-            applyMarkdown(currentStreamBubble, raw);
+            finalizeBubbleStream(currentStreamBubble);
             currentStreamBubble = null;
         }
         setStreaming(false);
+        return;
+    }
+
+    if (event.data.type === "tool_use" || event.data.type === "tool_result" || event.data.type === "tool_error") {
+        appendToolEvent(event.data.type, event.data.name || "", event.data.input, event.data.text || "", event.data.id);
+        return;
+    }
+
+    if (event.data.type === "tokens-live") {
+        updateLiveTokens(event.data.text || "");
         return;
     }
 });
@@ -1025,6 +1075,15 @@ function applyMarkdown(bubble, raw) {
     bubble.querySelectorAll("pre code").forEach(el => {
         if (typeof hljs !== "undefined") hljs.highlightElement(el);
     });
+    bubble.querySelectorAll("pre").forEach(pre => {
+        if (pre.querySelector(".apply-btn")) return;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "apply-btn";
+        btn.textContent = "Apply";
+        btn.title = "Insert this code at the cursor in the active editor";
+        pre.appendChild(btn);
+    });
 }
 
 function escapeHtmlRaw(text) {
@@ -1071,6 +1130,34 @@ function renderMarkdown(raw) {
         return `<ol>${items}</ol>`;
     });
 
+    // Tables
+    text = text.replace(/((?:^[ \t]*\|.+\|[ \t]*\n?){2,})/gm, m => {
+        const lines = m.split('\n').filter(l => l.trim().startsWith('|'));
+        if (lines.length < 2) return m;
+        const sepInner = lines[1].trim().replace(/^\||\|$/g, '');
+        if (!/^[\s\-:|]+$/.test(sepInner) || !/-/.test(sepInner)) return m;
+
+        const splitCells = line => line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+        const header = splitCells(lines[0]);
+        const aligns = splitCells(lines[1]).map(c => {
+            const t = c.trim();
+            if (t.startsWith(':') && t.endsWith(':')) return 'center';
+            if (t.endsWith(':')) return 'right';
+            return 'left';
+        });
+        const rows = lines.slice(2).map(splitCells);
+
+        const cellAlign = i => aligns[i] || 'left';
+        const thead = '<thead><tr>' + header.map((h, i) =>
+            `<th style="text-align:${cellAlign(i)}">${h}</th>`).join('') + '</tr></thead>';
+        const tbody = '<tbody>' + rows.map(r =>
+            '<tr>' + r.map((c, i) =>
+                `<td style="text-align:${cellAlign(i)}">${c}</td>`).join('') + '</tr>'
+        ).join('') + '</tbody>';
+
+        return `<table class="md-table">${thead}${tbody}</table>\n`;
+    });
+
     // Links
     text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
 
@@ -1078,7 +1165,7 @@ function renderMarkdown(raw) {
     text = text.split(/\n{2,}/).map(block => {
         block = block.trim();
         if (!block) return '';
-        if (/^(<(h[1-3]|ul|ol|pre)|\x00B)/.test(block)) return block;
+        if (/^(<(h[1-3]|ul|ol|pre|table)|\x00B)/.test(block)) return block;
         return `<p>${block.replace(/\n/g, '<br>')}</p>`;
     }).join('');
 
@@ -1089,20 +1176,122 @@ function renderMarkdown(raw) {
     return text;
 }
 
+function ensureStreamBubble() {
+    if (currentStreamBubble) return currentStreamBubble;
+    const msg = document.createElement("div");
+    msg.className = "message assistant";
+    msg.innerHTML = `<div class="bubble"></div>`;
+    messages.appendChild(msg);
+    decorateMessage(msg);
+    currentStreamBubble = msg.querySelector(".bubble");
+    return currentStreamBubble;
+}
+
+function getActiveTextSeg(bubble) {
+    const last = bubble.lastElementChild;
+    if (last && last.classList.contains("bubble-text") && last.dataset.finalized !== "1")
+        return last;
+    const seg = document.createElement("div");
+    seg.className = "bubble-text";
+    seg.dataset.raw = "";
+    bubble.appendChild(seg);
+    return seg;
+}
+
+function finalizeActiveSeg(bubble) {
+    const last = bubble.lastElementChild;
+    if (!last || !last.classList.contains("bubble-text") || last.dataset.finalized === "1") return;
+    const raw = last.dataset.raw || "";
+    if (raw) applyMarkdown(last, raw);
+    last.dataset.finalized = "1";
+}
+
+function finalizeBubbleStream(bubble) {
+    // Finalize any unfinished text segment AND legacy bubbles that used dataset.raw on the bubble itself
+    if (bubble.dataset.raw && !bubble.querySelector(".bubble-text")) {
+        applyMarkdown(bubble, bubble.dataset.raw);
+        bubble.dataset.finalized = "1";
+        return;
+    }
+    finalizeActiveSeg(bubble);
+}
+
 function appendChunk(text) {
     removeLoading();
-
-    if (!currentStreamBubble) {
-        const msg = document.createElement("div");
-        msg.className = "message assistant";
-        msg.innerHTML = `<div class="bubble"></div>`;
-        messages.appendChild(msg);
-        decorateMessage(msg);
-        currentStreamBubble = msg.querySelector(".bubble");
+    const bubble = ensureStreamBubble();
+    const seg = getActiveTextSeg(bubble);
+    seg.dataset.raw = (seg.dataset.raw || "") + text;
+    seg.textContent = seg.dataset.raw;
+    if (isStreaming) {
+        ensureLiveTimer();
+        bumpEstimatedOut(text.length);
     }
+    autoScroll();
+}
 
-    currentStreamBubble.dataset.raw = (currentStreamBubble.dataset.raw || "") + text;
-    currentStreamBubble.textContent = currentStreamBubble.dataset.raw;
+function summarizeToolInput(name, inputJson) {
+    if (!inputJson) return "";
+    let input;
+    try { input = JSON.parse(inputJson); } catch { return ""; }
+    if (!input || typeof input !== "object") return "";
+    const arg = input.file_path || input.path || input.command || input.pattern || input.url || input.notebook_path || input.query;
+    if (arg) {
+        const s = String(arg);
+        return s.length > 80 ? "…" + s.slice(-79) : s;
+    }
+    const keys = Object.keys(input);
+    return keys.length ? keys[0] : "";
+}
+
+function appendToolEvent(kind, name, inputJson, text, id) {
+    removeLoading();
+    const bubble = ensureStreamBubble();
+
+    if (kind === "tool_use") {
+        finalizeActiveSeg(bubble);
+        const chip = document.createElement("div");
+        chip.className = "tool-chip";
+        if (id) chip.dataset.toolId = id;
+
+        const dot = document.createElement("span");
+        dot.className = "tool-dot";
+        dot.textContent = "●";
+
+        const label = document.createElement("span");
+        label.className = "tool-name";
+        label.textContent = name || "tool";
+
+        chip.appendChild(dot);
+        chip.appendChild(label);
+
+        const arg = summarizeToolInput(name, inputJson);
+        if (arg) {
+            const argEl = document.createElement("span");
+            argEl.className = "tool-arg";
+            argEl.textContent = `(${arg})`;
+            chip.appendChild(argEl);
+        }
+        bubble.appendChild(chip);
+    } else if (kind === "tool_result" || kind === "tool_error") {
+        let chip = null;
+        if (id) chip = bubble.querySelector(`.tool-chip[data-tool-id="${CSS.escape(id)}"]`);
+        if (!chip) {
+            // fall back to last chip if no id match
+            const chips = bubble.querySelectorAll(".tool-chip");
+            chip = chips[chips.length - 1] || null;
+        }
+        if (!chip) return;
+        if (kind === "tool_error") chip.classList.add("tool-error");
+
+        if (text && text.trim()) {
+            const summary = document.createElement("div");
+            summary.className = "tool-summary";
+            const firstLine = text.split(/\r?\n/)[0];
+            summary.textContent = "↳ " + (firstLine.length > 160 ? firstLine.slice(0, 160) + "…" : firstLine);
+            chip.appendChild(summary);
+        }
+    }
+    if (isStreaming) ensureLiveTimer();
     autoScroll();
 }
 
@@ -1131,6 +1320,88 @@ function removeLoading() {
     _loadingTimer = null;
     const el = messages.querySelector(".loading");
     if (el) el.remove();
+    if (isStreaming) ensureLiveTimer();
+}
+
+let _liveTimerStart = 0;
+let _liveTimerInterval = null;
+let _liveTokens = { in: 0, out: 0, cached: 0 };
+let _estimatedOutChars = 0;
+let _realOutTokens = 0;
+
+function renderLiveTimer() {
+    const el = messages.querySelector(".stream-timer");
+    if (!el) return;
+    const ms = Date.now() - _liveTimerStart;
+    const fmt = n => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
+    const time = ms < 60000
+        ? `${(ms / 1000).toFixed(1)}s`
+        : `${Math.floor(ms / 60000)}m ${((ms % 60000) / 1000).toFixed(0)}s`;
+    let txt = `⏱ ${time}`;
+
+    const estOut = Math.floor(_estimatedOutChars / 3.7);
+    const outShown = Math.max(_realOutTokens, estOut);
+    const isEstimate = estOut > _realOutTokens;
+
+    const parts = [];
+    if (_liveTokens.in) parts.push(`↑ ${fmt(_liveTokens.in)}`);
+    if (_liveTokens.cached) parts.push(`↻ ${fmt(_liveTokens.cached)}`);
+    if (outShown) parts.push(`↓ ${isEstimate ? "~" : ""}${fmt(outShown)}`);
+    if (parts.length) txt += " · " + parts.join(" · ");
+
+    el.textContent = txt;
+}
+
+function ensureLiveTimer() {
+    let el = messages.querySelector(".stream-timer");
+    if (!el) {
+        // Inherit elapsed from loading bubble if it was up; do NOT kill the bubble.
+        // The loading dots stay as visual cue until real content arrives.
+        const inheritedStart = _loadingStart || Date.now();
+        _liveTimerStart = inheritedStart;
+        el = document.createElement("div");
+        el.className = "stream-timer";
+        messages.appendChild(el);
+        renderLiveTimer();
+
+        // Hide the inner live-timer of the loading bubble to avoid duplicate time display
+        const innerTimer = messages.querySelector(".loading .live-timer");
+        if (innerTimer) innerTimer.style.display = "none";
+    }
+    if (!_liveTimerInterval) {
+        _liveTimerInterval = setInterval(renderLiveTimer, 100);
+    }
+    messages.appendChild(el);
+    autoScroll();
+}
+
+function updateLiveTokens(text) {
+    const parts = (text || "").split("/").map(Number);
+    _liveTokens.in = parts[0] || 0;
+    const newOut = parts[1] || 0;
+    _liveTokens.cached = parts[2] || 0;
+    if (newOut > _realOutTokens) {
+        _realOutTokens = newOut;
+        // Recalibrate estimate so chars added after this point still inflate it correctly
+        _estimatedOutChars = _realOutTokens * 3.7;
+    }
+    _liveTokens.out = _realOutTokens;
+    if (isStreaming) ensureLiveTimer();
+    renderLiveTimer();
+}
+
+function bumpEstimatedOut(chars) {
+    _estimatedOutChars += chars;
+    renderLiveTimer();
+}
+
+function removeLiveTimer() {
+    if (_liveTimerInterval) { clearInterval(_liveTimerInterval); _liveTimerInterval = null; }
+    const el = messages.querySelector(".stream-timer");
+    if (el) el.remove();
+    _liveTokens = { in: 0, out: 0, cached: 0 };
+    _estimatedOutChars = 0;
+    _realOutTokens = 0;
 }
 
 function clearChat() {
@@ -1272,7 +1543,25 @@ function renderHistory(sessions) {
 
 function resumeSession(sessionId) {
     document.getElementById("history-menu").classList.remove("open");
+    showResumeOverlay();
     window.chrome.webview.postMessage({ type: "resume-session", sessionId });
+}
+
+function showResumeOverlay() {
+    let ov = document.getElementById("resume-overlay");
+    if (!ov) {
+        ov = document.createElement("div");
+        ov.id = "resume-overlay";
+        ov.className = "resume-overlay";
+        ov.innerHTML = `<div class="resume-overlay-inner"><span class="dots"><span>.</span><span>.</span><span>.</span></span><span>Loading session…</span></div>`;
+        document.body.appendChild(ov);
+    }
+    ov.classList.add("visible");
+}
+
+function hideResumeOverlay() {
+    const ov = document.getElementById("resume-overlay");
+    if (ov) ov.classList.remove("visible");
 }
 
 function escapeHtml(text) {

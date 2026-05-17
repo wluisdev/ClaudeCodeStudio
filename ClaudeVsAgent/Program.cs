@@ -150,12 +150,29 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
 
             if (type == "assistant")
             {
-                var content = evt.GetProperty("message").GetProperty("content");
+                var msgObj = evt.GetProperty("message");
+
+                if (msgObj.TryGetProperty("usage", out var usageLive))
+                {
+                    var inTok = usageLive.TryGetProperty("input_tokens", out var iL) ? iL.GetInt32() : 0;
+                    var outTok = usageLive.TryGetProperty("output_tokens", out var oL) ? oL.GetInt32() : 0;
+                    var cacheRead = usageLive.TryGetProperty("cache_read_input_tokens", out var crL) ? crL.GetInt32() : 0;
+                    var cacheCreate = usageLive.TryGetProperty("cache_creation_input_tokens", out var ccL) ? ccL.GetInt32() : 0;
+                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+                    {
+                        Type = "tokens-live",
+                        Text = $"{inTok + cacheCreate}/{outTok}/{cacheRead}"
+                    }));
+                    Console.Out.Flush();
+                }
+
+                var content = msgObj.GetProperty("content");
                 foreach (var item in content.EnumerateArray())
                 {
-                    if (item.TryGetProperty("type", out var itemType) &&
-                        itemType.GetString() == "text" &&
-                        item.TryGetProperty("text", out var textProp))
+                    if (!item.TryGetProperty("type", out var itemType)) continue;
+                    var itemTypeStr = itemType.GetString();
+
+                    if (itemTypeStr == "text" && item.TryGetProperty("text", out var textProp))
                     {
                         var text = textProp.GetString();
                         if (!string.IsNullOrEmpty(text))
@@ -169,6 +186,73 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
                             Console.Out.Flush();
                         }
                     }
+                    else if (itemTypeStr == "tool_use")
+                    {
+                        var name = item.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
+                        var id = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+                        string? inputJson = null;
+                        if (item.TryGetProperty("input", out var inputProp))
+                            inputJson = inputProp.GetRawText();
+
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+                        {
+                            Type = "tool_use",
+                            Tool = name,
+                            ToolInput = inputJson,
+                            ToolId = id
+                        }));
+                        Console.Out.Flush();
+                    }
+                }
+            }
+            else if (type == "user")
+            {
+                if (!evt.TryGetProperty("message", out var userMsg)) continue;
+                if (!userMsg.TryGetProperty("content", out var userContent)) continue;
+                if (userContent.ValueKind != JsonValueKind.Array) continue;
+
+                foreach (var item in userContent.EnumerateArray())
+                {
+                    if (!item.TryGetProperty("type", out var itemType)) continue;
+                    if (itemType.GetString() != "tool_result") continue;
+
+                    var id = item.TryGetProperty("tool_use_id", out var idProp) ? idProp.GetString() : null;
+                    string? summary = null;
+
+                    if (item.TryGetProperty("content", out var contentProp))
+                    {
+                        if (contentProp.ValueKind == JsonValueKind.String)
+                        {
+                            summary = contentProp.GetString();
+                        }
+                        else if (contentProp.ValueKind == JsonValueKind.Array)
+                        {
+                            var sb = new StringBuilder();
+                            foreach (var c in contentProp.EnumerateArray())
+                            {
+                                if (c.TryGetProperty("type", out var ct) && ct.GetString() == "text" &&
+                                    c.TryGetProperty("text", out var t))
+                                {
+                                    if (sb.Length > 0) sb.Append('\n');
+                                    sb.Append(t.GetString());
+                                }
+                            }
+                            summary = sb.ToString();
+                        }
+                    }
+
+                    if (summary != null && summary.Length > 240)
+                        summary = summary.Substring(0, 240) + "…";
+
+                    bool isError = item.TryGetProperty("is_error", out var errProp) && errProp.GetBoolean();
+
+                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+                    {
+                        Type = isError ? "tool_error" : "tool_result",
+                        Text = summary ?? "",
+                        ToolId = id
+                    }));
+                    Console.Out.Flush();
                 }
             }
             else if (type == "result")

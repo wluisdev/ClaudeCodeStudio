@@ -16,4 +16,7 @@ public class ChatChunk
 {
     public string Type { get; set; } = "";
     public string Text { get; set; } = "";
+    public string? Tool { get; set; }
+    public string? ToolInput { get; set; }
+    public string? ToolId { get; set; }
 }

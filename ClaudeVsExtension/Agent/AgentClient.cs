@@ -78,7 +78,7 @@ public class AgentClient
         OutputLog.Info($"agent started (pid {_process.Id})");
     }
 
-    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null)
+    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null)
     {
         var resumeId = PendingResumeSessionId;
         PendingResumeSessionId = null;
@@ -140,6 +140,12 @@ public class AgentClient
                 continue;
             }
 
+            if (chunk.Type == "tokens-live")
+            {
+                onTool?.Invoke("tokens-live", "", null, chunk.Text, null);
+                continue;
+            }
+
             if (chunk.Type == "session")
             {
                 CurrentSessionId = chunk.Text;
@@ -158,6 +164,12 @@ public class AgentClient
 
             if (chunk.Type == "chunk" && !string.IsNullOrEmpty(chunk.Text))
                 onChunk(chunk.Text);
+
+            if (chunk.Type == "tool_use" || chunk.Type == "tool_result" || chunk.Type == "tool_error")
+            {
+                OutputLog.Info($"{chunk.Type}: {chunk.Tool ?? "-"} id={chunk.ToolId ?? "-"} bytes={(chunk.ToolInput ?? chunk.Text ?? "").Length}");
+                onTool?.Invoke(chunk.Type, chunk.Tool ?? "", chunk.ToolInput, chunk.Text, chunk.ToolId);
+            }
         }
 
         _cancelTcs = null;
