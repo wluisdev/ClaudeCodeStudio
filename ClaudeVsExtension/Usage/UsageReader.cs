@@ -111,8 +111,18 @@ public static class UsageReader
             if (!el.TryGetProperty("type", out var typeEl) || typeEl.GetString() != "assistant") continue;
             if (!el.TryGetProperty("message", out var msg)) continue;
 
+            // Claude Code emits "<synthetic>" for internal assistant turns
+            // (quota warnings, injected error messages, etc.) that did not hit
+            // the API. Skip them entirely so tokens/cost reflect real usage.
             if (msg.TryGetProperty("model", out var modelEl))
-                model = modelEl.GetString() ?? model;
+            {
+                var m = modelEl.GetString();
+                if (!string.IsNullOrEmpty(m))
+                {
+                    if (m.StartsWith("<")) continue;
+                    model = m;
+                }
+            }
 
             if (!msg.TryGetProperty("usage", out var usage)) continue;
 
