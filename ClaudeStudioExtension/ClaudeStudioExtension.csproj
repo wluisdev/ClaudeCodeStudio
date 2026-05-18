@@ -11,7 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <None Remove="AgentToolWindowControl.xaml" />
-    <None Remove="ClaudeVsExtensionPackage.vsct" />
+    <None Remove="ClaudeStudioExtensionPackage.vsct" />
     <None Remove="Ui\app.js" />
     <None Remove="Ui\index.html" />
     <None Remove="Ui\styles.css" />
@@ -39,7 +39,7 @@
     <ProjectCapability Include="CreateVsixContainer" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\ClaudeVsShared\ClaudeVsShared.csproj" />
+    <ProjectReference Include="..\ClaudeStudioShared\ClaudeStudioShared.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.14.40265" ExcludeAssets="runtime" />
@@ -55,14 +55,14 @@
     <Reference Include="System.Xaml" />
   </ItemGroup>
   <ItemGroup>
-    <VSCTCompile Include="ClaudeVsExtensionPackage.vsct">
+    <VSCTCompile Include="ClaudeStudioExtensionPackage.vsct">
       <ResourceName>Menus.ctmenu</ResourceName>
       <Generator>VsctGenerator</Generator>
     </VSCTCompile>
   </ItemGroup>
 <ItemGroup>
-  <Content Include="..\ClaudeVsAgent\bin\Debug\net10.0\**\*">
-    <Link>ClaudeVsAgent\%(RecursiveDir)%(Filename)%(Extension)</Link>
+  <Content Include="..\ClaudeStudioAgent\bin\Debug\net10.0\**\*">
+    <Link>ClaudeStudioAgent\%(RecursiveDir)%(Filename)%(Extension)</Link>
     <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     <IncludeInVSIX>true</IncludeInVSIX>
   </Content>

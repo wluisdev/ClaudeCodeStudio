@@ -1,7 +1,7 @@
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 
-namespace ClaudeVsExtension;
+namespace ClaudeStudioExtension;
 
 internal static class VsStatusBar
 {

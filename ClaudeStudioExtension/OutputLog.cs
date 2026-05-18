@@ -4,12 +4,12 @@ using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 
-namespace ClaudeVsExtension;
+namespace ClaudeStudioExtension;
 
 internal static class OutputLog
 {
     private static readonly Guid PaneGuid = new("c0a2a8c1-7e1f-4b8a-9d33-cd3a911f7bb6");
-    private const string PaneName = "Claude VS";
+    private const string PaneName = "Claude Code Studio";
 
     private static IVsOutputWindowPane? _pane;
 

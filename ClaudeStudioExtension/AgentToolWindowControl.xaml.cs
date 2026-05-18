@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Controls;
-using ClaudeVsExtension.Agent;
+using ClaudeStudioExtension.Agent;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using System.Text.Json.Serialization;
@@ -12,7 +12,7 @@ using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.PlatformUI;
 
-namespace ClaudeVsExtension;
+namespace ClaudeStudioExtension;
 
 public partial class AgentToolWindowControl : UserControl
 {
@@ -60,7 +60,7 @@ public partial class AgentToolWindowControl : UserControl
 
         var userDataFolder = System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ClaudeVsStudio",
+            "ClaudeStudio",
             "WebView2");
 
         var environment = await CoreWebView2Environment
@@ -242,7 +242,7 @@ public partial class AgentToolWindowControl : UserControl
             if (request.Type == "open-usage")
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                var pkg = ClaudeVsExtensionPackage.Instance;
+                var pkg = ClaudeStudioExtensionPackage.Instance;
                 if (pkg != null)
                 {
                     var window = pkg.FindToolWindow(typeof(Usage.UsageToolWindow), 0, true);
@@ -257,7 +257,7 @@ public partial class AgentToolWindowControl : UserControl
             if (request.Type == "open-mcp")
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                var pkg = ClaudeVsExtensionPackage.Instance;
+                var pkg = ClaudeStudioExtensionPackage.Instance;
                 if (pkg != null)
                 {
                     var window = pkg.FindToolWindow(typeof(Mcp.McpToolWindow), 0, true);
@@ -286,7 +286,7 @@ public partial class AgentToolWindowControl : UserControl
             if (request.Type == "set-caption")
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                var pkg = ClaudeVsExtensionPackage.Instance;
+                var pkg = ClaudeStudioExtensionPackage.Instance;
                 var pane = pkg?.FindToolWindow(typeof(AgentToolWindow), 0, false) as AgentToolWindow;
                 if (pane != null && !string.IsNullOrEmpty(request.Text))
                     pane.Caption = request.Text;
@@ -677,7 +677,7 @@ public partial class AgentToolWindowControl : UserControl
         _ => ""
     };
 
-    private static readonly string _tempDir = Path.Combine(Path.GetTempPath(), "ClaudeVsStudio");
+    private static readonly string _tempDir = Path.Combine(Path.GetTempPath(), "ClaudeStudio");
 
     private async Task HandleGetClipboardFilesAsync()
     {

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
 
   <!--  This is the file that defines the actual layout and type of the commands.
@@ -25,7 +25,7 @@
 
   <!--The Commands section is where commands, menus, and menu groups are defined.
       This section uses a Guid to identify the package that provides the command defined inside it. -->
-  <Commands package="guidClaudeVsExtensionPackage">
+  <Commands package="guidClaudeStudioExtensionPackage">
     <!-- Inside this section we have different sub-sections: one for the menus, another
     for the menu groups, one for the buttons (the actual commands), one for the combos
     and the last one for the bitmaps used. Each element is identified by a command id that
@@ -35,27 +35,27 @@
     with command ids defined by other packages. -->
 
     <Menus>
-      <Menu guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenu" priority="0x0102" type="Menu">
-        <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsExtensionsMenuGroup"/>
+      <Menu guid="guidClaudeStudioExtensionPackageCmdSet" id="ClaudeStudioSubMenu" priority="0x0102" type="Menu">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="ClaudeStudioExtensionsMenuGroup"/>
         <Strings>
-          <ButtonText>Claude VS</ButtonText>
-          <CommandName>Claude VS</CommandName>
+          <ButtonText>Claude Code Studio</ButtonText>
+          <CommandName>Claude Code Studio</CommandName>
         </Strings>
       </Menu>
     </Menus>
 
     <Groups>
-      <Group guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsExtensionsMenuGroup" priority="0x0600">
+      <Group guid="guidClaudeStudioExtensionPackageCmdSet" id="ClaudeStudioExtensionsMenuGroup" priority="0x0600">
         <Parent guid="guidSHLMenuExtensions" id="IDM_VS_MENU_EXTENSIONS"/>
       </Group>
-      <Group guid="guidClaudeVsExtensionPackageCmdSet" id="EditorContextMenuGroup" priority="0x0600">
+      <Group guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorContextMenuGroup" priority="0x0600">
         <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN"/>
       </Group>
-      <Group guid="guidClaudeVsExtensionPackageCmdSet" id="SolutionExplorerContextMenuGroup" priority="0x0600">
+      <Group guid="guidClaudeStudioExtensionPackageCmdSet" id="SolutionExplorerContextMenuGroup" priority="0x0600">
         <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_ITEMNODE"/>
       </Group>
-      <Group guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenuGroup" priority="0x0100">
-        <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenu"/>
+      <Group guid="guidClaudeStudioExtensionPackageCmdSet" id="ClaudeStudioSubMenuGroup" priority="0x0100">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="ClaudeStudioSubMenu"/>
       </Group>
     </Groups>
 
@@ -70,46 +70,46 @@
               <CommandFlag>DefaultInvisible</CommandFlag>
               <CommandFlag>DynamicVisibility</CommandFlag>
           If you do not want an image next to your command, remove the Icon node /> -->
-      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="AgentToolWindowCommandId" priority="0x0099" type="Button">
-        <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenuGroup"/>
+      <Button guid="guidClaudeStudioExtensionPackageCmdSet" id="AgentToolWindowCommandId" priority="0x0099" type="Button">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="ClaudeStudioSubMenuGroup"/>
         <Icon guid="ImageCatalogGuid" id="MessageBubble" />
         <CommandFlag>IconIsMoniker</CommandFlag>
         <Strings>
           <ButtonText>Chat</ButtonText>
         </Strings>
       </Button>
-      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="FocusClaudeVsCommandId" priority="0x0101" type="Button">
+      <Button guid="guidClaudeStudioExtensionPackageCmdSet" id="FocusClaudeStudioCommandId" priority="0x0101" type="Button">
         <Parent guid="guidSHLMainMenu" id="IDG_VS_TOOLS_EXT_CUST"/>
         <CommandFlag>DefaultInvisible</CommandFlag>
         <Strings>
-          <ButtonText>Focus Claude VS</ButtonText>
-          <CommandName>ClaudeVS.Focus</CommandName>
+          <ButtonText>Focus Claude Code Studio</ButtonText>
+          <CommandName>ClaudeCodeStudio.Focus</CommandName>
         </Strings>
       </Button>
-      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="EditorSendSelectionCommandId" priority="0x0100" type="Button">
-        <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="EditorContextMenuGroup"/>
+      <Button guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorSendSelectionCommandId" priority="0x0100" type="Button">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorContextMenuGroup"/>
         <CommandFlag>DynamicVisibility</CommandFlag>
         <Strings>
-          <ButtonText>Send Selection to Claude VS</ButtonText>
+          <ButtonText>Send Selection to Claude Code Studio</ButtonText>
         </Strings>
       </Button>
-      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="SolutionExplorerSendFileCommandId" priority="0x0100" type="Button">
-        <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="SolutionExplorerContextMenuGroup"/>
+      <Button guid="guidClaudeStudioExtensionPackageCmdSet" id="SolutionExplorerSendFileCommandId" priority="0x0100" type="Button">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="SolutionExplorerContextMenuGroup"/>
         <CommandFlag>DynamicVisibility</CommandFlag>
         <Strings>
-          <ButtonText>Send to Claude VS</ButtonText>
+          <ButtonText>Send to Claude Code Studio</ButtonText>
         </Strings>
       </Button>
-      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="UsageToolWindowCommandId" priority="0x0100" type="Button">
-        <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenuGroup"/>
+      <Button guid="guidClaudeStudioExtensionPackageCmdSet" id="UsageToolWindowCommandId" priority="0x0100" type="Button">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="ClaudeStudioSubMenuGroup"/>
         <Icon guid="ImageCatalogGuid" id="BarChart" />
         <CommandFlag>IconIsMoniker</CommandFlag>
         <Strings>
           <ButtonText>Usage</ButtonText>
         </Strings>
       </Button>
-      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="McpToolWindowCommandId" priority="0x0101" type="Button">
-        <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenuGroup"/>
+      <Button guid="guidClaudeStudioExtensionPackageCmdSet" id="McpToolWindowCommandId" priority="0x0101" type="Button">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="ClaudeStudioSubMenuGroup"/>
         <Icon guid="ImageCatalogGuid" id="LocalServer" />
         <CommandFlag>IconIsMoniker</CommandFlag>
         <Strings>
@@ -130,26 +130,26 @@
   </Commands>
 
   <KeyBindings>
-    <KeyBinding guid="guidClaudeVsExtensionPackageCmdSet" id="FocusClaudeVsCommandId" editor="guidVSStd97" key1="J" mod1="Control Shift" />
+    <KeyBinding guid="guidClaudeStudioExtensionPackageCmdSet" id="FocusClaudeStudioCommandId" editor="guidVSStd97" key1="J" mod1="Control Shift" />
   </KeyBindings>
 
   <Symbols>
     <!-- This is the package guid. -->
-    <GuidSymbol name="guidClaudeVsExtensionPackage" value="{36a4617b-b537-4a28-bdd4-a18067f26ea2}" />
+    <GuidSymbol name="guidClaudeStudioExtensionPackage" value="{36a4617b-b537-4a28-bdd4-a18067f26ea2}" />
 
     <!-- This is the guid used to group the menu commands together -->
-    <GuidSymbol name="guidClaudeVsExtensionPackageCmdSet" value="{dd63979a-7c8a-4d0c-b2f7-321ba5b6d8d2}">
+    <GuidSymbol name="guidClaudeStudioExtensionPackageCmdSet" value="{dd63979a-7c8a-4d0c-b2f7-321ba5b6d8d2}">
       <IDSymbol name="AgentToolWindowCommandId" value="0x0100" />
-      <IDSymbol name="FocusClaudeVsCommandId" value="0x0101" />
+      <IDSymbol name="FocusClaudeStudioCommandId" value="0x0101" />
       <IDSymbol name="EditorSendSelectionCommandId" value="0x0102" />
       <IDSymbol name="SolutionExplorerSendFileCommandId" value="0x0103" />
       <IDSymbol name="UsageToolWindowCommandId" value="0x0104" />
       <IDSymbol name="McpToolWindowCommandId" value="0x0105" />
-      <IDSymbol name="ClaudeVsSubMenu" value="0x1100" />
-      <IDSymbol name="ClaudeVsSubMenuGroup" value="0x1101" />
+      <IDSymbol name="ClaudeStudioSubMenu" value="0x1100" />
+      <IDSymbol name="ClaudeStudioSubMenuGroup" value="0x1101" />
       <IDSymbol name="EditorContextMenuGroup" value="0x1020" />
       <IDSymbol name="SolutionExplorerContextMenuGroup" value="0x1021" />
-      <IDSymbol name="ClaudeVsExtensionsMenuGroup" value="0x1022" />
+      <IDSymbol name="ClaudeStudioExtensionsMenuGroup" value="0x1022" />
     </GuidSymbol>
 
     <!-- IDM_VS_MENU_EXTENSIONS (0x0091) is not defined in vsshlids.h shipped with

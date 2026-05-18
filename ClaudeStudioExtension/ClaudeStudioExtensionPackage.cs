@@ -1,11 +1,11 @@
-﻿using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell;
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.Shell.Interop;
 
-namespace ClaudeVsExtension
+namespace ClaudeStudioExtension
 {
     /// <summary>
     /// This is the class that implements the package exposed by this assembly.
@@ -31,14 +31,14 @@ namespace ClaudeVsExtension
     [ProvideToolWindow(typeof(Usage.UsageToolWindow), Transient = true)]
     [ProvideToolWindow(typeof(Mcp.McpToolWindow), Transient = true)]
     [Guid(PackageGuidString)]
-    public sealed class ClaudeVsExtensionPackage : AsyncPackage
+    public sealed class ClaudeStudioExtensionPackage : AsyncPackage
     {
         /// <summary>
-        /// ClaudeVsExtensionPackage GUID string.
+        /// ClaudeStudioExtensionPackage GUID string.
         /// </summary>
         public const string PackageGuidString = "36a4617b-b537-4a28-bdd4-a18067f26ea2";
 
-        public static ClaudeVsExtensionPackage? Instance { get; private set; }
+        public static ClaudeStudioExtensionPackage? Instance { get; private set; }
 
         private uint _solutionEventsCookie;
         private SolutionEventsHandler? _solutionEventsHandler;

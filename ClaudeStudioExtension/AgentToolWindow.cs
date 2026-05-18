@@ -1,8 +1,8 @@
-﻿using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell;
 using System;
 using System.Runtime.InteropServices;
 
-namespace ClaudeVsExtension
+namespace ClaudeStudioExtension
 {
     /// <summary>
     /// This class implements the tool window exposed by this package and hosts a user control.
@@ -23,7 +23,7 @@ namespace ClaudeVsExtension
         /// </summary>
         public AgentToolWindow() : base(null)
         {
-            this.Caption = "Claude VS Chat";
+            this.Caption = "Claude Code Studio Chat";
 
             // This is the user control hosted by the tool window; Note that, even if this class implements IDisposable,
             // we are not calling Dispose on this object. This is because ToolWindowPane calls Dispose on
