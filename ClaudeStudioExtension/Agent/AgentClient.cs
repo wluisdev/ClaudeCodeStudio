@@ -1,12 +1,12 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
-using ClaudeVsShared;
+using ClaudeStudioShared;
 
-namespace ClaudeVsExtension.Agent;
+namespace ClaudeStudioExtension.Agent;
 
 public class AgentClient
 {
@@ -73,7 +73,7 @@ public class AgentClient
         {
             OutputLog.Error($"agent failed to signal READY (got: {ready ?? "NULL"})");
             throw new Exception(
-                $"ClaudeVsAgent failed to start.\n" +
+                $"ClaudeStudioAgent failed to start.\n" +
                 $"Response: {ready ?? "NULL"}");
         }
 
@@ -241,14 +241,14 @@ public class AgentClient
 
         var agentPath = Path.Combine(
             extensionDirectory,
-            "ClaudeVsAgent",
-            "ClaudeVsAgent.exe");
+            "ClaudeStudioAgent",
+            "ClaudeStudioAgent.exe");
 
         if (File.Exists(agentPath))
             return agentPath;
 
         throw new FileNotFoundException(
-            $"ClaudeVsAgent.exe not found at: {agentPath}");
+            $"ClaudeStudioAgent.exe not found at: {agentPath}");
     }
 
     //private static string GetAgentPath()
@@ -260,14 +260,14 @@ public class AgentClient
     //    {
     //        var agentProjectPath = Path.Combine(
     //            currentDirectory.FullName,
-    //            "ClaudeVsAgent");
+    //            "ClaudeStudioAgent");
 
     //        if (Directory.Exists(agentProjectPath))
     //        {
     //            var agentPath = Directory
     //                .GetFiles(
     //                    agentProjectPath,
-    //                    "ClaudeVsAgent.exe",
+    //                    "ClaudeStudioAgent.exe",
     //                    SearchOption.AllDirectories)
     //                .FirstOrDefault(path =>
     //                    path.Contains(@"\bin\Debug\") ||
@@ -281,6 +281,6 @@ public class AgentClient
     //    }
 
     //    throw new FileNotFoundException(
-    //        "ClaudeVsAgent.exe not found. Build the ClaudeVsAgent project first.");
+    //        "ClaudeStudioAgent.exe not found. Build the ClaudeStudioAgent project first.");
     //}
 }

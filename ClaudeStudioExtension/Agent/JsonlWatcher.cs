@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 
-namespace ClaudeVsExtension.Agent;
+namespace ClaudeStudioExtension.Agent;
 
 /// <summary>
 /// Watches the Claude Code session JSONL file and emits real-time events with
@@ -235,7 +235,7 @@ public sealed class JsonlWatcher : IDisposable
                 }
 
                 if (summary != null && summary.Length > 240)
-                    summary = summary.Substring(0, 240) + "…";
+                    summary = summary.Substring(0, 237) + "...";
 
                 bool isError = item.TryGetProperty("is_error", out var err) && err.GetBoolean();
                 OnEvent?.Invoke(isError ? "tool_error" : "tool_result", "", null, summary ?? "", id);
