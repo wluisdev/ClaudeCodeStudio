@@ -20,6 +20,7 @@ public class McpServer
     public Dictionary<string, string> Env { get; set; } = new();
     public string Url { get; set; } = "";
     public Dictionary<string, string> Headers { get; set; } = new();
+    public bool Disabled { get; set; }
 
     public McpServer Clone() => new()
     {
@@ -30,6 +31,7 @@ public class McpServer
         Env = new Dictionary<string, string>(Env),
         Url = Url,
         Headers = new Dictionary<string, string>(Headers),
+        Disabled = Disabled,
     };
 }
 
@@ -53,14 +55,24 @@ public static class McpConfigStore
         if (string.IsNullOrWhiteSpace(text)) return new List<McpServer>();
 
         using var doc = JsonDocument.Parse(text);
-        if (!doc.RootElement.TryGetProperty("mcpServers", out var serversEl) ||
-            serversEl.ValueKind != JsonValueKind.Object)
-            return new List<McpServer>();
-
         var list = new List<McpServer>();
-        foreach (var prop in serversEl.EnumerateObject())
-            list.Add(ParseServer(prop.Name, prop.Value));
+        LoadSection(doc, "mcpServers", disabled: false, list);
+        LoadSection(doc, "_disabledMcpServers", disabled: true, list);
         return list;
+    }
+
+    private static void LoadSection(JsonDocument doc, string key, bool disabled, List<McpServer> list)
+    {
+        if (!doc.RootElement.TryGetProperty(key, out var serversEl) ||
+            serversEl.ValueKind != JsonValueKind.Object) return;
+        foreach (var prop in serversEl.EnumerateObject())
+        {
+            var s = ParseServer(prop.Name, prop.Value);
+            s.Disabled = disabled;
+            var existing = list.FirstOrDefault(x => x.Name == s.Name);
+            if (existing != null) list.Remove(existing);
+            list.Add(s);
+        }
     }
 
     private static McpServer ParseServer(string name, JsonElement el)
@@ -115,12 +127,18 @@ public static class McpConfigStore
 
     private static void WriteProjectFile(string path, List<McpServer> servers)
     {
+        var hasDisabled = servers.Any(x => x.Disabled);
         using var ms = new MemoryStream();
         using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true }))
         {
             w.WriteStartObject();
             w.WritePropertyName("mcpServers");
-            WriteServersObject(w, servers);
+            WriteServersFiltered(w, servers, disabled: false);
+            if (hasDisabled)
+            {
+                w.WritePropertyName("_disabledMcpServers");
+                WriteServersFiltered(w, servers, disabled: true);
+            }
             w.WriteEndObject();
         }
         AtomicWrite(path, ms.ToArray());
@@ -144,11 +162,12 @@ public static class McpConfigStore
             }
         }
 
+        var hasDisabled = servers.Any(x => x.Disabled);
         using var ms = new MemoryStream();
         using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true }))
         {
             w.WriteStartObject();
-            bool wroteServers = false;
+            bool wroteServers = false, wroteDisabled = false;
             if (existing != null)
             {
                 foreach (var kv in existing)
@@ -156,8 +175,17 @@ public static class McpConfigStore
                     if (kv.Key == "mcpServers")
                     {
                         w.WritePropertyName("mcpServers");
-                        WriteServersObject(w, servers);
+                        WriteServersFiltered(w, servers, disabled: false);
                         wroteServers = true;
+                    }
+                    else if (kv.Key == "_disabledMcpServers")
+                    {
+                        if (hasDisabled)
+                        {
+                            w.WritePropertyName("_disabledMcpServers");
+                            WriteServersFiltered(w, servers, disabled: true);
+                        }
+                        wroteDisabled = true;
                     }
                     else
                     {
@@ -169,48 +197,56 @@ public static class McpConfigStore
             if (!wroteServers)
             {
                 w.WritePropertyName("mcpServers");
-                WriteServersObject(w, servers);
+                WriteServersFiltered(w, servers, disabled: false);
+            }
+            if (!wroteDisabled && hasDisabled)
+            {
+                w.WritePropertyName("_disabledMcpServers");
+                WriteServersFiltered(w, servers, disabled: true);
             }
             w.WriteEndObject();
         }
         AtomicWrite(path, ms.ToArray());
     }
 
-    private static void WriteServersObject(Utf8JsonWriter w, List<McpServer> servers)
+    private static void WriteServersFiltered(Utf8JsonWriter w, List<McpServer> servers, bool disabled)
     {
         w.WriteStartObject();
-        foreach (var s in servers)
+        foreach (var s in servers.Where(x => x.Disabled == disabled))
         {
             w.WritePropertyName(s.Name);
-            w.WriteStartObject();
+            WriteServerBody(w, s);
+        }
+        w.WriteEndObject();
+    }
 
-            if (s.Transport == McpTransport.Stdio)
+    private static void WriteServerBody(Utf8JsonWriter w, McpServer s)
+    {
+        w.WriteStartObject();
+        if (s.Transport == McpTransport.Stdio)
+        {
+            w.WriteString("type", "stdio");
+            w.WriteString("command", s.Command);
+            w.WriteStartArray("args");
+            foreach (var a in s.Args) w.WriteStringValue(a);
+            w.WriteEndArray();
+            if (s.Env.Count > 0)
             {
-                w.WriteString("type", "stdio");
-                w.WriteString("command", s.Command);
-                w.WriteStartArray("args");
-                foreach (var a in s.Args) w.WriteStringValue(a);
-                w.WriteEndArray();
-                if (s.Env.Count > 0)
-                {
-                    w.WriteStartObject("env");
-                    foreach (var kv in s.Env) w.WriteString(kv.Key, kv.Value);
-                    w.WriteEndObject();
-                }
+                w.WriteStartObject("env");
+                foreach (var kv in s.Env) w.WriteString(kv.Key, kv.Value);
+                w.WriteEndObject();
             }
-            else
+        }
+        else
+        {
+            w.WriteString("type", s.Transport == McpTransport.Sse ? "sse" : "http");
+            w.WriteString("url", s.Url);
+            if (s.Headers.Count > 0)
             {
-                w.WriteString("type", s.Transport == McpTransport.Sse ? "sse" : "http");
-                w.WriteString("url", s.Url);
-                if (s.Headers.Count > 0)
-                {
-                    w.WriteStartObject("headers");
-                    foreach (var kv in s.Headers) w.WriteString(kv.Key, kv.Value);
-                    w.WriteEndObject();
-                }
+                w.WriteStartObject("headers");
+                foreach (var kv in s.Headers) w.WriteString(kv.Key, kv.Value);
+                w.WriteEndObject();
             }
-
-            w.WriteEndObject();
         }
         w.WriteEndObject();
     }

@@ -159,6 +159,7 @@ public partial class McpToolWindowControl : UserControl
             : (string.IsNullOrEmpty(s.Url) ? "(no url)" : s.Url);
 
         var stack = new StackPanel { Orientation = Orientation.Vertical };
+        if (s.Disabled) stack.Opacity = 0.5;
 
         var topRow = new StackPanel { Orientation = Orientation.Horizontal };
         topRow.Children.Add(new TextBlock
@@ -185,6 +186,26 @@ public partial class McpToolWindowControl : UserControl
                 Typography = { Capitals = FontCapitals.AllSmallCaps },
             },
         });
+        if (s.Disabled)
+        {
+            topRow.Children.Add(new Border
+            {
+                Background = SurfaceBrush,
+                BorderBrush = BorderBrushColor,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(3),
+                Padding = new Thickness(5, 0, 5, 1),
+                Margin = new Thickness(4, 2, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock
+                {
+                    Text = "disabled",
+                    Foreground = MutedBrush,
+                    FontSize = 9,
+                    Typography = { Capitals = FontCapitals.AllSmallCaps },
+                },
+            });
+        }
         stack.Children.Add(topRow);
 
         stack.Children.Add(new TextBlock
@@ -255,6 +276,7 @@ public partial class McpToolWindowControl : UserControl
 
         NameBox.Text = s.Name;
         NameBox.IsEnabled = isNew;
+        DisableSwitch.IsChecked = !s.Disabled;
         RbStdio.IsChecked = s.Transport == McpTransport.Stdio;
         RbHttp.IsChecked = s.Transport == McpTransport.Http;
         RbSse.IsChecked = s.Transport == McpTransport.Sse;
@@ -330,6 +352,19 @@ public partial class McpToolWindowControl : UserControl
     private void OnAddEnvClick(object sender, RoutedEventArgs e) => EnvList.Children.Add(BuildKvRow("", "", EnvList));
     private void OnAddHeaderClick(object sender, RoutedEventArgs e) => HeadersList.Children.Add(BuildKvRow("", "", HeadersList));
 
+    private static bool IsSecretKey(string? key)
+    {
+        if (string.IsNullOrEmpty(key)) return false;
+        var u = key!.ToUpperInvariant();
+        return u.Contains("TOKEN")
+            || u.Contains("SECRET")
+            || u.Contains("PASSWORD")
+            || u.Contains("PASSWD")
+            || u.Contains("API_KEY")
+            || u.Contains("APIKEY")
+            || u.Contains("CREDENTIAL");
+    }
+
     private Grid BuildKvRow(string key, string value, StackPanel parent)
     {
         var grid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
@@ -337,18 +372,73 @@ public partial class McpToolWindowControl : UserControl
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var k = new TextBox { Text = key, Tag = "key" };
         var v = new TextBox { Text = value, Tag = "value", FontFamily = new FontFamily("Cascadia Code, Consolas, monospace") };
+        var pb = new PasswordBox { Tag = "passvalue", FontFamily = new FontFamily("Cascadia Code, Consolas, monospace") };
+        pb.Password = value;
+
+        var eye = new Button
+        {
+            Content = "show",
+            Width = 44,
+            Margin = new Thickness(4, 0, 0, 0),
+            FontSize = 10,
+            Tag = "eye",
+            Visibility = Visibility.Collapsed,
+        };
+
         var del = new Button { Content = "x", Width = 28, Margin = new Thickness(4, 0, 0, 0) };
         del.Click += (_, _) => parent.Children.Remove(grid);
 
+        bool revealed = false;
+
+        void ApplyMask()
+        {
+            bool secret = IsSecretKey(k.Text);
+            eye.Visibility = secret ? Visibility.Visible : Visibility.Collapsed;
+            if (secret && !revealed)
+            {
+                if (v.Visibility == Visibility.Visible)
+                {
+                    pb.Password = v.Text;
+                    v.Visibility = Visibility.Collapsed;
+                    pb.Visibility = Visibility.Visible;
+                }
+                eye.Content = "show";
+            }
+            else
+            {
+                if (pb.Visibility == Visibility.Visible)
+                {
+                    v.Text = pb.Password;
+                    pb.Visibility = Visibility.Collapsed;
+                    v.Visibility = Visibility.Visible;
+                }
+                eye.Content = secret ? "hide" : "show";
+            }
+        }
+
+        eye.Click += (_, _) =>
+        {
+            revealed = !revealed;
+            ApplyMask();
+        };
+        k.TextChanged += (_, _) => ApplyMask();
+
         Grid.SetColumn(k, 0);
         Grid.SetColumn(v, 2);
-        Grid.SetColumn(del, 3);
+        Grid.SetColumn(pb, 2);
+        Grid.SetColumn(eye, 3);
+        Grid.SetColumn(del, 4);
         grid.Children.Add(k);
         grid.Children.Add(v);
+        grid.Children.Add(pb);
+        grid.Children.Add(eye);
         grid.Children.Add(del);
+
+        ApplyMask();
         return grid;
     }
 
@@ -360,11 +450,17 @@ public partial class McpToolWindowControl : UserControl
             if (child is not Grid g) continue;
             string? k = null, v = null;
             foreach (var c in g.Children)
+            {
                 if (c is TextBox tb)
                 {
                     if ((string?)tb.Tag == "key") k = tb.Text;
-                    else if ((string?)tb.Tag == "value") v = tb.Text;
+                    else if ((string?)tb.Tag == "value" && tb.Visibility == Visibility.Visible) v = tb.Text;
                 }
+                else if (c is PasswordBox pb && (string?)pb.Tag == "passvalue" && pb.Visibility == Visibility.Visible)
+                {
+                    v = pb.Password;
+                }
+            }
             if (string.IsNullOrWhiteSpace(k))
             {
                 if (!string.IsNullOrEmpty(v)) return (map, $"Empty {label} key");
@@ -395,7 +491,7 @@ public partial class McpToolWindowControl : UserControl
                       : RbSse.IsChecked == true ? McpTransport.Sse
                       : McpTransport.Http;
 
-        var draft = new McpServer { Name = name, Transport = transport };
+        var draft = new McpServer { Name = name, Transport = transport, Disabled = DisableSwitch.IsChecked != true };
 
         if (transport == McpTransport.Stdio)
         {

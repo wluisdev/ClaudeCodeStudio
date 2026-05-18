@@ -113,6 +113,31 @@
             </Setter>
         </Style>
 
+        <Style TargetType="PasswordBox">
+            <Setter Property="Background" Value="{StaticResource surfaceBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource fgBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource borderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="CaretBrush" Value="{StaticResource accentBrush}"/>
+            <Setter Property="SelectionBrush" Value="{StaticResource accentBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="PasswordBox">
+                        <Border x:Name="brd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4">
+                            <ScrollViewer x:Name="PART_ContentHost" Padding="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="brd" Property="BorderBrush" Value="{StaticResource accentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="ComboToggleStyle" TargetType="ToggleButton">
             <Setter Property="Template">
                 <Setter.Value>
@@ -221,6 +246,32 @@
             </Setter>
         </Style>
 
+        <Style x:Key="SwitchToggle" TargetType="ToggleButton">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="18"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Background" Value="#3a3a3a"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="track" CornerRadius="9" Background="{TemplateBinding Background}">
+                            <Canvas>
+                                <Ellipse x:Name="thumb" Width="12" Height="12" Fill="#888888" Canvas.Left="3" Canvas.Top="3"/>
+                            </Canvas>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="track" Property="Background" Value="#3d2a1e"/>
+                                <Setter TargetName="thumb" Property="Fill" Value="#d88763"/>
+                                <Setter TargetName="thumb" Property="Canvas.Left" Value="17"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="LabelStyle" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource mutedBrush}"/>
             <Setter Property="FontSize" Value="10"/>
@@ -285,7 +336,14 @@
             <Grid x:Name="EditPanel" Grid.Column="2" Margin="14" Visibility="Collapsed">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
-                        <TextBlock x:Name="EditTitle" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="EditTitle" Grid.Column="0" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <ToggleButton x:Name="DisableSwitch" Grid.Column="1" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center" ToolTip="Toggle enabled / disabled"/>
+                        </Grid>
 
                         <TextBlock Text="Template" Style="{StaticResource LabelStyle}"/>
                         <ComboBox x:Name="TemplateCombo" SelectionChanged="OnTemplateChanged"/>

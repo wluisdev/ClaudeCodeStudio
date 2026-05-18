@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using Microsoft.VisualStudio.Imaging;
 using Microsoft.VisualStudio.Shell;
 
 namespace ClaudeVsExtension.Mcp;
@@ -10,6 +11,7 @@ public class McpToolWindow : ToolWindowPane
     public McpToolWindow() : base(null)
     {
         this.Caption = "Claude VS MCP Servers";
+        this.BitmapImageMoniker = KnownMonikers.Extension;
         this.Content = new McpToolWindowControl();
     }
 }
