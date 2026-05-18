@@ -218,6 +218,7 @@ namespace ClaudeVsExtension
 
             IVsWindowFrame windowFrame = (IVsWindowFrame)window.Frame;
             Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(windowFrame.Show());
+            ActiveControl?.FocusTextarea();
         }
 
         private void ExecuteFocus(object sender, EventArgs e)

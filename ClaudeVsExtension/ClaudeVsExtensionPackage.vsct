@@ -20,6 +20,9 @@
   <!--This header contains the command ids for the menus provided by the shell. -->
   <Extern href="vsshlids.h"/>
 
+  <!--This header contains the GUID and IDs for the VS Image Catalog (KnownImageIds.Chat etc.) -->
+  <Extern href="KnownImageIds.vsct"/>
+
   <!--The Commands section is where commands, menus, and menu groups are defined.
       This section uses a Guid to identify the package that provides the command defined inside it. -->
   <Commands package="guidClaudeVsExtensionPackage">
@@ -33,7 +36,7 @@
 
     <Menus>
       <Menu guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenu" priority="0x0102" type="Menu">
-        <Parent guid="guidSHLMainMenu" id="IDG_VS_TOOLS_EXT_CUST"/>
+        <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsExtensionsMenuGroup"/>
         <Strings>
           <ButtonText>Claude VS</ButtonText>
           <CommandName>Claude VS</CommandName>
@@ -42,6 +45,9 @@
     </Menus>
 
     <Groups>
+      <Group guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsExtensionsMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMenuExtensions" id="IDM_VS_MENU_EXTENSIONS"/>
+      </Group>
       <Group guid="guidClaudeVsExtensionPackageCmdSet" id="EditorContextMenuGroup" priority="0x0600">
         <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN"/>
       </Group>
@@ -64,11 +70,12 @@
               <CommandFlag>DefaultInvisible</CommandFlag>
               <CommandFlag>DynamicVisibility</CommandFlag>
           If you do not want an image next to your command, remove the Icon node /> -->
-      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="AgentToolWindowCommandId" priority="0x0100" type="Button">
-        <Parent guid="guidSHLMainMenu" id="IDG_VS_TOOLS_EXT_CUST"/>
-        <Icon guid="guidImages" id="bmpPic1" />
+      <Button guid="guidClaudeVsExtensionPackageCmdSet" id="AgentToolWindowCommandId" priority="0x0099" type="Button">
+        <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenuGroup"/>
+        <Icon guid="ImageCatalogGuid" id="MessageBubble" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
         <Strings>
-          <ButtonText>AgentToolWindow</ButtonText>
+          <ButtonText>Chat</ButtonText>
         </Strings>
       </Button>
       <Button guid="guidClaudeVsExtensionPackageCmdSet" id="FocusClaudeVsCommandId" priority="0x0101" type="Button">
@@ -95,12 +102,16 @@
       </Button>
       <Button guid="guidClaudeVsExtensionPackageCmdSet" id="UsageToolWindowCommandId" priority="0x0100" type="Button">
         <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenuGroup"/>
+        <Icon guid="ImageCatalogGuid" id="BarChart" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
         <Strings>
           <ButtonText>Usage</ButtonText>
         </Strings>
       </Button>
       <Button guid="guidClaudeVsExtensionPackageCmdSet" id="McpToolWindowCommandId" priority="0x0101" type="Button">
         <Parent guid="guidClaudeVsExtensionPackageCmdSet" id="ClaudeVsSubMenuGroup"/>
+        <Icon guid="ImageCatalogGuid" id="LocalServer" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
         <Strings>
           <ButtonText>MCP Servers</ButtonText>
         </Strings>
@@ -138,7 +149,16 @@
       <IDSymbol name="ClaudeVsSubMenuGroup" value="0x1101" />
       <IDSymbol name="EditorContextMenuGroup" value="0x1020" />
       <IDSymbol name="SolutionExplorerContextMenuGroup" value="0x1021" />
+      <IDSymbol name="ClaudeVsExtensionsMenuGroup" value="0x1022" />
     </GuidSymbol>
+
+    <!-- IDM_VS_MENU_EXTENSIONS (0x0091) is not defined in vsshlids.h shipped with
+         Microsoft.VSSDK.BuildTools, so we declare it locally bound to the same
+         guidSHLMainMenu GUID under an alias name. -->
+    <GuidSymbol name="guidSHLMenuExtensions" value="{d309f791-903f-11d0-9efc-00a0c911004f}">
+      <IDSymbol name="IDM_VS_MENU_EXTENSIONS" value="0x0091" />
+    </GuidSymbol>
+
 
     <GuidSymbol name="guidImages" value="{6ebedfa4-f3fb-4a41-a6b3-9a15b185f370}" >
       <IDSymbol name="bmpPic1" value="1" />
