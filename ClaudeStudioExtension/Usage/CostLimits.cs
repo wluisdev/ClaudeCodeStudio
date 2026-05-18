@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Text.Json;
 
-namespace ClaudeVsExtension.Usage;
+namespace ClaudeStudioExtension.Usage;
 
 public class CostLimits
 {
@@ -13,7 +13,7 @@ public class CostLimits
     private static string FilePath =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ClaudeVsStudio", "cost_limits.json");
+            "ClaudeStudio", "cost_limits.json");
 
     public static CostLimits Load()
     {

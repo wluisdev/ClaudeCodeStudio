@@ -6,7 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using Microsoft.VisualStudio.Shell;
 
-namespace ClaudeVsExtension.Usage;
+namespace ClaudeStudioExtension.Usage;
 
 public partial class UsageToolWindowControl : UserControl
 {
@@ -83,7 +83,7 @@ public partial class UsageToolWindowControl : UserControl
         var totalOut   = list.Sum(r => r.OutputTokens);
         var totalCache = list.Sum(r => r.CacheReadTokens + r.CacheCreationTokens);
 
-        TotalCostText.Text     = $"${totalCost:F4}";
+        TotalCostText.Text     = $"${totalCost:F2}";
         TotalInText.Text       = totalIn.ToString("N0");
         TotalOutText.Text      = totalOut.ToString("N0");
         TotalCacheText.Text    = totalCache.ToString("N0");

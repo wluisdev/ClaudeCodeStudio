@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 
-namespace ClaudeVsExtension.Usage;
+namespace ClaudeStudioExtension.Usage;
 
 public class SessionUsage
 {
