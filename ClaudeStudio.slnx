@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="ClaudeStudioAgent/ClaudeStudioAgent.csproj" />
+  <Project Path="ClaudeStudioExtension/ClaudeStudioExtension.csproj" Id="1d0644b2-0126-43c6-be49-e9fc3a424a57">
+    <Deploy />
+  </Project>
+  <Project Path="ClaudeStudioShared/ClaudeStudioShared.csproj" />
+</Solution>
