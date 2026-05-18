@@ -1,4 +1,4 @@
-namespace ClaudeVsShared;
+namespace ClaudeStudioShared;
 
 public class ChatRequest
 {
