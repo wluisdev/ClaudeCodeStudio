@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 
-namespace ClaudeVsExtension.Mcp;
+namespace ClaudeStudioExtension.Mcp;
 
 public enum McpScope { Project, User }
 

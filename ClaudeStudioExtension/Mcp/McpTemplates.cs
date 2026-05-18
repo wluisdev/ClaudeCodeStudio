@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace ClaudeVsExtension.Mcp;
+namespace ClaudeStudioExtension.Mcp;
 
 public class McpTemplate
 {

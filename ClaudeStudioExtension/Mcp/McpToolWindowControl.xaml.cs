@@ -8,7 +8,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.VisualStudio.Shell;
 
-namespace ClaudeVsExtension.Mcp;
+namespace ClaudeStudioExtension.Mcp;
 
 public partial class McpToolWindowControl : UserControl
 {
