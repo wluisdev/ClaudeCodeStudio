@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using ClaudeVsShared;
+using ClaudeStudioShared;
 
 string? sessionId = null;
 
@@ -283,7 +283,7 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
                     }
 
                     if (summary != null && summary.Length > 240)
-                        summary = summary.Substring(0, 240) + "…";
+                        summary = summary.Substring(0, 237) + "...";
 
                     bool isError = item.TryGetProperty("is_error", out var errProp) && errProp.GetBoolean();
 
