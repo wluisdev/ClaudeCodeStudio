@@ -1,4 +1,4 @@
-console.log("Claude VS loaded");
+console.log("Claude Code Studio loaded");
 
 // ── Layout toggle ────────────────────────────────────────────
 function toggleLayout() {
@@ -170,7 +170,7 @@ function exportChatToMarkdown() {
     const pad = n => String(n).padStart(2, "0");
     const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
-    let md = `# Claude VS — Chat Export\n\n_Exported ${ts}_\n_Model: ${modelLabel}_\n\n---\n\n`;
+    let md = `# Claude Code Studio — Chat Export\n\n_Exported ${ts}_\n_Model: ${modelLabel}_\n\n---\n\n`;
     let lastRole = null;
     for (const msg of items) {
         const bubble = msg.querySelector(".bubble");
@@ -267,7 +267,7 @@ const modelSelect = document.querySelector(".model-select");
 function updateCaption() {
     const label = modelSelect.options[modelSelect.selectedIndex]?.text || modelSelect.value;
     try {
-        window.chrome.webview.postMessage({ type: "set-caption", text: `Claude VS — ${label}` });
+        window.chrome.webview.postMessage({ type: "set-caption", text: `Claude Code Studio — ${label}` });
     } catch (e) { /* webview not ready yet */ }
 }
 modelSelect.addEventListener("change", updateCaption);
@@ -1438,7 +1438,7 @@ function removeLiveTimer() {
 function clearChat() {
     messages.innerHTML = `
         <div class="welcome">
-            <div class="hero"><span class="logo">✺</span> Claude VS</div>
+            <div class="hero"><span class="logo">✺</span> Claude Code Studio</div>
             <div class="bot">🤖</div>
         </div>`;
 
