@@ -364,3 +364,6 @@ FodyWeavers.xsd
 
 # Claude Code
 .claude/
+
+# Local PoC / diagnostic scripts (not part of the product)
+_poc/

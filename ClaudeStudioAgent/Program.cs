@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using ClaudeStudioShared;
 
-string? sessionId = null;
+ClaudeSession? session = null;
 
 try
 {
@@ -13,183 +13,335 @@ try
     while (true)
     {
         var line = Console.ReadLine();
+        if (line == null) break;
+        if (string.IsNullOrWhiteSpace(line)) continue;
 
-        if (line == null)
-            break;
-
-        if (string.IsNullOrWhiteSpace(line))
+        ChatRequest? request;
+        try
+        {
+            request = JsonSerializer.Deserialize<ChatRequest>(line);
+        }
+        catch (Exception ex)
+        {
+            EmitError($"failed to parse request: {ex.Message}");
             continue;
-
-        var request = JsonSerializer.Deserialize<ChatRequest>(line);
-
-        if (request == null)
-            continue;
+        }
+        if (request == null) continue;
 
         if (request.ResetSession)
         {
-            sessionId = null;
+            if (session != null)
+            {
+                await session.DisposeAsync();
+                session = null;
+            }
             continue;
         }
 
-        if (request.ResumeSessionId != null)
-            sessionId = request.ResumeSessionId;
-
-        var message = request.Message ?? "";
-        var model = request.Model ?? "claude-sonnet-4-6";
-        var effort = request.Effort;
-        var permissionMode = request.PermissionMode ?? "yolo";
-
-        sessionId = await StreamClaudeAsync(message, model, effort, permissionMode, request.WorkingDirectory, sessionId, request.AutoResume);
-    }
-}
-catch (Exception ex)
-{
-    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = ex.ToString() }));
-    Console.Out.Flush();
-}
-
-static void EmitTiming(string label, long ms)
-{
-    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"{label}: {ms}ms" }));
-    Console.Out.Flush();
-}
-
-static async Task<string?> StreamClaudeAsync(string message, string model, string? effort, string permissionMode, string? workingDirectory, string? sessionId, bool autoResume)
-{
-    var sw = Stopwatch.StartNew();
-    string? newSessionId = null;
-
-    var psi = new ProcessStartInfo
-    {
-        FileName = FindClaude(),
-
-        RedirectStandardInput = true,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-
-        StandardOutputEncoding = Encoding.UTF8,
-        StandardErrorEncoding = Encoding.UTF8,
-
-        UseShellExecute = false,
-        CreateNoWindow = true
-    };
-
-    if (!string.IsNullOrEmpty(workingDirectory) && Directory.Exists(workingDirectory))
-        psi.WorkingDirectory = workingDirectory;
-
-    psi.ArgumentList.Add("--output-format");
-    psi.ArgumentList.Add("stream-json");
-    psi.ArgumentList.Add("--verbose");
-    psi.ArgumentList.Add("--include-partial-messages");
-    psi.ArgumentList.Add("-p");
-    psi.ArgumentList.Add(message);
-    psi.ArgumentList.Add("--model");
-    psi.ArgumentList.Add(model);
-    if (permissionMode == "plan")
-    {
-        psi.ArgumentList.Add("--permission-mode");
-        psi.ArgumentList.Add("plan");
-    }
-    else if (permissionMode == "ask")
-    {
-        // no extra flag — default claude behavior
-    }
-    else // "yolo" (default)
-    {
-        psi.ArgumentList.Add("--dangerously-skip-permissions");
-    }
-
-    if (!string.IsNullOrEmpty(effort))
-    {
-        psi.ArgumentList.Add("--effort");
-        psi.ArgumentList.Add(effort);
-    }
-
-    if (sessionId != null)
-    {
-        psi.ArgumentList.Add("--resume");
-        psi.ArgumentList.Add(sessionId);
-    }
-    else if (autoResume)
-    {
-        psi.ArgumentList.Add("--continue");
-    }
-
-    using var process = Process.Start(psi);
-
-    if (process == null)
-    {
-        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = "Could not start Claude." }));
-        Console.Out.Flush();
-        return sessionId;
-    }
-
-    EmitTiming("process started", sw.ElapsedMilliseconds);
-    process.StandardInput.Close();
-
-    var errorTask = process.StandardError.ReadToEndAsync();
-    string? line;
-    bool firstLine = true;
-    bool firstChunk = true;
-
-    while ((line = await process.StandardOutput.ReadLineAsync()) != null)
-    {
-        if (string.IsNullOrWhiteSpace(line)) continue;
-
-        if (firstLine)
+        var wantKey = ClaudeSession.MakeKey(request);
+        if (session == null || session.Key != wantKey)
         {
-            EmitTiming("first stdout line", sw.ElapsedMilliseconds);
-            firstLine = false;
+            if (session != null) await session.DisposeAsync();
+            session = new ClaudeSession(request);
+            try
+            {
+                await session.StartAsync();
+            }
+            catch (Exception ex)
+            {
+                EmitError($"failed to start claude session: {ex.Message}");
+                session = null;
+                EmitDone();
+                continue;
+            }
         }
 
         try
         {
-            var evt = JsonSerializer.Deserialize<JsonElement>(line);
+            await session.SendMessageAsync(request.Message ?? "");
+        }
+        catch (Exception ex)
+        {
+            EmitError($"send failed: {ex.Message}");
+            EmitDone();
+            // Session may be dead — drop it so next request respawns
+            await session.DisposeAsync();
+            session = null;
+        }
+    }
+}
+catch (Exception ex)
+{
+    EmitError(ex.ToString());
+}
+finally
+{
+    if (session != null) await session.DisposeAsync();
+}
+
+static void EmitError(string text)
+{
+    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = text }));
+    Console.Out.Flush();
+}
+
+static void EmitDone()
+{
+    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "done" }));
+    Console.Out.Flush();
+}
+
+/// <summary>
+/// Holds a single persistent claude.exe instance running with --input-format stream-json
+/// --output-format stream-json. Messages are written to its stdin as NDJSON; output is
+/// parsed and forwarded to the extension via ChatChunk lines on our stdout.
+///
+/// Restart is triggered externally (via key mismatch in the main loop) when model,
+/// effort, permissionMode, working dir, or resume params change.
+/// </summary>
+sealed class ClaudeSession : IAsyncDisposable
+{
+    private readonly string _model;
+    private readonly string? _effort;
+    private readonly string _permissionMode;
+    private readonly string? _workingDirectory;
+    private readonly string? _resumeSessionId;
+    private readonly bool _autoResume;
+
+    private Process? _proc;
+    private StreamWriter? _stdin;
+    private StreamReader? _stdout;
+    private readonly StringBuilder _stderrBuffer = new();
+    private Task? _stderrPump;
+    public string? SessionId { get; private set; }
+    public string Key { get; }
+
+    public ClaudeSession(ChatRequest request)
+    {
+        _model = request.Model ?? "claude-sonnet-4-6";
+        _effort = request.Effort;
+        _permissionMode = request.PermissionMode ?? "yolo";
+        _workingDirectory = request.WorkingDirectory;
+        _resumeSessionId = request.ResumeSessionId;
+        _autoResume = request.AutoResume;
+        Key = MakeKey(request);
+    }
+
+    public static string MakeKey(ChatRequest r) =>
+        $"{r.Model}|{r.Effort}|{r.PermissionMode}|{r.WorkingDirectory}|{r.ResumeSessionId}|{r.AutoResume}";
+
+    public async Task StartAsync()
+    {
+        var sw = Stopwatch.StartNew();
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = FindClaudeExe(),
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        if (!string.IsNullOrEmpty(_workingDirectory) && Directory.Exists(_workingDirectory))
+            psi.WorkingDirectory = _workingDirectory;
+
+        psi.ArgumentList.Add("--input-format");
+        psi.ArgumentList.Add("stream-json");
+        psi.ArgumentList.Add("--output-format");
+        psi.ArgumentList.Add("stream-json");
+        psi.ArgumentList.Add("--verbose");
+        psi.ArgumentList.Add("--include-partial-messages");
+        psi.ArgumentList.Add("--model");
+        psi.ArgumentList.Add(_model);
+
+        if (_permissionMode == "plan")
+        {
+            psi.ArgumentList.Add("--permission-mode");
+            psi.ArgumentList.Add("plan");
+        }
+        else if (_permissionMode == "ask")
+        {
+            // default claude behavior — no extra flag
+        }
+        else // "yolo" (default)
+        {
+            psi.ArgumentList.Add("--dangerously-skip-permissions");
+        }
+
+        if (!string.IsNullOrEmpty(_effort))
+        {
+            psi.ArgumentList.Add("--effort");
+            psi.ArgumentList.Add(_effort);
+        }
+
+        if (_resumeSessionId != null)
+        {
+            psi.ArgumentList.Add("--resume");
+            psi.ArgumentList.Add(_resumeSessionId);
+        }
+        else if (_autoResume)
+        {
+            psi.ArgumentList.Add("--continue");
+        }
+
+        _proc = Process.Start(psi)
+            ?? throw new Exception("Process.Start returned null");
+
+        // Force UTF-8 without BOM on stdin. .NET 10's default is already UTF-8 no BOM,
+        // but be explicit so this never regresses (the PoC hit a BOM bug on PS 5.1).
+        _stdin = new StreamWriter(_proc.StandardInput.BaseStream, new UTF8Encoding(false))
+        {
+            AutoFlush = false
+        };
+        _stdout = _proc.StandardOutput;
+
+        // Drain stderr in background. Without this, a full stderr pipe buffer would
+        // deadlock claude before it could emit init on stdout.
+        _stderrPump = Task.Run(async () =>
+        {
+            var buf = new char[4096];
+            try
+            {
+                while (true)
+                {
+                    int n = await _proc.StandardError.ReadAsync(buf, 0, buf.Length);
+                    if (n == 0) break;
+                    lock (_stderrBuffer) _stderrBuffer.Append(buf, 0, n);
+                }
+            }
+            catch { }
+        });
+
+        EmitTiming("claude spawned", sw.ElapsedMilliseconds);
+
+        // NOTE: we do NOT wait for `system/init` here. With `--input-format stream-json`
+        // (no `-p`), claude does not emit any stdout until it receives the first stdin
+        // line — waiting for init before sending the first message deadlocks both sides.
+        // Instead, init arrives as the first event of the first SendMessageAsync call
+        // and is processed by the same loop as everything else.
+    }
+
+    public async Task SendMessageAsync(string userText)
+    {
+        if (_stdin == null || _stdout == null || _proc == null || _proc.HasExited)
+            throw new InvalidOperationException("session not started or already exited");
+
+        var sw = Stopwatch.StartNew();
+
+        var userMsg = new
+        {
+            type = "user",
+            message = new { role = "user", content = userText },
+            parent_tool_use_id = (string?)null,
+            session_id = SessionId ?? ""
+        };
+        var ndjson = JsonSerializer.Serialize(userMsg);
+
+        await _stdin.WriteLineAsync(ndjson);
+        await _stdin.FlushAsync();
+
+        EmitTiming("message sent", sw.ElapsedMilliseconds);
+
+        bool firstLine = true;
+        bool firstChunk = true;
+
+        string? line;
+        while ((line = await _stdout.ReadLineAsync()) != null)
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            if (firstLine)
+            {
+                EmitTiming("first stdout line", sw.ElapsedMilliseconds);
+                firstLine = false;
+            }
+
+            JsonElement evt;
+            try { evt = JsonSerializer.Deserialize<JsonElement>(line); }
+            catch { continue; }
 
             if (!evt.TryGetProperty("type", out var typeProp)) continue;
             var type = typeProp.GetString();
 
-            if (type == "assistant")
+            if (type == "system")
+            {
+                // `system/init` is the first event claude emits after receiving the
+                // first stdin line (no `-p` mode). Capture session_id, emit a session
+                // chunk on first sighting, and record timing. Other system subtypes
+                // (status, rate_limit_event) are intentionally ignored.
+                if (!evt.TryGetProperty("subtype", out var subProp)) continue;
+                if (subProp.GetString() != "init") continue;
+
+                if (evt.TryGetProperty("session_id", out var sidProp))
+                {
+                    var sid = sidProp.GetString();
+                    if (!string.IsNullOrEmpty(sid) && sid != SessionId)
+                    {
+                        SessionId = sid;
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "session", Text = sid! }));
+                        Console.Out.Flush();
+                    }
+                }
+                EmitTiming("claude init", sw.ElapsedMilliseconds);
+            }
+            else if (type == "assistant")
             {
                 var msgObj = evt.GetProperty("message");
 
+                // Synthetic responses (slash commands like /cost, /context) come as a
+                // single complete assistant message with text content and no preceding
+                // stream_event deltas. Detect by model == "<synthetic>" and emit the
+                // text directly as a chunk.
+                bool isSynthetic = msgObj.TryGetProperty("model", out var modelEl)
+                    && modelEl.GetString() == "<synthetic>";
+
                 if (msgObj.TryGetProperty("usage", out var usageLive))
-                {
-                    var inTok = usageLive.TryGetProperty("input_tokens", out var iL) ? iL.GetInt32() : 0;
-                    var outTok = usageLive.TryGetProperty("output_tokens", out var oL) ? oL.GetInt32() : 0;
-                    var cacheRead = usageLive.TryGetProperty("cache_read_input_tokens", out var crL) ? crL.GetInt32() : 0;
-                    var cacheCreate = usageLive.TryGetProperty("cache_creation_input_tokens", out var ccL) ? ccL.GetInt32() : 0;
-                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
-                    {
-                        Type = "tokens-live",
-                        Text = $"{inTok + cacheCreate}/{outTok}/{cacheRead}"
-                    }));
-                    Console.Out.Flush();
-                }
+                    EmitTokensLive(usageLive);
 
-                // Text content is emitted incrementally via stream_event deltas
-                // (see --include-partial-messages). Only tool_use is parsed here
-                // because the final assistant event carries the fully-resolved input JSON.
                 var content = msgObj.GetProperty("content");
-                foreach (var item in content.EnumerateArray())
+                if (content.ValueKind == JsonValueKind.Array)
                 {
-                    if (!item.TryGetProperty("type", out var itemType)) continue;
-                    if (itemType.GetString() != "tool_use") continue;
-
-                    var name = item.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
-                    var id = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
-                    string? inputJson = null;
-                    if (item.TryGetProperty("input", out var inputProp))
-                        inputJson = inputProp.GetRawText();
-
-                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+                    foreach (var item in content.EnumerateArray())
                     {
-                        Type = "tool_use",
-                        Tool = name,
-                        ToolInput = inputJson,
-                        ToolId = id
-                    }));
-                    Console.Out.Flush();
+                        if (!item.TryGetProperty("type", out var itemType)) continue;
+                        var itemTypeStr = itemType.GetString();
+
+                        if (itemTypeStr == "tool_use")
+                        {
+                            var name = item.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
+                            var id = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+                            string? inputJson = null;
+                            if (item.TryGetProperty("input", out var inputProp))
+                                inputJson = inputProp.GetRawText();
+
+                            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+                            {
+                                Type = "tool_use",
+                                Tool = name,
+                                ToolInput = inputJson,
+                                ToolId = id
+                            }));
+                            Console.Out.Flush();
+                        }
+                        else if (itemTypeStr == "text" && isSynthetic)
+                        {
+                            var text = item.TryGetProperty("text", out var tp) ? tp.GetString() : null;
+                            if (!string.IsNullOrEmpty(text))
+                            {
+                                if (firstChunk)
+                                {
+                                    EmitTiming("first chunk", sw.ElapsedMilliseconds);
+                                    firstChunk = false;
+                                }
+                                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "chunk", Text = text }));
+                                Console.Out.Flush();
+                            }
+                        }
+                    }
                 }
             }
             else if (type == "stream_event")
@@ -216,40 +368,22 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
                     Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "chunk", Text = text }));
                     Console.Out.Flush();
                 }
-                else if (evtTypeStr == "message_delta")
+                else if (evtTypeStr == "message_delta" && streamEvt.TryGetProperty("usage", out var deltaUsage))
                 {
-                    if (!streamEvt.TryGetProperty("usage", out var deltaUsage)) continue;
-                    var inTok = deltaUsage.TryGetProperty("input_tokens", out var iD) ? iD.GetInt32() : 0;
-                    var outTok = deltaUsage.TryGetProperty("output_tokens", out var oD) ? oD.GetInt32() : 0;
-                    var cacheRead = deltaUsage.TryGetProperty("cache_read_input_tokens", out var crD) ? crD.GetInt32() : 0;
-                    var cacheCreate = deltaUsage.TryGetProperty("cache_creation_input_tokens", out var ccD) ? ccD.GetInt32() : 0;
-                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
-                    {
-                        Type = "tokens-live",
-                        Text = $"{inTok + cacheCreate}/{outTok}/{cacheRead}"
-                    }));
-                    Console.Out.Flush();
+                    EmitTokensLive(deltaUsage);
                 }
-                else if (evtTypeStr == "message_start")
+                else if (evtTypeStr == "message_start"
+                    && streamEvt.TryGetProperty("message", out var startMsg)
+                    && startMsg.TryGetProperty("usage", out var startUsage))
                 {
-                    if (!streamEvt.TryGetProperty("message", out var startMsg)) continue;
-                    if (!startMsg.TryGetProperty("usage", out var startUsage)) continue;
-                    var inTok = startUsage.TryGetProperty("input_tokens", out var iS) ? iS.GetInt32() : 0;
-                    var outTok = startUsage.TryGetProperty("output_tokens", out var oS) ? oS.GetInt32() : 0;
-                    var cacheRead = startUsage.TryGetProperty("cache_read_input_tokens", out var crS) ? crS.GetInt32() : 0;
-                    var cacheCreate = startUsage.TryGetProperty("cache_creation_input_tokens", out var ccS) ? ccS.GetInt32() : 0;
-                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
-                    {
-                        Type = "tokens-live",
-                        Text = $"{inTok + cacheCreate}/{outTok}/{cacheRead}"
-                    }));
-                    Console.Out.Flush();
+                    EmitTokensLive(startUsage);
                 }
             }
             else if (type == "user")
             {
-                if (!evt.TryGetProperty("message", out var userMsg)) continue;
-                if (!userMsg.TryGetProperty("content", out var userContent)) continue;
+                // tool_result content emitted by claude when a tool finished
+                if (!evt.TryGetProperty("message", out var userMsgObj)) continue;
+                if (!userMsgObj.TryGetProperty("content", out var userContent)) continue;
                 if (userContent.ValueKind != JsonValueKind.Array) continue;
 
                 foreach (var item in userContent.EnumerateArray())
@@ -272,10 +406,10 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
                             foreach (var c in contentProp.EnumerateArray())
                             {
                                 if (c.TryGetProperty("type", out var ct) && ct.GetString() == "text" &&
-                                    c.TryGetProperty("text", out var t))
+                                    c.TryGetProperty("text", out var tt))
                                 {
                                     if (sb.Length > 0) sb.Append('\n');
-                                    sb.Append(t.GetString());
+                                    sb.Append(tt.GetString());
                                 }
                             }
                             summary = sb.ToString();
@@ -300,22 +434,25 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
             {
                 EmitTiming("result received", sw.ElapsedMilliseconds);
 
+                // session id is stable across turns once set, but the result event
+                // re-emits it — refresh + re-broadcast in case the extension missed it
                 if (evt.TryGetProperty("session_id", out var sidProp))
                 {
-                    newSessionId = sidProp.GetString();
-                    if (!string.IsNullOrEmpty(newSessionId))
+                    var newSid = sidProp.GetString();
+                    if (!string.IsNullOrEmpty(newSid) && newSid != SessionId)
                     {
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "session", Text = newSessionId }));
+                        SessionId = newSid;
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "session", Text = newSid! }));
                         Console.Out.Flush();
                     }
                 }
 
                 if (evt.TryGetProperty("usage", out var usage))
                 {
-                    var inputTok    = usage.TryGetProperty("input_tokens",                out var inp)   ? inp.GetInt32()   : 0;
-                    var outputTok   = usage.TryGetProperty("output_tokens",               out var out_)  ? out_.GetInt32()  : 0;
-                    var cacheCreate = usage.TryGetProperty("cache_creation_input_tokens", out var cc)    ? cc.GetInt32()    : 0;
-                    var cacheRead   = usage.TryGetProperty("cache_read_input_tokens",     out var cr)    ? cr.GetInt32()    : 0;
+                    var inputTok = usage.TryGetProperty("input_tokens", out var inp) ? inp.GetInt32() : 0;
+                    var outputTok = usage.TryGetProperty("output_tokens", out var out_) ? out_.GetInt32() : 0;
+                    var cacheCreate = usage.TryGetProperty("cache_creation_input_tokens", out var cc) ? cc.GetInt32() : 0;
+                    var cacheRead = usage.TryGetProperty("cache_read_input_tokens", out var cr) ? cr.GetInt32() : 0;
                     var newIn = inputTok + cacheCreate;
                     Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "tokens", Text = $"{newIn}/{outputTok}/{cacheRead}" }));
                     Console.Out.Flush();
@@ -327,51 +464,102 @@ static async Task<string?> StreamClaudeAsync(string message, string model, strin
                     Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = resultProp.GetString() ?? "" }));
                     Console.Out.Flush();
                 }
-                break;
+
+                EmitTiming("total", sw.ElapsedMilliseconds);
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "done" }));
+                Console.Out.Flush();
+                return;
             }
+            // Other event types (status, rate_limit_event, etc.) are intentionally ignored.
         }
-        catch { /* ignora linhas malformadas */ }
-    }
 
-    EmitTiming("total", sw.ElapsedMilliseconds);
-    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "done" }));
-    Console.Out.Flush();
-
-    var error = await errorTask;
-    process.WaitForExit();
-
-    if (!string.IsNullOrWhiteSpace(error) && process.ExitCode != 0)
-    {
-        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = error.Trim() }));
+        // stdout closed mid-turn — claude died
+        var stderr = SnapshotStderr();
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+        {
+            Type = "error",
+            Text = string.IsNullOrWhiteSpace(stderr) ? "claude session ended unexpectedly" : stderr.Trim()
+        }));
+        Console.Out.Flush();
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "done" }));
         Console.Out.Flush();
     }
 
-    return newSessionId ?? sessionId;
-}
-
-static string FindClaude()
-{
-    var pathDirs = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
-    foreach (var dir in pathDirs)
+    private string SnapshotStderr()
     {
-        var candidate = Path.Combine(dir, "claude.exe");
-        if (File.Exists(candidate))
-            return candidate;
+        lock (_stderrBuffer) return _stderrBuffer.ToString();
     }
 
-    var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-    var fallbacks = new[]
+    private static void EmitTokensLive(JsonElement usage)
     {
-        Path.Combine(appData, @"npm\claude.exe"),
-        Path.Combine(appData, @"npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe"),
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"nodejs\claude.exe"),
-    };
+        var inTok = usage.TryGetProperty("input_tokens", out var i) ? i.GetInt32() : 0;
+        var outTok = usage.TryGetProperty("output_tokens", out var o) ? o.GetInt32() : 0;
+        var cacheRead = usage.TryGetProperty("cache_read_input_tokens", out var cr) ? cr.GetInt32() : 0;
+        var cacheCreate = usage.TryGetProperty("cache_creation_input_tokens", out var cc) ? cc.GetInt32() : 0;
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+        {
+            Type = "tokens-live",
+            Text = $"{inTok + cacheCreate}/{outTok}/{cacheRead}"
+        }));
+        Console.Out.Flush();
+    }
 
-    foreach (var path in fallbacks)
-        if (File.Exists(path))
-            return path;
+    private static void EmitTiming(string label, long ms)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"{label}: {ms}ms" }));
+        Console.Out.Flush();
+    }
 
-    throw new FileNotFoundException(
-        "claude.exe not found. Verify that Claude Code is installed and on PATH.");
+    private static string FindClaudeExe()
+    {
+        var pathDirs = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
+        foreach (var dir in pathDirs)
+        {
+            var candidate = Path.Combine(dir, "claude.exe");
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var fallbacks = new[]
+        {
+            Path.Combine(appData, @"npm\claude.exe"),
+            Path.Combine(appData, @"npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"nodejs\claude.exe"),
+        };
+
+        foreach (var path in fallbacks)
+            if (File.Exists(path))
+                return path;
+
+        throw new FileNotFoundException(
+            "claude.exe not found. Verify that Claude Code is installed and on PATH.");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_proc == null) return;
+        try
+        {
+            try { _stdin?.Close(); } catch { }
+            if (!_proc.HasExited)
+            {
+                if (!_proc.WaitForExit(2000))
+                {
+                    try { _proc.Kill(entireProcessTree: true); } catch { }
+                    try { _proc.WaitForExit(); } catch { }
+                }
+            }
+        }
+        finally
+        {
+            try { _stdout?.Dispose(); } catch { }
+            try { _stdin?.Dispose(); } catch { }
+            try { _proc.Dispose(); } catch { }
+            _stdin = null;
+            _stdout = null;
+            _proc = null;
+        }
+        await Task.CompletedTask;
+    }
 }
-
