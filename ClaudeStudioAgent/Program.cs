@@ -249,6 +249,16 @@ sealed class ClaudeSession : IAsyncDisposable
                 psi.ArgumentList.Add("--settings");
                 psi.ArgumentList.Add(settingsPath);
                 psi.ArgumentList.Add("--include-hook-events");
+                // Claude has an internal permission check for file-modifying tools
+                // (Edit/Write/MultiEdit) that runs BEFORE PreToolUse hooks in stdio
+                // mode. Without acceptEdits, claude blocks these tools with
+                // "Claude requested permissions to write to X, but you haven't
+                // granted it yet" — the hook never gets a chance. acceptEdits
+                // tells claude the internal check should auto-pass; the hook still
+                // fires for these tools (matcher includes Edit|Write|MultiEdit),
+                // so the user still sees the permission modal.
+                psi.ArgumentList.Add("--permission-mode");
+                psi.ArgumentList.Add("acceptEdits");
             }
         }
         else // "yolo" (default)
