@@ -30,6 +30,7 @@ internal static class HookMode
             string? toolName = hook.TryGetProperty("tool_name", out var tn) ? tn.GetString() : null;
             string? toolUseId = hook.TryGetProperty("tool_use_id", out var tid) ? tid.GetString() : null;
             string? toolInputJson = hook.TryGetProperty("tool_input", out var ti) ? ti.GetRawText() : null;
+            string? cwd = hook.TryGetProperty("cwd", out var cw) ? cw.GetString() : null;
 
             if (string.IsNullOrEmpty(toolName) || string.IsNullOrEmpty(toolUseId))
             {
@@ -61,6 +62,7 @@ internal static class HookMode
                 tool_use_id = toolUseId,
                 tool_name = toolName,
                 tool_input = JsonSerializer.Deserialize<JsonElement>(toolInputJson ?? "null"),
+                cwd,
                 hook_pid = Environment.ProcessId
             };
             var requestLine = JsonSerializer.Serialize(request) + "\n";

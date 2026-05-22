@@ -20,6 +20,7 @@ public class ChatChunk
     public string? Tool { get; set; }
     public string? ToolInput { get; set; }
     public string? ToolId { get; set; }
+    public string? Cwd { get; set; }
 }
 
 public class PermissionResponse

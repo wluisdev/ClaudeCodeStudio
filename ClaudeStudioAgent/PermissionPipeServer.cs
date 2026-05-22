@@ -97,6 +97,7 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
             toolUseId = req.TryGetProperty("tool_use_id", out var tid) ? tid.GetString() : null;
             var toolName = req.TryGetProperty("tool_name", out var tn) ? tn.GetString() : null;
             var toolInput = req.TryGetProperty("tool_input", out var ti) ? ti.GetRawText() : null;
+            var cwd = req.TryGetProperty("cwd", out var cw) ? cw.GetString() : null;
 
             if (string.IsNullOrEmpty(toolUseId) || string.IsNullOrEmpty(toolName))
             {
@@ -126,7 +127,8 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
                     Type = "permission_request",
                     Tool = toolName,
                     ToolInput = toolInput,
-                    ToolId = toolUseId
+                    ToolId = toolUseId,
+                    Cwd = cwd
                 });
 
                 var timeoutTask = Task.Delay(ResponseTimeout, ct);

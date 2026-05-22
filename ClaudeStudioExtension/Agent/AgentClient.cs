@@ -110,7 +110,7 @@ public class AgentClient
         await _writer.FlushAsync();
     }
 
-    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string>? onPermissionRequest = null)
+    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null)
     {
         var resumeId = PendingResumeSessionId;
         PendingResumeSessionId = null;
@@ -211,8 +211,8 @@ public class AgentClient
 
             if (chunk.Type == "permission_request")
             {
-                OutputLog.Info($"permission_request: {chunk.Tool ?? "-"} id={chunk.ToolId ?? "-"}");
-                onPermissionRequest?.Invoke(chunk.Tool ?? "", chunk.ToolInput, chunk.ToolId ?? "");
+                OutputLog.Info($"permission_request: {chunk.Tool ?? "-"} id={chunk.ToolId ?? "-"} cwd={chunk.Cwd ?? "-"}");
+                onPermissionRequest?.Invoke(chunk.Tool ?? "", chunk.ToolInput, chunk.ToolId ?? "", chunk.Cwd);
             }
         }
 
