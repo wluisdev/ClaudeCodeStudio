@@ -855,6 +855,15 @@ window.chrome.webview.addEventListener("message", event => {
         openPermissionModal(event.data.tool || "", event.data.input || "", event.data.id || "", event.data.cwd || "");
         return;
     }
+
+    if (event.data.type === "git-baseline-response") {
+        const pending = pendingGitBaselineRequests.get(event.data.requestId);
+        if (pending) {
+            pendingGitBaselineRequests.delete(event.data.requestId);
+            pending({ content: event.data.content || null, error: event.data.error || null });
+        }
+        return;
+    }
 });
 
 let pendingPermissionToolId = null;
@@ -1334,6 +1343,216 @@ function summarizeToolInput(name, inputJson) {
     return keys.length ? keys[0] : "";
 }
 
+// ---- diff viewer state ----
+const DIFF_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
+const toolInputData = new Map();      // toolId → parsed input object
+const gitBaselineCache = new Map();   // filePath → { content|null, error|null }
+const pendingGitBaselineRequests = new Map(); // requestId → resolve()
+const PREVIEW_MAX_LINES = 30;
+
+function requestGitBaseline(filePath) {
+    if (!filePath) return Promise.resolve({ content: null, error: "no path" });
+    const cached = gitBaselineCache.get(filePath);
+    if (cached) return Promise.resolve(cached);
+    return new Promise(resolve => {
+        const requestId = "gb-" + Math.random().toString(36).slice(2);
+        pendingGitBaselineRequests.set(requestId, result => {
+            gitBaselineCache.set(filePath, result);
+            resolve(result);
+        });
+        window.chrome.webview.postMessage({
+            type: "request-git-baseline",
+            requestId,
+            path: filePath
+        });
+    });
+}
+
+function computeLineDiff(oldText, newText) {
+    const oldLines = (oldText || "").split("\n");
+    const newLines = (newText || "").split("\n");
+    const m = oldLines.length, n = newLines.length;
+
+    // Guard against huge inputs (DP table too big)
+    if (m * n > 2_000_000) {
+        const out = [];
+        for (let i = 0; i < m; i++) out.push({ type: "-", line: oldLines[i], oldNum: i + 1, newNum: null });
+        for (let j = 0; j < n; j++) out.push({ type: "+", line: newLines[j], oldNum: null, newNum: j + 1 });
+        return out;
+    }
+
+    const dp = Array.from({ length: m + 1 }, () => new Int32Array(n + 1));
+    for (let i = m - 1; i >= 0; i--) {
+        for (let j = n - 1; j >= 0; j--) {
+            dp[i][j] = oldLines[i] === newLines[j]
+                ? dp[i + 1][j + 1] + 1
+                : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+    }
+
+    const out = [];
+    let i = 0, j = 0;
+    while (i < m && j < n) {
+        if (oldLines[i] === newLines[j]) {
+            out.push({ type: " ", line: oldLines[i], oldNum: i + 1, newNum: j + 1 });
+            i++; j++;
+        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+            out.push({ type: "-", line: oldLines[i], oldNum: i + 1, newNum: null });
+            i++;
+        } else {
+            out.push({ type: "+", line: newLines[j], oldNum: null, newNum: j + 1 });
+            j++;
+        }
+    }
+    while (i < m) { out.push({ type: "-", line: oldLines[i], oldNum: i + 1, newNum: null }); i++; }
+    while (j < n) { out.push({ type: "+", line: newLines[j], oldNum: null, newNum: j + 1 }); j++; }
+    return out;
+}
+
+function trimDiffToChangedHunks(lines, contextSize) {
+    // Keep changed lines and `contextSize` of surrounding context. Insert gap markers.
+    const ctx = contextSize ?? 3;
+    const keep = new Array(lines.length).fill(false);
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].type !== " ") {
+            for (let k = Math.max(0, i - ctx); k <= Math.min(lines.length - 1, i + ctx); k++) keep[k] = true;
+        }
+    }
+    const out = [];
+    let lastKept = -2;
+    for (let i = 0; i < lines.length; i++) {
+        if (!keep[i]) continue;
+        if (lastKept >= 0 && i > lastKept + 1) out.push({ type: "gap" });
+        out.push(lines[i]);
+        lastKept = i;
+    }
+    return out;
+}
+
+function renderDiffHtml(diffLines) {
+    const html = [];
+    for (const ln of diffLines) {
+        if (ln.type === "gap") {
+            html.push('<div class="diff-line diff-gap">⋯</div>');
+            continue;
+        }
+        const cls = ln.type === "+" ? "diff-add" : ln.type === "-" ? "diff-del" : "diff-ctx";
+        const oldNum = ln.oldNum != null ? String(ln.oldNum) : "";
+        const newNum = ln.newNum != null ? String(ln.newNum) : "";
+        const indicator = ln.type;
+        const safe = escapeHtml(ln.line ?? "");
+        html.push(`<div class="diff-line ${cls}"><span class="diff-lineno">${oldNum}</span><span class="diff-lineno">${newNum}</span><span class="diff-indicator">${indicator}</span><span class="diff-text">${safe}</span></div>`);
+    }
+    return html.join("");
+}
+
+function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+async function buildDiffForTool(toolName, input) {
+    // Returns { filePath, diffLines, hasBaseline, error }
+    if (toolName === "Edit") {
+        const lines = computeLineDiff(input.old_string || "", input.new_string || "");
+        return { filePath: input.file_path || "", diffLines: lines };
+    }
+    if (toolName === "MultiEdit") {
+        const edits = Array.isArray(input.edits) ? input.edits : [];
+        const all = [];
+        edits.forEach((e, idx) => {
+            if (idx > 0) all.push({ type: "gap" });
+            const lines = computeLineDiff(e.old_string || "", e.new_string || "");
+            all.push(...lines);
+        });
+        return { filePath: input.file_path || "", diffLines: all };
+    }
+    if (toolName === "Write") {
+        const filePath = input.file_path || "";
+        const newContent = input.content || "";
+        const { content: baseline, error } = await requestGitBaseline(filePath);
+        if (baseline == null) {
+            // New file (or git unavailable) — show all as +
+            const lines = newContent.split("\n").map((line, idx) => ({ type: "+", line, oldNum: null, newNum: idx + 1 }));
+            return { filePath, diffLines: lines, hasBaseline: false, error };
+        }
+        const lines = computeLineDiff(baseline, newContent);
+        return { filePath, diffLines: lines, hasBaseline: true };
+    }
+    return { filePath: "", diffLines: [], error: "unsupported tool" };
+}
+
+async function toggleToolDiff(chip) {
+    const existing = chip.querySelector(".tool-diff-inline");
+    if (existing) {
+        existing.remove();
+        chip.classList.remove("tool-chip-expanded");
+        return;
+    }
+    const id = chip.dataset.toolId;
+    const data = id ? toolInputData.get(id) : null;
+    if (!data) return;
+
+    const container = document.createElement("div");
+    container.className = "tool-diff-inline";
+    container.innerHTML = '<div class="tool-diff-loading">computing diff…</div>';
+    chip.appendChild(container);
+    chip.classList.add("tool-chip-expanded");
+
+    try {
+        const { filePath, diffLines, hasBaseline, error } = await buildDiffForTool(data.name, data.input);
+        if (error && (!diffLines || diffLines.length === 0)) {
+            container.innerHTML = `<div class="tool-diff-error">${escapeHtml(error)}</div>`;
+            return;
+        }
+        const trimmed = trimDiffToChangedHunks(diffLines, 3);
+        const preview = trimmed.slice(0, PREVIEW_MAX_LINES);
+        const truncated = trimmed.length > PREVIEW_MAX_LINES;
+        const noteHtml = (data.name === "Write" && hasBaseline === false)
+            ? '<div class="tool-diff-note">new file (no git baseline)</div>'
+            : "";
+        container.innerHTML =
+            noteHtml +
+            `<div class="tool-diff-body">${renderDiffHtml(preview)}</div>` +
+            `<div class="tool-diff-actions">
+                ${truncated ? `<span class="tool-diff-truncated">+${trimmed.length - PREVIEW_MAX_LINES} mais</span>` : ""}
+                <button class="tool-diff-full-btn">ver completo</button>
+            </div>`;
+        const btn = container.querySelector(".tool-diff-full-btn");
+        btn.addEventListener("click", e => {
+            e.stopPropagation();
+            openDiffModal(filePath, diffLines, data.name, hasBaseline);
+        });
+    } catch (ex) {
+        container.innerHTML = `<div class="tool-diff-error">${escapeHtml(String(ex))}</div>`;
+    }
+    autoScroll();
+}
+
+function openDiffModal(filePath, diffLines, toolName, hasBaseline) {
+    const overlay = document.getElementById("diff-modal-overlay");
+    document.getElementById("diff-modal-path").textContent = filePath || "(no path)";
+    const subtitle = document.getElementById("diff-modal-subtitle");
+    const added = diffLines.filter(l => l.type === "+").length;
+    const removed = diffLines.filter(l => l.type === "-").length;
+    let sub = `${toolName} • +${added} -${removed}`;
+    if (toolName === "Write" && hasBaseline === false) sub += " • new file";
+    subtitle.textContent = sub;
+    document.getElementById("diff-modal-body").innerHTML = renderDiffHtml(diffLines);
+    overlay.classList.add("open");
+}
+
+function closeDiffModal() {
+    document.getElementById("diff-modal-overlay").classList.remove("open");
+}
+
+document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    const overlay = document.getElementById("diff-modal-overlay");
+    if (!overlay || !overlay.classList.contains("open")) return;
+    e.stopPropagation();
+    closeDiffModal();
+}, true);
+
 function appendToolEvent(kind, name, inputJson, text, id) {
     removeLoading();
     const bubble = ensureStreamBubble();
@@ -1350,9 +1569,32 @@ function appendToolEvent(kind, name, inputJson, text, id) {
                     if (!argEl) {
                         argEl = document.createElement("span");
                         argEl.className = "tool-arg";
-                        existing.appendChild(argEl);
+                        // Insert before caret if present so caret stays at the end
+                        const caret = existing.querySelector(".tool-diff-caret");
+                        if (caret) existing.insertBefore(argEl, caret);
+                        else existing.appendChild(argEl);
                     }
                     argEl.textContent = `(${arg})`;
+                }
+                // Refresh stored input — JSONL watcher payload is authoritative (full content)
+                if (DIFF_TOOLS.has(name) && inputJson) {
+                    try {
+                        const parsed = JSON.parse(inputJson);
+                        if (parsed && typeof parsed === "object") {
+                            toolInputData.set(id, { name, input: parsed });
+                            if (!existing.classList.contains("tool-chip-diffable")) {
+                                existing.classList.add("tool-chip-diffable");
+                                const caret = document.createElement("span");
+                                caret.className = "tool-diff-caret";
+                                caret.textContent = "▸";
+                                existing.appendChild(caret);
+                                existing.addEventListener("click", e => {
+                                    if (e.target.closest(".tool-diff-inline")) return;
+                                    toggleToolDiff(existing);
+                                });
+                            }
+                        }
+                    } catch { /* ignore */ }
                 }
                 if (isStreaming) ensureLiveTimer();
                 autoScroll();
@@ -1366,6 +1608,19 @@ function appendToolEvent(kind, name, inputJson, text, id) {
         if (id) {
             chip.dataset.toolId = id;
             if (id === pendingPermissionToolId) chip.classList.add("tool-pending");
+        }
+
+        // For diff-supported tools, parse and store input + mark chip clickable
+        let diffable = false;
+        if (id && DIFF_TOOLS.has(name) && inputJson) {
+            try {
+                const parsed = JSON.parse(inputJson);
+                if (parsed && typeof parsed === "object") {
+                    toolInputData.set(id, { name, input: parsed });
+                    diffable = true;
+                    chip.classList.add("tool-chip-diffable");
+                }
+            } catch { /* leave unclickable */ }
         }
 
         const dot = document.createElement("span");
@@ -1386,6 +1641,19 @@ function appendToolEvent(kind, name, inputJson, text, id) {
             argEl.textContent = `(${arg})`;
             chip.appendChild(argEl);
         }
+
+        if (diffable) {
+            const caret = document.createElement("span");
+            caret.className = "tool-diff-caret";
+            caret.textContent = "▸";
+            chip.appendChild(caret);
+            chip.addEventListener("click", e => {
+                // Ignore clicks on the inline diff body (so user can select text)
+                if (e.target.closest(".tool-diff-inline")) return;
+                toggleToolDiff(chip);
+            });
+        }
+
         bubble.appendChild(chip);
     } else if (kind === "tool_result" || kind === "tool_error") {
         let chip = null;

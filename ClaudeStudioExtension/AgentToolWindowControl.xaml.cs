@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Controls;
 using ClaudeStudioExtension.Agent;
@@ -234,6 +235,17 @@ public partial class AgentToolWindowControl : UserControl
                 catch { }
 #pragma warning restore VSTHRD010
                 await HandleGetDiffAsync();
+                return;
+            }
+
+            if (request.Type == "request-git-baseline")
+            {
+                var reqId = request.RequestId ?? "";
+                var filePath = request.Path ?? "";
+                var (content, err) = await GetGitBaselineAsync(filePath);
+                var gitDispatcher = System.Windows.Application.Current.Dispatcher;
+                gitDispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new { type = "git-baseline-response", requestId = reqId, content, error = err })));
                 return;
             }
 
@@ -1233,6 +1245,52 @@ public partial class AgentToolWindowControl : UserControl
         catch { return ""; }
     }
 
+    private static async Task<(string? content, string? error)> GetGitBaselineAsync(string filePath)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+                return (null, "file not found");
+
+            // Walk up to find .git
+            var dir = Path.GetDirectoryName(filePath);
+            string? repoRoot = null;
+            while (!string.IsNullOrEmpty(dir))
+            {
+                if (Directory.Exists(Path.Combine(dir, ".git")))
+                {
+                    repoRoot = dir;
+                    break;
+                }
+                dir = Path.GetDirectoryName(dir);
+            }
+            if (repoRoot == null) return (null, "not a git repo");
+
+            var rel = filePath.Substring(repoRoot.Length).TrimStart('\\', '/').Replace('\\', '/');
+            var psi = new ProcessStartInfo("git", $"show HEAD:\"{rel}\"")
+            {
+                WorkingDirectory = repoRoot,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8
+            };
+            using var proc = Process.Start(psi)!;
+            var output = await proc.StandardOutput.ReadToEndAsync();
+            var err = await proc.StandardError.ReadToEndAsync();
+            var exited = await Task.Run(() => proc.WaitForExit(2000));
+            if (!exited) { try { proc.Kill(); } catch { } return (null, "git timeout"); }
+            if (proc.ExitCode != 0)
+                return (null, string.IsNullOrWhiteSpace(err) ? "git failed" : err.Trim());
+            return (output, null);
+        }
+        catch (Exception ex)
+        {
+            return (null, ex.Message);
+        }
+    }
+
     private class WebChatMessage
     {
         [JsonPropertyName("type")]
@@ -1303,5 +1361,8 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("allowSession")]
         public string? AllowSession { get; set; }
+
+        [JsonPropertyName("requestId")]
+        public string? RequestId { get; set; }
     }
 }

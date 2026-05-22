@@ -297,6 +297,19 @@
         </div>
     </div>
 
+    <div class="cmd-modal-overlay" id="diff-modal-overlay" onclick="if(event.target===this)closeDiffModal()">
+        <div class="cmd-modal diff-modal">
+            <div class="diff-modal-header">
+                <div class="diff-modal-title">
+                    <div class="diff-modal-path" id="diff-modal-path"></div>
+                    <div class="diff-modal-subtitle" id="diff-modal-subtitle"></div>
+                </div>
+                <button class="diff-modal-close" onclick="closeDiffModal()">×</button>
+            </div>
+            <div class="diff-modal-body" id="diff-modal-body"></div>
+        </div>
+    </div>
+
     <div class="cmd-modal-overlay" id="perm-modal-overlay" onclick="if(event.target===this)permissionDeny('dismissed')">
         <div class="cmd-modal perm-modal">
             <div class="perm-modal-header">
