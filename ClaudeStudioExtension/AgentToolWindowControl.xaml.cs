@@ -193,6 +193,17 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "permission-response")
+            {
+                if (string.IsNullOrEmpty(request.ToolUseId))
+                {
+                    OutputLog.Warn("permission-response missing toolUseId");
+                    return;
+                }
+                await _agentClient.SendPermissionResponseAsync(request.ToolUseId, request.Allow, request.Reason);
+                return;
+            }
+
             if (request.Type == "get-history")
             {
                 await HandleGetHistoryAsync();
@@ -400,7 +411,10 @@ public partial class AgentToolWindowControl : UserControl
                         JsonSerializer.Serialize(new { type = "session-info", sessionId = sid }))),
                 onTool: (kind, name, input, text, id) => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = kind, name, input, text, id }))));
+                        JsonSerializer.Serialize(new { type = kind, name, input, text, id }))),
+                onPermissionRequest: (tool, input, id) => dispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "permission_request", tool, input, id }))));
 
             VsStatusBar.Clear();
 
@@ -1221,5 +1235,14 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("language")]
         public string? Language { get; set; }
+
+        [JsonPropertyName("toolUseId")]
+        public string? ToolUseId { get; set; }
+
+        [JsonPropertyName("allow")]
+        public bool Allow { get; set; }
+
+        [JsonPropertyName("reason")]
+        public string? Reason { get; set; }
     }
 }

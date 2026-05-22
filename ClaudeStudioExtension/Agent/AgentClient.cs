@@ -55,6 +55,10 @@ public class AgentClient
             }
         };
 
+        // Phase 2: enable the PreToolUse hook pipeline so the agent intercepts
+        // tool calls under permissionMode == "ask" and routes prompts to the UI.
+        _process.StartInfo.EnvironmentVariables["CLAUDESTUDIO_HOOK_ENABLE"] = "1";
+
         _process.ErrorDataReceived += (_, e) =>
         {
             if (!string.IsNullOrWhiteSpace(e.Data))
@@ -80,7 +84,32 @@ public class AgentClient
         OutputLog.Info($"agent started (pid {_process.Id})");
     }
 
-    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null)
+    public async Task SendPermissionResponseAsync(string toolUseId, bool allow, string? reason)
+    {
+        if (_writer == null)
+        {
+            OutputLog.Warn($"permission-response dropped — agent not running (toolUseId={toolUseId})");
+            return;
+        }
+
+        var request = new ChatRequest
+        {
+            Message = "",
+            PermissionResponse = new PermissionResponse
+            {
+                ToolUseId = toolUseId,
+                Allow = allow,
+                Reason = reason
+            }
+        };
+        var json = JsonSerializer.Serialize(request);
+
+        OutputLog.Info($"permission-response → toolUseId={toolUseId} allow={allow}");
+        await _writer.WriteLineAsync(json);
+        await _writer.FlushAsync();
+    }
+
+    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string>? onPermissionRequest = null)
     {
         var resumeId = PendingResumeSessionId;
         PendingResumeSessionId = null;
@@ -177,6 +206,12 @@ public class AgentClient
             {
                 OutputLog.Info($"{chunk.Type}: {chunk.Tool ?? "-"} id={chunk.ToolId ?? "-"} bytes={(chunk.ToolInput ?? chunk.Text ?? "").Length}");
                 onTool?.Invoke(chunk.Type, chunk.Tool ?? "", chunk.ToolInput, chunk.Text, chunk.ToolId);
+            }
+
+            if (chunk.Type == "permission_request")
+            {
+                OutputLog.Info($"permission_request: {chunk.Tool ?? "-"} id={chunk.ToolId ?? "-"}");
+                onPermissionRequest?.Invoke(chunk.Tool ?? "", chunk.ToolInput, chunk.ToolId ?? "");
             }
         }
 

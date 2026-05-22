@@ -849,7 +849,63 @@ window.chrome.webview.addEventListener("message", event => {
         updateLiveTokens(event.data.text || "");
         return;
     }
+
+    if (event.data.type === "permission_request") {
+        openPermissionModal(event.data.tool || "", event.data.input || "", event.data.id || "");
+        return;
+    }
 });
+
+let pendingPermissionToolId = null;
+
+function openPermissionModal(tool, input, id) {
+    pendingPermissionToolId = id;
+    document.getElementById("perm-modal-tool").textContent = tool;
+
+    const pre = document.getElementById("perm-modal-input");
+    let formatted = input;
+    if (input) {
+        try { formatted = JSON.stringify(JSON.parse(input), null, 2); }
+        catch (_) { /* leave as-is */ }
+    }
+    pre.textContent = formatted || "(no input)";
+
+    document.getElementById("perm-modal-overlay").classList.add("open");
+}
+
+function closePermissionModal() {
+    document.getElementById("perm-modal-overlay").classList.remove("open");
+    pendingPermissionToolId = null;
+}
+
+function permissionAllow() {
+    if (!pendingPermissionToolId) { closePermissionModal(); return; }
+    window.chrome.webview.postMessage({
+        type: "permission-response",
+        toolUseId: pendingPermissionToolId,
+        allow: true,
+        reason: null
+    });
+    closePermissionModal();
+}
+
+function permissionDeny(reason) {
+    if (!pendingPermissionToolId) { closePermissionModal(); return; }
+    window.chrome.webview.postMessage({
+        type: "permission-response",
+        toolUseId: pendingPermissionToolId,
+        allow: false,
+        reason: reason || "denied by user"
+    });
+    closePermissionModal();
+}
+
+document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    if (!document.getElementById("perm-modal-overlay").classList.contains("open")) return;
+    e.stopPropagation();
+    permissionDeny("dismissed");
+}, true);
 
 const tokensToggle = document.getElementById("tokens-toggle");
 tokensToggle.checked = localStorage.getItem("showTokens") !== "false";

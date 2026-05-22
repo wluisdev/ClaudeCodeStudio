@@ -555,6 +555,81 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
 
 .cmd-modal-buttons .btn-primary:hover { background: #c4734f; }
 
+.perm-modal {
+    width: 420px;
+    max-width: calc(100vw - 40px);
+}
+
+.perm-modal-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.perm-modal-icon {
+    font-size: 22px;
+    line-height: 1;
+}
+
+.perm-modal-title {
+    flex: 1;
+    min-width: 0;
+}
+
+.perm-modal-eyebrow {
+    font-size: 11px;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.perm-modal-tool {
+    font-size: 15px;
+    font-weight: 600;
+    color: #eee;
+    font-family: Consolas, Menlo, monospace;
+}
+
+.perm-modal-input {
+    background: #1e1e1e;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    color: #ddd;
+    font-family: Consolas, Menlo, monospace;
+    font-size: 12px;
+    padding: 10px 12px;
+    margin: 0 0 14px;
+    max-height: 260px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.perm-modal-buttons .perm-allow {
+    background: #2f7d4f;
+    border-color: #2f7d4f;
+    color: white;
+}
+
+.perm-modal-buttons .perm-allow:hover { background: #266a42; }
+
+.perm-modal-buttons .perm-deny {
+    background: #8a3232;
+    border-color: #8a3232;
+    color: white;
+}
+
+.perm-modal-buttons .perm-deny:hover { background: #732828; }
+
+html.light-theme .perm-modal-eyebrow { color: #666; }
+html.light-theme .perm-modal-tool { color: #111; }
+html.light-theme .perm-modal-input {
+    background: #f7f7f7;
+    border-color: #ddd;
+    color: #222;
+}
+
 #history-menu {
     min-width: 260px;
     max-height: min(360px, calc(100vh - 80px));

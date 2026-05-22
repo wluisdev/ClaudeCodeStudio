@@ -297,6 +297,23 @@
         </div>
     </div>
 
+    <div class="cmd-modal-overlay" id="perm-modal-overlay" onclick="if(event.target===this)permissionDeny('dismissed')">
+        <div class="cmd-modal perm-modal">
+            <div class="perm-modal-header">
+                <span class="perm-modal-icon">🔒</span>
+                <div class="perm-modal-title">
+                    <div class="perm-modal-eyebrow">Permission requested</div>
+                    <div class="perm-modal-tool" id="perm-modal-tool">Tool</div>
+                </div>
+            </div>
+            <pre class="perm-modal-input" id="perm-modal-input"></pre>
+            <div class="cmd-modal-buttons perm-modal-buttons">
+                <button class="perm-deny" onclick="permissionDeny()">Deny</button>
+                <button class="perm-allow" onclick="permissionAllow()">Allow</button>
+            </div>
+        </div>
+    </div>
+
     <div class="cmd-modal-overlay" id="cmd-modal-overlay" onclick="if(event.target===this)closeAddCommand()">
         <div class="cmd-modal">
             <h3>Add command</h3>

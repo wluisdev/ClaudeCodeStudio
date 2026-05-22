@@ -10,6 +10,7 @@ public class ChatRequest
     public string? ResumeSessionId { get; set; }
     public string? WorkingDirectory { get; set; }
     public bool AutoResume { get; set; }
+    public PermissionResponse? PermissionResponse { get; set; }
 }
 
 public class ChatChunk
@@ -19,4 +20,11 @@ public class ChatChunk
     public string? Tool { get; set; }
     public string? ToolInput { get; set; }
     public string? ToolId { get; set; }
+}
+
+public class PermissionResponse
+{
+    public string ToolUseId { get; set; } = "";
+    public bool Allow { get; set; }
+    public string? Reason { get; set; }
 }

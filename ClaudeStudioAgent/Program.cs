@@ -1,33 +1,98 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
+using ClaudeStudioAgent;
 using ClaudeStudioShared;
 
+// Hook mode: when claude.exe spawns us as a PreToolUse hook, route to HookMode
+// and exit. This branch never enters the normal request loop.
+if (args.Length >= 2 && args[0] == "--hook")
+{
+    return await HookMode.RunAsync(args[1]);
+}
+
+// Phase 2 (gated): when enabled, the agent stands up a named pipe server that
+// hook helper processes connect to in order to broker permission prompts.
+PermissionPipeServer? pipeServer = null;
+if (Environment.GetEnvironmentVariable("CLAUDESTUDIO_HOOK_ENABLE") == "1")
+{
+    pipeServer = new PermissionPipeServer();
+    pipeServer.Start();
+}
+
 ClaudeSession? session = null;
+
+// Stdin reading is decoupled from request processing. The main loop spends most
+// of its time inside SendMessageAsync, blocked on claude's stdout. If stdin were
+// read on that same thread, PermissionResponse lines arriving mid-turn would
+// queue up until the turn finished — but the turn can't finish because the hook
+// (and thus claude) is waiting on that very response. Deadlock.
+//
+// Fix: a dedicated reader Task drains stdin into a Channel. PermissionResponse
+// is dispatched inline (it just signals a TCS and returns); everything else is
+// queued for the main loop.
+var requestChannel = Channel.CreateUnbounded<ChatRequest>(new UnboundedChannelOptions
+{
+    SingleReader = true,
+    SingleWriter = true
+});
+
+var stdinReader = Task.Run(async () =>
+{
+    try
+    {
+        while (true)
+        {
+            var line = await Console.In.ReadLineAsync();
+            if (line == null) break;
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            ChatRequest? request;
+            try
+            {
+                request = JsonSerializer.Deserialize<ChatRequest>(line);
+            }
+            catch (Exception ex)
+            {
+                EmitError($"failed to parse request: {ex.Message}");
+                continue;
+            }
+            if (request == null) continue;
+
+            if (request.PermissionResponse != null)
+            {
+                if (pipeServer == null)
+                {
+                    EmitError("permission response received but hook server is disabled");
+                    continue;
+                }
+                var pr = request.PermissionResponse;
+                if (!pipeServer.Respond(pr.ToolUseId, pr.Allow, pr.Reason))
+                    EmitError($"no pending permission request for tool_use_id {pr.ToolUseId}");
+                continue;
+            }
+
+            await requestChannel.Writer.WriteAsync(request);
+        }
+    }
+    catch (Exception ex)
+    {
+        EmitError($"stdin reader failed: {ex.Message}");
+    }
+    finally
+    {
+        requestChannel.Writer.TryComplete();
+    }
+});
 
 try
 {
     Console.WriteLine("READY");
     Console.Out.Flush();
 
-    while (true)
+    await foreach (var request in requestChannel.Reader.ReadAllAsync())
     {
-        var line = Console.ReadLine();
-        if (line == null) break;
-        if (string.IsNullOrWhiteSpace(line)) continue;
-
-        ChatRequest? request;
-        try
-        {
-            request = JsonSerializer.Deserialize<ChatRequest>(line);
-        }
-        catch (Exception ex)
-        {
-            EmitError($"failed to parse request: {ex.Message}");
-            continue;
-        }
-        if (request == null) continue;
-
         if (request.ResetSession)
         {
             if (session != null)
@@ -42,7 +107,7 @@ try
         if (session == null || session.Key != wantKey)
         {
             if (session != null) await session.DisposeAsync();
-            session = new ClaudeSession(request);
+            session = new ClaudeSession(request, pipeServer?.PipeName);
             try
             {
                 await session.StartAsync();
@@ -76,8 +141,13 @@ catch (Exception ex)
 }
 finally
 {
+    requestChannel.Writer.TryComplete();
+    try { await stdinReader; } catch { }
     if (session != null) await session.DisposeAsync();
+    if (pipeServer != null) await pipeServer.DisposeAsync();
 }
+
+return 0;
 
 static void EmitError(string text)
 {
@@ -107,16 +177,18 @@ sealed class ClaudeSession : IAsyncDisposable
     private readonly string? _workingDirectory;
     private readonly string? _resumeSessionId;
     private readonly bool _autoResume;
+    private readonly string? _pipeName;
 
     private Process? _proc;
     private StreamWriter? _stdin;
     private StreamReader? _stdout;
     private readonly StringBuilder _stderrBuffer = new();
     private Task? _stderrPump;
+    private string? _settingsTempDir;
     public string? SessionId { get; private set; }
     public string Key { get; }
 
-    public ClaudeSession(ChatRequest request)
+    public ClaudeSession(ChatRequest request, string? pipeName)
     {
         _model = request.Model ?? "claude-sonnet-4-6";
         _effort = request.Effort;
@@ -124,6 +196,7 @@ sealed class ClaudeSession : IAsyncDisposable
         _workingDirectory = request.WorkingDirectory;
         _resumeSessionId = request.ResumeSessionId;
         _autoResume = request.AutoResume;
+        _pipeName = pipeName;
         Key = MakeKey(request);
     }
 
@@ -165,7 +238,16 @@ sealed class ClaudeSession : IAsyncDisposable
         }
         else if (_permissionMode == "ask")
         {
-            // default claude behavior — no extra flag
+            // When a pipe is available (CLAUDESTUDIO_HOOK_ENABLE=1), wire a PreToolUse
+            // hook pointing back to ourselves so prompts route to the UI. Without a
+            // pipe, claude auto-approves everything in stdio mode (PoC-confirmed).
+            if (_pipeName != null)
+            {
+                var settingsPath = WriteHookSettings();
+                psi.ArgumentList.Add("--settings");
+                psi.ArgumentList.Add(settingsPath);
+                psi.ArgumentList.Add("--include-hook-events");
+            }
         }
         else // "yolo" (default)
         {
@@ -510,6 +592,48 @@ sealed class ClaudeSession : IAsyncDisposable
         Console.Out.Flush();
     }
 
+    private string WriteHookSettings()
+    {
+        var tempBase = Path.GetTempPath();
+        _settingsTempDir = Path.Combine(tempBase, $"claudestudio-{Environment.ProcessId}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_settingsTempDir);
+
+        var settingsPath = Path.Combine(_settingsTempDir, "settings.json");
+        var agentPath = Environment.ProcessPath
+            ?? throw new InvalidOperationException("cannot resolve agent executable path");
+
+        // PoC confirmed: paths in settings.json must use forward slashes — claude's
+        // shell layer interprets backslashes as escape characters and strips them.
+        var agentPathFwd = agentPath.Replace('\\', '/');
+
+        var settings = new
+        {
+            hooks = new
+            {
+                PreToolUse = new[]
+                {
+                    new
+                    {
+                        matcher = "Bash|KillBash|Edit|Write|NotebookEdit|Task|WebFetch|CronCreate|mcp__.*",
+                        hooks = new[]
+                        {
+                            new
+                            {
+                                type = "command",
+                                command = $"\"{agentPathFwd}\" --hook {_pipeName}"
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        File.WriteAllText(
+            settingsPath,
+            JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+        return settingsPath;
+    }
+
     private static string FindClaudeExe()
     {
         var pathDirs = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
@@ -538,16 +662,18 @@ sealed class ClaudeSession : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_proc == null) return;
         try
         {
-            try { _stdin?.Close(); } catch { }
-            if (!_proc.HasExited)
+            if (_proc != null)
             {
-                if (!_proc.WaitForExit(2000))
+                try { _stdin?.Close(); } catch { }
+                if (!_proc.HasExited)
                 {
-                    try { _proc.Kill(entireProcessTree: true); } catch { }
-                    try { _proc.WaitForExit(); } catch { }
+                    if (!_proc.WaitForExit(2000))
+                    {
+                        try { _proc.Kill(entireProcessTree: true); } catch { }
+                        try { _proc.WaitForExit(); } catch { }
+                    }
                 }
             }
         }
@@ -555,10 +681,16 @@ sealed class ClaudeSession : IAsyncDisposable
         {
             try { _stdout?.Dispose(); } catch { }
             try { _stdin?.Dispose(); } catch { }
-            try { _proc.Dispose(); } catch { }
+            try { _proc?.Dispose(); } catch { }
             _stdin = null;
             _stdout = null;
             _proc = null;
+
+            if (_settingsTempDir != null)
+            {
+                try { Directory.Delete(_settingsTempDir, recursive: true); } catch { }
+                _settingsTempDir = null;
+            }
         }
         await Task.CompletedTask;
     }
