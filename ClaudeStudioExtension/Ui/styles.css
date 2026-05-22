@@ -671,13 +671,85 @@ html.light-theme .perm-modal-cwd {
 }
 
 #history-menu {
-    min-width: 260px;
-    max-height: min(360px, calc(100vh - 80px));
+    min-width: 280px;
+    max-height: min(420px, calc(100vh - 80px));
     display: none;
     flex-direction: column;
 }
 
 #history-menu.open { display: flex; }
+
+.history-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.history-count {
+    color: #888;
+    font-size: 10px;
+    font-weight: normal;
+    font-family: inherit;
+}
+.history-footer {
+    padding: 5px 10px 7px;
+    border-top: 1px solid #2c2c2c;
+    color: #888;
+    font-size: 10px;
+    font-family: inherit;
+    user-select: none;
+    word-break: break-all;
+}
+
+.history-filter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px 8px;
+    border-bottom: 1px solid #2c2c2c;
+}
+.history-filter #history-search {
+    flex: 1;
+    background: #1e1e1e;
+    border: 1px solid #3a3a3a;
+    border-radius: 3px;
+    color: #ddd;
+    padding: 3px 7px;
+    font-size: 11px;
+    font-family: inherit;
+    outline: none;
+}
+.history-filter #history-search:focus { border-color: #d88763; }
+.history-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #888;
+    font-size: 11px;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+.history-toggle input { margin: 0; cursor: pointer; }
+
+.history-empty { color: #888; font-family: inherit; }
+.history-empty a { color: #d88763; text-decoration: none; }
+.history-empty a:hover { text-decoration: underline; }
+
+html.light-theme .history-filter { border-bottom-color: #ddd; }
+html.light-theme .history-filter #history-search {
+    background: #f7f7f7;
+    border-color: #ddd;
+    color: #222;
+}
+html.light-theme .history-toggle { color: #555; }
+html.light-theme .history-empty { color: #666; }
+html.light-theme .history-empty a { color: #b05c35; }
+html.light-theme .history-count { color: #777; }
+html.light-theme .history-footer {
+    border-top-color: #ddd;
+    color: #666;
+}
 
 #history-list {
     overflow-y: auto;

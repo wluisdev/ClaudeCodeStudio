@@ -111,14 +111,38 @@ function pushPromptHistory(text) {
 }
 
 // ── Session history ───────────────────────────────────────────
+let historySessions = [];
+let historyScope = "all";
+let historyWorkspaceName = null;
+
 function toggleHistory() {
     const menu = document.getElementById("history-menu");
     const isOpen = menu.classList.toggle("open");
     if (isOpen) {
+        document.getElementById("history-search").value = "";
         document.getElementById("history-list").innerHTML =
             '<div class="cmd-item" style="color:#555;font-family:inherit">Loading…</div>';
-        window.chrome.webview.postMessage({ type: "get-history" });
+        requestHistory();
     }
+}
+
+function requestHistory() {
+    const showAll = document.getElementById("history-show-all")?.checked || false;
+    window.chrome.webview.postMessage({ type: "get-history", showAll });
+}
+
+function onShowAllToggle() {
+    document.getElementById("history-list").innerHTML =
+        '<div class="cmd-item" style="color:#555;font-family:inherit">Loading…</div>';
+    requestHistory();
+}
+
+function filterHistory() {
+    const q = document.getElementById("history-search").value.trim().toLowerCase();
+    const filtered = q
+        ? historySessions.filter(s => (s.preview || "").toLowerCase().includes(q))
+        : historySessions;
+    renderHistoryList(filtered, q);
 }
 
 document.addEventListener("click", e => {
@@ -709,9 +733,13 @@ function sendMessage() {
             effort: effortSelect.value || null,
             permissionMode: permissionSelect.value,
             workingDirectory: localStorage.getItem("workingDirectory") || null,
-            autoResume: localStorage.getItem("autoResume") === "true",
+            // After clearChat / reset-chat, the next send must NOT resume. Otherwise
+            // claude.exe gets --continue and reuses the previous session instead of
+            // creating a fresh one (turn count keeps going up in the old row).
+            autoResume: _suppressNextAutoResume ? false : localStorage.getItem("autoResume") === "true",
             autoSave: autoSaveValues[+autoSaveSlider.value]
         });
+        _suppressNextAutoResume = false;
     }
 }
 
@@ -758,7 +786,7 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "history") {
-        renderHistory(event.data.sessions);
+        renderHistory(event.data.sessions, event.data.scope, event.data.workspace);
         return;
     }
 
@@ -853,6 +881,25 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "permission_request") {
         openPermissionModal(event.data.tool || "", event.data.input || "", event.data.id || "", event.data.cwd || "");
+        return;
+    }
+
+    if (event.data.type === "reset-chat") {
+        // Triggered by solution open/close from C# side. Same UX as the user
+        // clicking the ✎ button, minus posting "clear" back (backend already reset).
+        messages.innerHTML = `
+            <div class="welcome">
+                <div class="hero"><span class="logo">✺</span> Claude Code Studio</div>
+                <div class="bot">🤖</div>
+            </div>`;
+        welcome = messages.querySelector(".welcome");
+        textarea.value = "";
+        sessionIn = 0;
+        sessionOut = 0;
+        msgCounter = 0;
+        currentSessionId = null;
+        updateUsageSessionValues();
+        _suppressNextAutoResume = true;
         return;
     }
 
@@ -1797,6 +1844,8 @@ function removeLiveTimer() {
     _realOutTokens = 0;
 }
 
+let _suppressNextAutoResume = false;
+
 function clearChat() {
     messages.innerHTML = `
         <div class="welcome">
@@ -1811,6 +1860,9 @@ function clearChat() {
     msgCounter = 0;
     currentSessionId = null;
     updateUsageSessionValues();
+    // User explicitly asked for a fresh chat — suppress --continue on the next
+    // outbound message even if the "Auto-resume" setting is on.
+    _suppressNextAutoResume = true;
 
     window.chrome.webview.postMessage({ type: "clear" });
 }
@@ -1916,20 +1968,48 @@ function insertAtCursor(text) {
     updateTokenEstimate();
 }
 
-function renderHistory(sessions) {
+function renderHistory(sessions, scope, workspace) {
+    historySessions = sessions || [];
+    historyScope = scope || "all";
+    historyWorkspaceName = workspace || null;
+
+    const footer = document.getElementById("history-footer");
+    if (footer) {
+        if (historyScope === "workspace" && historyWorkspaceName) {
+            footer.innerHTML = `📂 ${escapeHtml(historyWorkspaceName)}`;
+        } else if (historyScope === "workspace") {
+            footer.innerHTML = `📂 workspace`;
+        } else {
+            footer.innerHTML = `🌐 all projects`;
+        }
+    }
+
+    renderHistoryList(historySessions, "");
+}
+
+function renderHistoryList(sessions, query) {
     const list = document.getElementById("history-list");
+    const countEl = document.getElementById("history-count");
+    if (countEl) countEl.textContent = (sessions && sessions.length) ? String(sessions.length) : "";
     if (!sessions || sessions.length === 0) {
-        list.innerHTML = '<div class="cmd-item" style="color:#555;font-family:inherit">No sessions found</div>';
+        if (query) {
+            list.innerHTML = `<div class="cmd-item" style="color:#555;font-family:inherit">No matches for "${escapeHtml(query)}"</div>`;
+        } else if (historyScope === "workspace") {
+            list.innerHTML = `<div class="cmd-item history-empty">No sessions in this workspace · <a href="#" onclick="event.preventDefault();document.getElementById('history-show-all').checked=true;onShowAllToggle();">see all projects</a></div>`;
+        } else {
+            list.innerHTML = '<div class="cmd-item" style="color:#555;font-family:inherit">No sessions found</div>';
+        }
         return;
     }
     list.innerHTML = sessions.map(s => {
         const tok = s.tokens > 1000 ? `${(s.tokens / 1000).toFixed(1)}k tok` : `${s.tokens} tok`;
+        const msgs = (s.messages != null) ? `${s.messages} msg${s.messages === 1 ? "" : "s"} · ` : "";
         return `<div class="cmd-item history-item" data-session-id="${escapeAttr(s.id)}">
   <div class="history-header">
     <div class="history-preview" onclick="resumeSession('${escapeAttr(s.id)}')">${escapeHtml(s.preview)}</div>
     <button class="history-delete" onclick="deleteSession('${escapeAttr(s.id)}')" title="Delete session">×</button>
   </div>
-  <div class="history-date">${escapeHtml(s.date)} · ${tok}</div>
+  <div class="history-date">${escapeHtml(s.date)} · ${msgs}${tok}</div>
 </div>`;
     }).join("");
 }

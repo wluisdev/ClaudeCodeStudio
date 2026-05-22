@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -205,7 +206,17 @@ public partial class AgentToolWindowControl : UserControl
 
             if (request.Type == "get-history")
             {
-                await HandleGetHistoryAsync();
+                // For the history filter we use ResolveWorkspaceCwd (no ActiveDocument
+                // / UserProfile fallback) so "no workspace" cleanly means "show all"
+                // instead of accidentally filtering by a random doc folder.
+                string? workspaceForHistory = null;
+                try
+                {
+                    var dteHist = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+                    workspaceForHistory = ResolveWorkspaceCwd(dteHist);
+                }
+                catch { }
+                await HandleGetHistoryAsync(workspaceForHistory, request.ShowAll);
                 return;
             }
 
@@ -432,6 +443,11 @@ public partial class AgentToolWindowControl : UserControl
             {
                 Browser.CoreWebView2.PostWebMessageAsJson(
                     JsonSerializer.Serialize(new { type = "stream-done" }));
+                // Refresh Usage now — at this point claude.exe has flushed the
+                // assistant turn to JSONL, so the gated count (assistantTurns > 0)
+                // picks up the new session. Doing this on `session` (init) fires
+                // too early, before any turn has been written.
+                Usage.UsageToolWindowControl.RefreshIfOpen();
             });
 
             _ = Task.Run(() => CheckCostLimitsAsync(workingDir));
@@ -522,6 +538,41 @@ public partial class AgentToolWindowControl : UserControl
     public Task SendActiveSelectionAsync() => HandleGetSelectionAsync();
 
 #pragma warning disable VSTHRD010
+    /// <summary>
+    /// Workspace-only resolver: returns the path of a loaded .sln or Open Folder,
+    /// or null. Does NOT fall through to ActiveDocument or UserProfile — those
+    /// are agent-cwd fallbacks, not "current workspace" signals. Used by features
+    /// that filter by project (history dropdown, Usage panel) so null cleanly
+    /// means "no current workspace → show all".
+    /// </summary>
+    public static string? ResolveWorkspaceCwd(EnvDTE.DTE? dte)
+    {
+        try
+        {
+            var solutionPath = dte?.Solution?.FullName;
+            if (!string.IsNullOrEmpty(solutionPath))
+            {
+                var dir = Path.GetDirectoryName(solutionPath);
+                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                    return dir;
+            }
+        }
+        catch { }
+
+        try
+        {
+            var vsSolution = Package.GetGlobalService(typeof(SVsSolution)) as IVsSolution;
+            if (vsSolution != null &&
+                vsSolution.GetSolutionInfo(out var solutionDir, out _, out _) == 0 &&
+                !string.IsNullOrEmpty(solutionDir) &&
+                Directory.Exists(solutionDir))
+                return solutionDir;
+        }
+        catch { }
+
+        return null;
+    }
+
     private static string? ResolveCwd(EnvDTE.DTE? dte)
     {
         // 1. Loaded .sln (most common case)
@@ -626,6 +677,17 @@ public partial class AgentToolWindowControl : UserControl
         await _agentClient.StopAsync();
         _lastWorkingDir = null;
         _sessionStart = DateTime.Now;
+
+        // Solution-driven reset: also clear the chat UI so the user doesn't see
+        // messages from the previous workspace. Without this the agent is killed
+        // but the WebView keeps showing the old conversation.
+        try
+        {
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            dispatcher?.Invoke(() => Browser?.CoreWebView2?.PostWebMessageAsJson(
+                JsonSerializer.Serialize(new { type = "reset-chat" })));
+        }
+        catch { }
     }
 
     private (decimal sessionCost, decimal dailyCost) ComputeCosts(string? cwd)
@@ -839,33 +901,71 @@ public partial class AgentToolWindowControl : UserControl
         dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
     }
 
-    private async Task HandleGetHistoryAsync()
+    private static string EncodeClaudeProjectPath(string path)
     {
-        var claudeDir = System.IO.Path.Combine(
+        if (string.IsNullOrEmpty(path)) return "";
+        var sb = new StringBuilder(path.Length);
+        foreach (var ch in path)
+            sb.Append(char.IsLetterOrDigit(ch) ? ch : '-');
+        return sb.ToString();
+    }
+
+    private async Task HandleGetHistoryAsync(string? workspaceDir, bool showAll)
+    {
+        var rootDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".claude", "projects");
 
         var sessions = new System.Collections.Generic.List<object>();
+        var scope = "all";
+        var workspaceSubdir = "";
 
-        if (Directory.Exists(claudeDir))
+        IEnumerable<string> files = Array.Empty<string>();
+
+        if (Directory.Exists(rootDir))
         {
-            var files = Directory.GetFiles(claudeDir, "*.jsonl", SearchOption.AllDirectories)
-                .OrderByDescending(File.GetLastWriteTime)
-                .Take(30);
-
-            foreach (var file in files)
+            if (!showAll && !string.IsNullOrEmpty(workspaceDir))
             {
-                var sessionId = System.IO.Path.GetFileNameWithoutExtension(file);
+                workspaceSubdir = Path.Combine(rootDir, EncodeClaudeProjectPath(workspaceDir!));
+                if (Directory.Exists(workspaceSubdir))
+                {
+                    files = Directory.GetFiles(workspaceSubdir, "*.jsonl", SearchOption.TopDirectoryOnly);
+                    scope = "workspace";
+                }
+                // If the encoded folder doesn't exist yet, we leave files empty so the
+                // UI can show "no sessions in this workspace" without falling back silently
+            }
+            else
+            {
+                // Match UsageReader.ReadAll's enumeration shape: iterate project
+                // subdirectories then their direct .jsonl children only. Using
+                // AllDirectories picked up nested files (sub-agent transcripts,
+                // stray backups) that /usage doesn't count.
+                files = Directory
+                    .EnumerateDirectories(rootDir)
+                    .SelectMany(d => Directory.EnumerateFiles(d, "*.jsonl", SearchOption.TopDirectoryOnly));
+            }
+
+            // Parse files in parallel — each JSONL is independent, IO-bound.
+            // Order by mtime afterwards so the UI list stays newest-first.
+            var orderedFiles = files.OrderByDescending(File.GetLastWriteTime).ToArray();
+
+            var parsed = await Task.WhenAll(orderedFiles.Select(file => Task.Run(() =>
+            {
+                var sessionId = Path.GetFileNameWithoutExtension(file);
+                var lastWrite = File.GetLastWriteTime(file);
+                var date = lastWrite.ToString("dd/MM/yyyy HH:mm");
                 var preview = "";
-                var date = File.GetLastWriteTime(file).ToString("MM/dd/yyyy HH:mm");
                 var tokenCount = 0;
+                var messageCount = 0;
+                var assistantTurns = 0; // gates the session (matches UsageReader logic)
 
                 try
                 {
                     using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                     using var sr = new StreamReader(fs);
                     string? jsonLine;
-                    while ((jsonLine = await sr.ReadLineAsync()) != null)
+                    while ((jsonLine = sr.ReadLine()) != null)
                     {
                         if (string.IsNullOrWhiteSpace(jsonLine)) continue;
                         using var doc = System.Text.Json.JsonDocument.Parse(jsonLine);
@@ -874,39 +974,56 @@ public partial class AgentToolWindowControl : UserControl
 
                         var entryType = t.GetString();
 
-                        if (entryType == "user" && string.IsNullOrEmpty(preview))
+                        if (entryType == "user")
                         {
-                            if (!root.TryGetProperty("message", out var msg)) continue;
-                            if (!msg.TryGetProperty("content", out var content)) continue;
+                            messageCount++;
 
-                            string candidate = "";
-                            if (content.ValueKind == System.Text.Json.JsonValueKind.Array)
+                            if (string.IsNullOrEmpty(preview))
                             {
-                                foreach (var item in content.EnumerateArray())
+                                if (!root.TryGetProperty("message", out var msg)) continue;
+                                if (!msg.TryGetProperty("content", out var content)) continue;
+
+                                string candidate = "";
+                                if (content.ValueKind == System.Text.Json.JsonValueKind.Array)
                                 {
-                                    if (item.TryGetProperty("type", out var itemType) &&
-                                        itemType.GetString() == "text" &&
-                                        item.TryGetProperty("text", out var textEl))
+                                    foreach (var item in content.EnumerateArray())
                                     {
-                                        candidate = textEl.GetString() ?? "";
-                                        break;
+                                        if (item.TryGetProperty("type", out var itemType) &&
+                                            itemType.GetString() == "text" &&
+                                            item.TryGetProperty("text", out var textEl))
+                                        {
+                                            candidate = textEl.GetString() ?? "";
+                                            break;
+                                        }
                                     }
                                 }
-                            }
-                            else if (content.ValueKind == System.Text.Json.JsonValueKind.String)
-                            {
-                                candidate = content.GetString() ?? "";
-                            }
+                                else if (content.ValueKind == System.Text.Json.JsonValueKind.String)
+                                {
+                                    candidate = content.GetString() ?? "";
+                                }
 
-                            candidate = StripLocalCommandCaveat(candidate).Trim();
-                            if (string.IsNullOrEmpty(candidate)) continue;
-
-                            preview = candidate.Length > 80 ? candidate.Substring(0, 80) + "…" : candidate;
+                                candidate = StripLocalCommandCaveat(candidate).Trim();
+                                if (!string.IsNullOrEmpty(candidate))
+                                    preview = candidate.Length > 80 ? candidate.Substring(0, 80) + "…" : candidate;
+                            }
                         }
                         else if (entryType == "assistant")
                         {
+                            messageCount++;
+
                             if (!root.TryGetProperty("message", out var msg)) continue;
+
+                            // Skip <synthetic> assistant entries (quota warnings, injected
+                            // errors). Same gating UsageReader uses so session counts agree.
+                            if (msg.TryGetProperty("model", out var modelEl))
+                            {
+                                var m = modelEl.GetString();
+                                if (!string.IsNullOrEmpty(m) && m!.StartsWith("<")) continue;
+                            }
+
                             if (!msg.TryGetProperty("usage", out var usage)) continue;
+
+                            assistantTurns++;
 
                             if (usage.TryGetProperty("input_tokens", out var inputTok))
                                 tokenCount += inputTok.GetInt32();
@@ -917,17 +1034,29 @@ public partial class AgentToolWindowControl : UserControl
                 }
                 catch { }
 
-                if (!string.IsNullOrEmpty(preview))
-                {
-                    var sidecar = Path.Combine(Path.GetDirectoryName(file)!, $"{sessionId}.branch");
-                    var isBranch = File.Exists(sidecar);
-                    if (isBranch) preview = "↳ " + preview;
-                    sessions.Add(new { id = sessionId, preview, date, tokens = tokenCount, isBranch });
-                }
+                return (file, sessionId, preview, date, lastWrite, tokenCount, messageCount, assistantTurns);
+            })));
+
+            foreach (var entry in parsed.OrderByDescending(e => e.lastWrite))
+            {
+                // Match /usage's gating: a session needs at least one real assistant turn.
+                // Sessions aborted before any API response are skipped from the list.
+                if (string.IsNullOrEmpty(entry.preview) || entry.assistantTurns == 0) continue;
+                var sidecar = Path.Combine(Path.GetDirectoryName(entry.file)!, $"{entry.sessionId}.branch");
+                var isBranch = File.Exists(sidecar);
+                var preview = isBranch ? "↳ " + entry.preview : entry.preview;
+                sessions.Add(new { id = entry.sessionId, preview, date = entry.date, tokens = entry.tokenCount, messages = entry.messageCount, isBranch });
             }
         }
 
-        var json = JsonSerializer.Serialize(new { type = "history", sessions });
+        string? workspaceName = null;
+        if (scope == "workspace" && !string.IsNullOrEmpty(workspaceDir))
+        {
+            try { workspaceName = Path.GetFileName(workspaceDir!.TrimEnd('\\', '/')); }
+            catch { }
+        }
+
+        var json = JsonSerializer.Serialize(new { type = "history", sessions, scope, workspace = workspaceName });
         var dispatcher = System.Windows.Application.Current.Dispatcher;
         dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
     }
@@ -1364,5 +1493,8 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("requestId")]
         public string? RequestId { get; set; }
+
+        [JsonPropertyName("showAll")]
+        public bool ShowAll { get; set; }
     }
 }

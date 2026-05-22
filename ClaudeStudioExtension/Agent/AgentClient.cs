@@ -234,26 +234,30 @@ public class AgentClient
         _jsonlWatcher.Stop();
         _watcherSessionId = null;
 
-        if (_process == null)
-            return;
+        // Take a local snapshot so concurrent StopAsync calls (e.g. solution
+        // event reset firing while user clicks ✎) don't NullRef on _process
+        // being cleared mid-finally by the other thread.
+        var proc = _process;
+        if (proc == null) return;
+        _process = null; // claim it — subsequent callers see null and bail out
 
-        var pid = _process.Id;
+        var pid = proc.Id;
         OutputLog.Info($"stopping agent (pid {pid})");
 
         try
         {
-            if (!_process.HasExited)
+            if (!proc.HasExited)
             {
                 _writer?.Close();
 
                 var exited = await Task.Run(() =>
-                    _process.WaitForExit(2000));
+                    proc.WaitForExit(2000));
 
-                if (!exited && !_process.HasExited)
+                if (!exited && !proc.HasExited)
                 {
                     OutputLog.Warn($"agent (pid {pid}) didn't exit in 2s, killing");
-                    _process.Kill();
-                    _process.WaitForExit();
+                    proc.Kill();
+                    proc.WaitForExit();
                 }
             }
         }
@@ -261,11 +265,10 @@ public class AgentClient
         {
             _reader?.Dispose();
             _writer?.Dispose();
-            _process.Dispose();
+            proc.Dispose();
 
             _reader = null;
             _writer = null;
-            _process = null;
             OutputLog.Info($"agent (pid {pid}) stopped");
         }
     }

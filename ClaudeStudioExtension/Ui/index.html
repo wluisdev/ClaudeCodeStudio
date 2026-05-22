@@ -38,8 +38,19 @@
                     <div class="cmd-wrap" id="history-wrap">
                         <button class="action-btn" title="Session history" onclick="toggleHistory()">◷</button>
                         <div class="cmd-menu" id="history-menu">
-                            <div class="cmd-section">Previous sessions</div>
+                            <div class="cmd-section history-section-header">
+                                <span>Previous sessions</span>
+                                <span class="history-count" id="history-count"></span>
+                            </div>
+                            <div class="history-filter">
+                                <input type="text" id="history-search" placeholder="Filter…" oninput="filterHistory()" />
+                                <label class="history-toggle">
+                                    <input type="checkbox" id="history-show-all" onchange="onShowAllToggle()" />
+                                    <span>all projects</span>
+                                </label>
+                            </div>
                             <div id="history-list"><div class="cmd-item" style="color:#555;font-family:inherit">Loading…</div></div>
+                            <div class="history-footer" id="history-footer"></div>
                         </div>
                     </div>
                 </div>
