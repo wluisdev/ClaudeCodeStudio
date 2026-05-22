@@ -192,7 +192,7 @@ sealed class ClaudeSession : IAsyncDisposable
     {
         _model = request.Model ?? "claude-sonnet-4-6";
         _effort = request.Effort;
-        _permissionMode = request.PermissionMode ?? "yolo";
+        _permissionMode = request.PermissionMode ?? "ask";
         _workingDirectory = request.WorkingDirectory;
         _resumeSessionId = request.ResumeSessionId;
         _autoResume = request.AutoResume;

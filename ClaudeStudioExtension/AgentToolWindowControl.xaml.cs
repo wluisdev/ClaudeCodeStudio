@@ -1192,7 +1192,7 @@ public partial class AgentToolWindowControl : UserControl
         public string? Effort { get; set; }
 
         [JsonPropertyName("permissionMode")]
-        public string PermissionMode { get; set; } = "auto";
+        public string PermissionMode { get; set; } = "ask";
 
         [JsonPropertyName("sessionId")]
         public string? SessionId { get; set; }

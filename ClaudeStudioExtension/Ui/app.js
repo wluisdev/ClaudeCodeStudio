@@ -64,7 +64,7 @@ function toggleLayout() {
 })();
 
 // ── Permission mode cycle ─────────────────────────────────────
-const permissionCycle = ["yolo", "plan", "ask"];
+const permissionCycle = ["ask", "plan", "yolo"];
 const permissionIcons = { yolo: "⚡", plan: "📋", ask: "🔒" };
 const permissionLabels = { yolo: "yolo — skips ALL permission prompts (dangerous)", plan: "plan — plans only", ask: "ask — Claude default" };
 
@@ -304,6 +304,7 @@ effortSlider.addEventListener("input", () => {
 });
 const permissionSelect = document.querySelector(".permission-select");
 permissionSelect.addEventListener("change", updatePermissionBtn);
+updatePermissionBtn();
 const timingSelect = document.getElementById("timing-select");
 (function () {
     const saved = localStorage.getItem("timingMode") || "simple";
