@@ -139,9 +139,7 @@ public partial class AgentToolWindowControl : UserControl
             try
             {
                 var dteForCwd = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
-                var solutionPath = dteForCwd?.Solution?.FullName;
-                if (!string.IsNullOrEmpty(solutionPath))
-                    currentSolutionDir = Path.GetDirectoryName(solutionPath);
+                currentSolutionDir = ResolveCwd(dteForCwd);
 
                 ApplyAutoSave(dteForCwd, request.AutoSave);
             }
@@ -412,9 +410,9 @@ public partial class AgentToolWindowControl : UserControl
                 onTool: (kind, name, input, text, id) => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = kind, name, input, text, id }))),
-                onPermissionRequest: (tool, input, id) => dispatcher.Invoke(() =>
+                onPermissionRequest: (tool, input, id, cwd) => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = "permission_request", tool, input, id }))));
+                        JsonSerializer.Serialize(new { type = "permission_request", tool, input, id, cwd }))));
 
             VsStatusBar.Clear();
 
@@ -510,6 +508,64 @@ public partial class AgentToolWindowControl : UserControl
     }
 
     public Task SendActiveSelectionAsync() => HandleGetSelectionAsync();
+
+#pragma warning disable VSTHRD010
+    private static string? ResolveCwd(EnvDTE.DTE? dte)
+    {
+        // 1. Loaded .sln (most common case)
+        try
+        {
+            var solutionPath = dte?.Solution?.FullName;
+            if (!string.IsNullOrEmpty(solutionPath))
+            {
+                var dir = Path.GetDirectoryName(solutionPath);
+                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                {
+                    OutputLog.Info($"cwd resolved via Solution.FullName: {dir}");
+                    return dir;
+                }
+            }
+        }
+        catch { }
+
+        // 2. Open Folder mode — VS exposes the folder via IVsSolution.GetSolutionInfo
+        try
+        {
+            var vsSolution = Package.GetGlobalService(typeof(SVsSolution)) as IVsSolution;
+            if (vsSolution != null &&
+                vsSolution.GetSolutionInfo(out var solutionDir, out _, out _) == 0 &&
+                !string.IsNullOrEmpty(solutionDir) &&
+                Directory.Exists(solutionDir))
+            {
+                OutputLog.Info($"cwd resolved via IVsSolution (Open Folder): {solutionDir}");
+                return solutionDir;
+            }
+        }
+        catch { }
+
+        // 3. Active document's directory
+        try
+        {
+            var activeDocPath = dte?.ActiveDocument?.Path;
+            if (!string.IsNullOrEmpty(activeDocPath) && Directory.Exists(activeDocPath))
+            {
+                OutputLog.Info($"cwd resolved via ActiveDocument: {activeDocPath}");
+                return activeDocPath;
+            }
+        }
+        catch { }
+
+        // 4. Last resort: user profile (always writable, never the binary dir)
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrEmpty(userProfile) && Directory.Exists(userProfile))
+        {
+            OutputLog.Info($"cwd resolved via UserProfile fallback: {userProfile}");
+            return userProfile;
+        }
+
+        return null;
+    }
+#pragma warning restore VSTHRD010
 
 #pragma warning disable VSTHRD010
     private static void ApplyAutoSave(EnvDTE.DTE? dte, string? mode)
