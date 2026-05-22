@@ -591,6 +591,32 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
     font-family: Consolas, Menlo, monospace;
 }
 
+.perm-modal-cwd {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 10px;
+    padding: 6px 10px;
+    background: #1e1e1e;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    font-family: Consolas, Menlo, monospace;
+    font-size: 11px;
+    color: #bbb;
+    word-break: break-all;
+}
+
+.perm-modal-cwd-icon {
+    font-size: 12px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.perm-modal-cwd-path {
+    min-width: 0;
+    flex: 1;
+}
+
 .perm-modal-input {
     background: #1e1e1e;
     border: 1px solid #3a3a3a;
@@ -636,6 +662,12 @@ html.light-theme .perm-modal-input {
     background: #f7f7f7;
     border-color: #ddd;
     color: #222;
+}
+
+html.light-theme .perm-modal-cwd {
+    background: #f7f7f7;
+    border-color: #ddd;
+    color: #555;
 }
 
 #history-menu {
@@ -1346,6 +1378,19 @@ html.light-theme .assistant .bubble .md-table tbody tr:nth-child(even) { backgro
 }
 .tool-chip.tool-error .tool-dot,
 .tool-chip.tool-error .tool-name { color: #d05050; }
+.tool-chip.tool-pending {
+    border-left-color: #e8b94a;
+    background: rgba(232, 185, 74, 0.07);
+}
+.tool-chip.tool-pending .tool-dot,
+.tool-chip.tool-pending .tool-name { color: #e8b94a; }
+.tool-chip.tool-pending .tool-dot {
+    animation: tool-pending-pulse 1.2s ease-in-out infinite;
+}
+@keyframes tool-pending-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
 html.light-theme .tool-chip { color: #555; background: rgba(176, 92, 53, 0.07); border-left-color: #b05c35; }
 html.light-theme .tool-chip .tool-dot,
 html.light-theme .tool-chip .tool-name { color: #b05c35; }
@@ -1354,6 +1399,9 @@ html.light-theme .tool-chip .tool-summary { color: #888; }
 html.light-theme .tool-chip.tool-error { background: rgba(180, 50, 50, 0.07); border-left-color: #b03030; }
 html.light-theme .tool-chip.tool-error .tool-dot,
 html.light-theme .tool-chip.tool-error .tool-name { color: #b03030; }
+html.light-theme .tool-chip.tool-pending { background: rgba(190, 140, 30, 0.08); border-left-color: #b48a1f; }
+html.light-theme .tool-chip.tool-pending .tool-dot,
+html.light-theme .tool-chip.tool-pending .tool-name { color: #b48a1f; }
 
 .stream-timer {
     font-family: Cascadia Code, Consolas, monospace;

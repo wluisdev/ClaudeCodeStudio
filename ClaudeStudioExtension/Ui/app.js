@@ -852,7 +852,7 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "permission_request") {
-        openPermissionModal(event.data.tool || "", event.data.input || "", event.data.id || "");
+        openPermissionModal(event.data.tool || "", event.data.input || "", event.data.id || "", event.data.cwd || "");
         return;
     }
 });
@@ -860,10 +860,25 @@ window.chrome.webview.addEventListener("message", event => {
 let pendingPermissionToolId = null;
 let pendingPermissionToolName = null;
 
-function openPermissionModal(tool, input, id) {
+function openPermissionModal(tool, input, id, cwd) {
     pendingPermissionToolId = id;
     pendingPermissionToolName = tool;
     document.getElementById("perm-modal-tool").textContent = tool;
+
+    if (id) {
+        const chip = messages.querySelector(`.tool-chip[data-tool-id="${CSS.escape(id)}"]`);
+        if (chip) chip.classList.add("tool-pending");
+    }
+
+    const cwdRow = document.getElementById("perm-modal-cwd");
+    const cwdPath = document.getElementById("perm-modal-cwd-path");
+    if (cwd) {
+        cwdPath.textContent = cwd;
+        cwdRow.hidden = false;
+    } else {
+        cwdPath.textContent = "";
+        cwdRow.hidden = true;
+    }
 
     const pre = document.getElementById("perm-modal-input");
     let formatted = input;
@@ -878,6 +893,10 @@ function openPermissionModal(tool, input, id) {
 
 function closePermissionModal() {
     document.getElementById("perm-modal-overlay").classList.remove("open");
+    if (pendingPermissionToolId) {
+        const chip = messages.querySelector(`.tool-chip[data-tool-id="${CSS.escape(pendingPermissionToolId)}"]`);
+        if (chip) chip.classList.remove("tool-pending");
+    }
     pendingPermissionToolId = null;
     pendingPermissionToolName = null;
 }
@@ -1344,7 +1363,10 @@ function appendToolEvent(kind, name, inputJson, text, id) {
         finalizeActiveSeg(bubble);
         const chip = document.createElement("div");
         chip.className = "tool-chip";
-        if (id) chip.dataset.toolId = id;
+        if (id) {
+            chip.dataset.toolId = id;
+            if (id === pendingPermissionToolId) chip.classList.add("tool-pending");
+        }
 
         const dot = document.createElement("span");
         dot.className = "tool-dot";
