@@ -858,9 +858,11 @@ window.chrome.webview.addEventListener("message", event => {
 });
 
 let pendingPermissionToolId = null;
+let pendingPermissionToolName = null;
 
 function openPermissionModal(tool, input, id) {
     pendingPermissionToolId = id;
+    pendingPermissionToolName = tool;
     document.getElementById("perm-modal-tool").textContent = tool;
 
     const pre = document.getElementById("perm-modal-input");
@@ -877,6 +879,7 @@ function openPermissionModal(tool, input, id) {
 function closePermissionModal() {
     document.getElementById("perm-modal-overlay").classList.remove("open");
     pendingPermissionToolId = null;
+    pendingPermissionToolName = null;
 }
 
 function permissionAllow() {
@@ -886,6 +889,18 @@ function permissionAllow() {
         toolUseId: pendingPermissionToolId,
         allow: true,
         reason: null
+    });
+    closePermissionModal();
+}
+
+function permissionAllowSession() {
+    if (!pendingPermissionToolId) { closePermissionModal(); return; }
+    window.chrome.webview.postMessage({
+        type: "permission-response",
+        toolUseId: pendingPermissionToolId,
+        allow: true,
+        reason: null,
+        allowSession: pendingPermissionToolName
     });
     closePermissionModal();
 }

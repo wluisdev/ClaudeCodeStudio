@@ -15,6 +15,8 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
 
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<Decision>> _pending = new();
+    private readonly HashSet<string> _sessionAllowed = new();
+    private readonly object _sessionAllowedLock = new();
     private Task? _acceptLoop;
 
     public PermissionPipeServer()
@@ -32,6 +34,16 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
         if (_pending.TryGetValue(toolUseId, out var tcs))
             return tcs.TrySetResult(new Decision(allow, reason));
         return false;
+    }
+
+    public void AllowForSession(string toolName)
+    {
+        lock (_sessionAllowedLock) _sessionAllowed.Add(toolName);
+    }
+
+    private bool IsSessionAllowed(string toolName)
+    {
+        lock (_sessionAllowedLock) return _sessionAllowed.Contains(toolName);
     }
 
     private async Task AcceptLoopAsync(CancellationToken ct)
@@ -92,35 +104,45 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
                 return;
             }
 
-            tcs = new TaskCompletionSource<Decision>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (!_pending.TryAdd(toolUseId, tcs))
-            {
-                EmitError($"pipe: duplicate tool_use_id {toolUseId}");
-                return;
-            }
-
-            EmitChunk(new ChatChunk
-            {
-                Type = "permission_request",
-                Tool = toolName,
-                ToolInput = toolInput,
-                ToolId = toolUseId
-            });
-
+            // Session allowlist short-circuit — auto-approve without bothering the UI.
+            // Set is populated when the user clicks "Allow for session" on a prior
+            // prompt for this tool.
             Decision decision;
-            var timeoutTask = Task.Delay(ResponseTimeout, ct);
-            var completed = await Task.WhenAny(tcs.Task, timeoutTask);
-            if (completed == tcs.Task)
+            if (IsSessionAllowed(toolName!))
             {
-                decision = await tcs.Task;
-            }
-            else if (ct.IsCancellationRequested)
-            {
-                decision = new Decision(false, "Agent shutting down");
+                decision = new Decision(true, null);
             }
             else
             {
-                decision = new Decision(false, $"Permission timed out ({ResponseTimeout.TotalMinutes:F0}min)");
+                tcs = new TaskCompletionSource<Decision>(TaskCreationOptions.RunContinuationsAsynchronously);
+                if (!_pending.TryAdd(toolUseId!, tcs))
+                {
+                    EmitError($"pipe: duplicate tool_use_id {toolUseId}");
+                    return;
+                }
+
+                EmitChunk(new ChatChunk
+                {
+                    Type = "permission_request",
+                    Tool = toolName,
+                    ToolInput = toolInput,
+                    ToolId = toolUseId
+                });
+
+                var timeoutTask = Task.Delay(ResponseTimeout, ct);
+                var completed = await Task.WhenAny(tcs.Task, timeoutTask);
+                if (completed == tcs.Task)
+                {
+                    decision = await tcs.Task;
+                }
+                else if (ct.IsCancellationRequested)
+                {
+                    decision = new Decision(false, "Agent shutting down");
+                }
+                else
+                {
+                    decision = new Decision(false, $"Permission timed out ({ResponseTimeout.TotalMinutes:F0}min)");
+                }
             }
 
             var responseObj = new

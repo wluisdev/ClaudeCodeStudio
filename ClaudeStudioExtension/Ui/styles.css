@@ -622,6 +622,14 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
 
 .perm-modal-buttons .perm-deny:hover { background: #732828; }
 
+.perm-modal-buttons .perm-allow-session {
+    background: #2f5d7d;
+    border-color: #2f5d7d;
+    color: white;
+}
+
+.perm-modal-buttons .perm-allow-session:hover { background: #264e69; }
+
 html.light-theme .perm-modal-eyebrow { color: #666; }
 html.light-theme .perm-modal-tool { color: #111; }
 html.light-theme .perm-modal-input {

@@ -84,7 +84,7 @@ public class AgentClient
         OutputLog.Info($"agent started (pid {_process.Id})");
     }
 
-    public async Task SendPermissionResponseAsync(string toolUseId, bool allow, string? reason)
+    public async Task SendPermissionResponseAsync(string toolUseId, bool allow, string? reason, string? allowSession = null)
     {
         if (_writer == null)
         {
@@ -99,12 +99,13 @@ public class AgentClient
             {
                 ToolUseId = toolUseId,
                 Allow = allow,
-                Reason = reason
+                Reason = reason,
+                AllowSession = allowSession
             }
         };
         var json = JsonSerializer.Serialize(request);
 
-        OutputLog.Info($"permission-response → toolUseId={toolUseId} allow={allow}");
+        OutputLog.Info($"permission-response → toolUseId={toolUseId} allow={allow} allowSession={allowSession ?? "-"}");
         await _writer.WriteLineAsync(json);
         await _writer.FlushAsync();
     }

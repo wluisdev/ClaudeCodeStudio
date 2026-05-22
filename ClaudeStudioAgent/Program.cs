@@ -68,6 +68,8 @@ var stdinReader = Task.Run(async () =>
                     continue;
                 }
                 var pr = request.PermissionResponse;
+                if (!string.IsNullOrEmpty(pr.AllowSession))
+                    pipeServer.AllowForSession(pr.AllowSession);
                 if (!pipeServer.Respond(pr.ToolUseId, pr.Allow, pr.Reason))
                     EmitError($"no pending permission request for tool_use_id {pr.ToolUseId}");
                 continue;

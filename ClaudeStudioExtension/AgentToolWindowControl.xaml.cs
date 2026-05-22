@@ -200,7 +200,7 @@ public partial class AgentToolWindowControl : UserControl
                     OutputLog.Warn("permission-response missing toolUseId");
                     return;
                 }
-                await _agentClient.SendPermissionResponseAsync(request.ToolUseId, request.Allow, request.Reason);
+                await _agentClient.SendPermissionResponseAsync(request.ToolUseId, request.Allow, request.Reason, request.AllowSession);
                 return;
             }
 
@@ -1244,5 +1244,8 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("reason")]
         public string? Reason { get; set; }
+
+        [JsonPropertyName("allowSession")]
+        public string? AllowSession { get; set; }
     }
 }

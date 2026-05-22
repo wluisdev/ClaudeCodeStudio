@@ -27,4 +27,8 @@ public class PermissionResponse
     public string ToolUseId { get; set; } = "";
     public bool Allow { get; set; }
     public string? Reason { get; set; }
+
+    // When set, adds the tool name to the agent's session allowlist so future
+    // calls of this same tool auto-approve without prompting the UI.
+    public string? AllowSession { get; set; }
 }
