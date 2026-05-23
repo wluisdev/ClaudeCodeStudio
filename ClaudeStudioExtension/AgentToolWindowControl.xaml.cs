@@ -22,6 +22,7 @@ public partial class AgentToolWindowControl : UserControl
     private bool _initialized;
     private string? _lastWorkingDir;
     private DateTime _sessionStart = DateTime.Now;
+    private static bool _tempCleanupDone;
 
     public AgentToolWindowControl()
     {
@@ -32,6 +33,39 @@ public partial class AgentToolWindowControl : UserControl
         IsVisibleChanged += AgentToolWindowControl_IsVisibleChanged;
 
         AgentToolWindowCommand.ActiveControl = this;
+
+        // One-shot cleanup of stale pasted images/files. Runs once per VS
+        // session in the background — these files accumulate in %TEMP%/ClaudeStudio
+        // without expiry (every Ctrl+V of an image or binary file drops one),
+        // so screenshots of Snipping Tool at ~300KB each can pile up to MB
+        // over weeks. 7 days is a comfortable retention.
+        if (!_tempCleanupDone)
+        {
+            _tempCleanupDone = true;
+            _ = Task.Run(() => CleanupOldTempFiles(TimeSpan.FromDays(7)));
+        }
+    }
+
+    private static void CleanupOldTempFiles(TimeSpan maxAge)
+    {
+        try
+        {
+            if (!Directory.Exists(_tempDir)) return;
+            var cutoff = DateTime.UtcNow - maxAge;
+            foreach (var file in Directory.EnumerateFiles(_tempDir))
+            {
+                try
+                {
+                    if (File.GetLastWriteTimeUtc(file) < cutoff)
+                        File.Delete(file);
+                }
+                catch { /* file locked or already gone — ignore */ }
+            }
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"temp cleanup failed: {ex.Message}");
+        }
     }
 
     private void AgentToolWindowControl_IsVisibleChanged(
@@ -839,7 +873,28 @@ public partial class AgentToolWindowControl : UserControl
                 var ext = Path.GetExtension(filePath);
                 var isBinary = _binaryExtensions.Contains(ext);
                 var content = isBinary ? null : $"[{filename}]\n```\n{File.ReadAllText(filePath)}\n```";
-                var returnPath = isBinary ? filePath : (string?)null;
+
+                string? returnPath = null;
+                if (isBinary)
+                {
+                    // Copy into our temp dir so the path falls under the --add-dir
+                    // whitelist passed to claude.exe. Without this, pasted image
+                    // files referenced from Pictures/Downloads/etc. fail the
+                    // workspace boundary check and Read is denied.
+                    try
+                    {
+                        Directory.CreateDirectory(_tempDir);
+                        var destFilename = $"{DateTime.Now:yyyyMMdd_HHmmss}_{filename}";
+                        var destPath = Path.Combine(_tempDir, destFilename);
+                        File.Copy(filePath, destPath, overwrite: true);
+                        returnPath = destPath;
+                    }
+                    catch (Exception ex)
+                    {
+                        OutputLog.Warn($"failed to stage pasted file in temp: {ex.Message}");
+                        returnPath = filePath; // fallback: claude may still refuse
+                    }
+                }
                 var fileJson = JsonSerializer.Serialize(new { type = "attach-file", filename, content, isBinary, filePath = returnPath });
                 dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(fileJson));
             }
@@ -1329,29 +1384,123 @@ public partial class AgentToolWindowControl : UserControl
 
     private async Task HandleGetDiffAsync()
     {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        // Wrap everything so we always post SOMETHING back to the WebView —
+        // otherwise the "Running git diff…" loader sits there forever on any
+        // exception path.
+        string stat = "";
+        string diff = "";
 
-        var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
-        var solutionPath = dte?.Solution?.FullName;
-        var workDir = string.IsNullOrEmpty(solutionPath) ? null : Path.GetDirectoryName(solutionPath);
-
-        if (string.IsNullOrEmpty(workDir) || !Directory.Exists(workDir))
+        try
         {
-            var errJson = JsonSerializer.Serialize(new { type = "diff", stat = "", diff = "No solution open." });
-            var disp = System.Windows.Application.Current.Dispatcher;
-            disp.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(errJson));
-            return;
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+            var solutionPath = dte?.Solution?.FullName;
+            var workDir = string.IsNullOrEmpty(solutionPath) ? null : Path.GetDirectoryName(solutionPath);
+
+            if (string.IsNullOrEmpty(workDir) || !Directory.Exists(workDir))
+            {
+                diff = "No solution open.";
+            }
+            else if (!Directory.Exists(Path.Combine(workDir, ".git")) &&
+                     !await IsInsideGitWorktreeAsync(workDir))
+            {
+                // Not a git repository at all (no .git folder anywhere up the tree).
+                // VS's own Git panel shows "git not in use" in this case. We just
+                // surface a friendly message instead of running git commands that
+                // all fail silently.
+                stat = "Not a git repository.";
+                diff = "This project is not under git version control.\n\nInitialize a repository in VS to enable diffs.";
+            }
+            else
+            {
+                stat = await RunGitAsync(workDir, "diff --stat HEAD");
+                diff = await RunGitAsync(workDir, "diff HEAD");
+
+                // Repo sem commits ainda → diff HEAD vazio. Sintetiza "tudo novo".
+                if (string.IsNullOrWhiteSpace(stat) && string.IsNullOrWhiteSpace(diff))
+                {
+                    var hasHead = !string.IsNullOrWhiteSpace(
+                        await RunGitAsync(workDir, "rev-parse --verify HEAD"));
+
+                    if (!hasHead)
+                    {
+                        var allFiles = await RunGitAsync(workDir, "ls-files --others --cached --exclude-standard");
+                        var paths = allFiles.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+
+                        var statSb = new StringBuilder();
+                        var diffSb = new StringBuilder();
+                        int totalLines = 0;
+
+                        foreach (var rel in paths)
+                        {
+                            try
+                            {
+                                var full = Path.Combine(workDir, rel);
+                                if (!File.Exists(full)) continue;
+                                var info = new FileInfo(full);
+                                if (info.Length > 256 * 1024) continue;
+                                var content = File.ReadAllText(full, Encoding.UTF8);
+                                var lines = content.Split('\n');
+                                var insertCount = lines.Length;
+                                totalLines += insertCount;
+                                statSb.AppendLine($" {rel} | {insertCount} +");
+                                diffSb.AppendLine($"diff --git a/{rel} b/{rel}");
+                                diffSb.AppendLine("new file mode 100644");
+                                diffSb.AppendLine("--- /dev/null");
+                                diffSb.AppendLine($"+++ b/{rel}");
+                                foreach (var line in lines)
+                                    diffSb.AppendLine("+" + line.TrimEnd('\r'));
+                            }
+                            catch { }
+                        }
+
+                        if (statSb.Length > 0)
+                        {
+                            statSb.AppendLine($" {paths.Length} files (no initial commit yet), {totalLines} insertions(+)");
+                            stat = statSb.ToString();
+                            diff = diffSb.ToString();
+                        }
+                        else
+                        {
+                            stat = "Repository initialized but empty.";
+                            diff = "No tracked or untracked files to show.";
+                        }
+                    }
+                    else
+                    {
+                        stat = await RunGitAsync(workDir, "status --short");
+                        if (string.IsNullOrWhiteSpace(stat))
+                            diff = "No changes since the last commit.";
+                    }
+                }
+            }
         }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"HandleGetDiffAsync failed: {ex.Message}");
+            diff = $"Error computing diff: {ex.Message}";
+        }
+        finally
+        {
+            var json = JsonSerializer.Serialize(new { type = "diff", stat = (stat ?? "").Trim(), diff = (diff ?? "").Trim() });
+            try
+            {
+                var dispatcher = System.Windows.Application.Current?.Dispatcher;
+                dispatcher?.Invoke(() => Browser?.CoreWebView2?.PostWebMessageAsJson(json));
+            }
+            catch (Exception ex)
+            {
+                OutputLog.Warn($"diff post failed: {ex.Message}");
+            }
+        }
+    }
 
-        var stat = await RunGitAsync(workDir, "diff --stat HEAD");
-        var diff = await RunGitAsync(workDir, "diff HEAD");
-
-        if (string.IsNullOrWhiteSpace(stat) && string.IsNullOrWhiteSpace(diff))
-            stat = await RunGitAsync(workDir, "status --short");
-
-        var json = JsonSerializer.Serialize(new { type = "diff", stat = stat.Trim(), diff = diff.Trim() });
-        var dispatcher = System.Windows.Application.Current.Dispatcher;
-        dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
+    private static async Task<bool> IsInsideGitWorktreeAsync(string workDir)
+    {
+        // git emits "true" / "false" / nothing depending on context.
+        var result = await RunGitAsync(workDir, "rev-parse --is-inside-work-tree");
+        return result.Trim().Equals("true", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<string> RunGitAsync(string workDir, string arguments)
@@ -1364,7 +1513,12 @@ public partial class AgentToolWindowControl : UserControl
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
-                CreateNoWindow = true
+                CreateNoWindow = true,
+                // git emits UTF-8 by default; without this hint the host process
+                // would decode with the OS ANSI codepage and mangle non-ASCII
+                // bytes (e.g. "Aplicação" → "AplicaÃ§Ã£o").
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
             };
             using var proc = Process.Start(psi)!;
             var output = await proc.StandardOutput.ReadToEndAsync();

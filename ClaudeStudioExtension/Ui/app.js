@@ -2196,8 +2196,11 @@ let _diffFiles = [];
 let _diffStat = "";
 let _diffActive = null;
 
+let _diffRawText = "";
+
 function renderDiff(stat, diff) {
     _diffStat = stat || "";
+    _diffRawText = diff || "";
     _diffFiles = parseDiffFiles(diff || "");
     _diffActive = null;
     paintDiffStat();
@@ -2251,7 +2254,18 @@ function paintDiffBody() {
     const body = document.getElementById("diff-body");
     body.innerHTML = "";
     if (_diffFiles.length === 0) {
-        body.textContent = _diffStat ? "" : "No changes.";
+        // No parseable `diff --git` blocks. Show whatever diff text we got
+        // (e.g. "Not a git repository. ... Initialize a repository in VS to
+        // enable diffs.") instead of leaving the body empty. Wrap in a div
+        // with pre-wrap so backend-supplied newlines (\n\n) actually break.
+        if (_diffRawText) {
+            const msg = document.createElement("div");
+            msg.className = "diff-empty-message";
+            msg.textContent = _diffRawText;
+            body.appendChild(msg);
+        } else if (!_diffStat) {
+            body.textContent = "No changes.";
+        }
         return;
     }
     const list = _diffActive ? _diffFiles.filter(f => f.name === _diffActive) : _diffFiles;

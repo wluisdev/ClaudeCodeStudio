@@ -2005,6 +2005,13 @@ html.light-theme .find-match.current { background: #d88763; color: #fff; }
     flex: 1;
     min-height: 0;
 }
+.diff-empty-message {
+    white-space: pre-wrap;
+    color: #aaa;
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 12px 4px;
+}
 .diff-body pre {
     margin: 0;
     font-size: 12px;

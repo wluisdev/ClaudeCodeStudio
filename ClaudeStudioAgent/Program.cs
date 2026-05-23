@@ -257,8 +257,28 @@ sealed class ClaudeSession : IAsyncDisposable
                 // tells claude the internal check should auto-pass; the hook still
                 // fires for these tools (matcher includes Edit|Write|MultiEdit),
                 // so the user still sees the permission modal.
+                // Use bypassPermissions instead of acceptEdits so claude doesn't
+                // refuse internally for non-edit tools either. acceptEdits only
+                // covers Edit/Write/MultiEdit; Bash compound commands (`cd X && Y`,
+                // `cd X; Y`) and other "needs approval" cases were still being
+                // auto-denied by claude in stdio mode (no TTY to ask via). With
+                // bypass, claude lets everything through and the hook (configured
+                // via --settings + --include-hook-events) remains the sole
+                // gatekeeper — modal still appears for matched tools.
                 psi.ArgumentList.Add("--permission-mode");
-                psi.ArgumentList.Add("acceptEdits");
+                psi.ArgumentList.Add("bypassPermissions");
+
+                // Allow Read of transient files the extension drops here —
+                // pasted screenshots (Ctrl+V) land in %TEMP%/ClaudeStudio/.
+                // Without --add-dir, claude refuses to Read paths outside the
+                // workspace, breaking the "paste image and ask about it" flow.
+                var sharedTempDir = Path.Combine(Path.GetTempPath(), "ClaudeStudio");
+                if (!Directory.Exists(sharedTempDir))
+                {
+                    try { Directory.CreateDirectory(sharedTempDir); } catch { }
+                }
+                psi.ArgumentList.Add("--add-dir");
+                psi.ArgumentList.Add(sharedTempDir);
             }
         }
         else // "yolo" (default)
