@@ -22,6 +22,12 @@ public class McpServer
     public Dictionary<string, string> Headers { get; set; } = new();
     public bool Disabled { get; set; }
 
+    // Forward-compat bucket: any per-server JSON properties we don't recognize
+    // (e.g. future MCP options like timeoutMs, autoStart, etc.) are captured
+    // here on Load and emitted verbatim on Save so they survive roundtrip
+    // through this binary.
+    public Dictionary<string, JsonElement>? ExtraFields { get; set; }
+
     public McpServer Clone() => new()
     {
         Name = Name,
@@ -32,6 +38,7 @@ public class McpServer
         Url = Url,
         Headers = new Dictionary<string, string>(Headers),
         Disabled = Disabled,
+        ExtraFields = ExtraFields == null ? null : new Dictionary<string, JsonElement>(ExtraFields),
     };
 }
 
@@ -75,6 +82,14 @@ public static class McpConfigStore
         }
     }
 
+    // Known per-server JSON keys we map to typed McpServer properties. Anything
+    // outside this set lands in McpServer.ExtraFields for forward-compat
+    // roundtrip preservation.
+    private static readonly HashSet<string> _knownServerKeys = new(StringComparer.Ordinal)
+    {
+        "type", "url", "command", "args", "env", "headers"
+    };
+
     private static McpServer ParseServer(string name, JsonElement el)
     {
         var s = new McpServer { Name = name };
@@ -106,6 +121,15 @@ public static class McpConfigStore
         if (el.TryGetProperty("headers", out var hdrEl) && hdrEl.ValueKind == JsonValueKind.Object)
             foreach (var p in hdrEl.EnumerateObject())
                 if (p.Value.ValueKind == JsonValueKind.String) s.Headers[p.Name] = p.Value.GetString() ?? "";
+
+        // Capture any unrecognized server-level properties so they survive
+        // a Save without being silently dropped.
+        foreach (var prop in el.EnumerateObject())
+        {
+            if (_knownServerKeys.Contains(prop.Name)) continue;
+            s.ExtraFields ??= new Dictionary<string, JsonElement>();
+            s.ExtraFields[prop.Name] = prop.Value.Clone();
+        }
 
         return s;
     }
@@ -246,6 +270,16 @@ public static class McpConfigStore
                 w.WriteStartObject("headers");
                 foreach (var kv in s.Headers) w.WriteString(kv.Key, kv.Value);
                 w.WriteEndObject();
+            }
+        }
+        // Re-emit unknown per-server fields captured on Parse so the on-disk
+        // file keeps any options a newer version (or hand-edits) introduced.
+        if (s.ExtraFields != null)
+        {
+            foreach (var kv in s.ExtraFields)
+            {
+                w.WritePropertyName(kv.Key);
+                kv.Value.WriteTo(w);
             }
         }
         w.WriteEndObject();

@@ -533,6 +533,10 @@ public partial class McpToolWindowControl : UserControl
                 var idx = _servers.IndexOf(_editing);
                 if (idx < 0) idx = _servers.FindIndex(x => x.Name == _editing.Name);
                 draft.Name = _editing.Name;
+                // Preserve per-server fields the UI doesn't manage (forward-compat
+                // unknown props like timeoutMs, custom future MCP options) so a
+                // toggle/edit doesn't drop them.
+                draft.ExtraFields = _editing.ExtraFields;
                 if (idx >= 0) _servers[idx] = draft;
                 else _servers.Add(draft);
             }

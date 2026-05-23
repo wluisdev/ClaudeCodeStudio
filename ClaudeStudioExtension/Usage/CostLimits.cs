@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ClaudeStudioExtension.Usage;
 
@@ -9,6 +11,13 @@ public class CostLimits
     public decimal? SessionLimit { get; set; }
     public decimal? DailyLimit { get; set; }
     public bool Block { get; set; }
+
+    // Forward-compat capture bucket: properties added by a newer version of
+    // the extension end up here on Load and are re-emitted on Save so an
+    // older binary doesn't silently drop them. Adding new known fields to
+    // this class still works as before — they bind to typed properties.
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? UnknownProperties { get; set; }
 
     private static string FilePath =>
         Path.Combine(
