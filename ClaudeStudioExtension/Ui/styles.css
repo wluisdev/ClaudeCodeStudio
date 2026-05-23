@@ -1281,7 +1281,7 @@ html.light-theme .token-estimate { color: #999; }
     padding: 8px 12px;
     border-radius: 10px;
     line-height: 1.4;
-    font-size: 13px;
+    font-size: var(--chat-font-size, 13px);
     white-space: pre-wrap;
     word-break: break-word;
 }
@@ -1314,13 +1314,13 @@ html.light-theme .token-estimate { color: #999; }
     border-radius: 10px;
     overflow-x: auto;
     margin: 6px 0;
-    font-size: 12px;
+    font-size: calc(var(--chat-font-size, 13px) - 1px);
     white-space: pre;
     position: relative;
 }
 .message .bubble pre code {
     font-family: Cascadia Code, Consolas, monospace;
-    font-size: 12px;
+    font-size: calc(var(--chat-font-size, 13px) - 1px);
     white-space: pre;
 }
 .assistant .bubble pre .apply-btn {

@@ -1170,15 +1170,23 @@ function dismissCostWarning() {
     document.getElementById("cost-warning").style.display = "none";
 }
 
-// Ctrl+Scroll to resize textarea font
+// Ctrl+Scroll to resize chat font (bubbles, code blocks, composer — all driven
+// by the --chat-font-size CSS var). Composer keeps its inline style so the
+// textarea matches even when CSS var inheritance gets weird. Same localStorage
+// key as before for backward compat with users who already set a custom size.
 let composerFontSize = parseFloat(localStorage.getItem("composerFontSize") || "13");
-textarea.style.fontSize = composerFontSize + "px";
 
-textarea.addEventListener("wheel", e => {
+function applyChatFontSize(px) {
+    document.documentElement.style.setProperty("--chat-font-size", px + "px");
+    textarea.style.fontSize = px + "px";
+}
+applyChatFontSize(composerFontSize);
+
+document.addEventListener("wheel", e => {
     if (!e.ctrlKey) return;
     e.preventDefault();
-    composerFontSize = Math.max(10, Math.min(24, composerFontSize + (e.deltaY < 0 ? 1 : -1)));
-    textarea.style.fontSize = composerFontSize + "px";
+    composerFontSize = Math.max(8, Math.min(24, composerFontSize + (e.deltaY < 0 ? 1 : -1)));
+    applyChatFontSize(composerFontSize);
     localStorage.setItem("composerFontSize", composerFontSize);
 }, { passive: false });
 
