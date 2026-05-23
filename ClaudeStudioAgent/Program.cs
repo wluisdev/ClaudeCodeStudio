@@ -21,6 +21,35 @@ if (Environment.GetEnvironmentVariable("CLAUDESTUDIO_HOOK_ENABLE") == "1")
     pipeServer.Start();
 }
 
+// Sweep stale hook-settings temp dirs left behind by crashed agent processes.
+// Each "ask" session creates `%TEMP%/claudestudio-<pid>-<guid>/` and deletes it
+// in DisposeAsync — but a VS crash, Task Manager kill, or power loss bypasses
+// that path, leaving orphans accumulating forever. Age-based (>24h) cleanup
+// in background so it doesn't delay startup, and so an active sibling session
+// from minutes ago is never touched.
+_ = Task.Run(() =>
+{
+    try
+    {
+        var tempBase = Path.GetTempPath();
+        var cutoff = DateTime.UtcNow - TimeSpan.FromDays(1);
+        foreach (var dir in Directory.EnumerateDirectories(tempBase, "claudestudio-*"))
+        {
+            try
+            {
+                var name = Path.GetFileName(dir);
+                // Defensive: name must look like `claudestudio-<digits>-<hex>` —
+                // skip anything else that happened to match the wildcard.
+                if (string.IsNullOrEmpty(name) || !name.Contains("-")) continue;
+                if (Directory.GetLastWriteTimeUtc(dir) < cutoff)
+                    Directory.Delete(dir, recursive: true);
+            }
+            catch { /* in-use, locked, or already gone — ignore */ }
+        }
+    }
+    catch { }
+});
+
 ClaudeSession? session = null;
 
 // Stdin reading is decoupled from request processing. The main loop spends most
