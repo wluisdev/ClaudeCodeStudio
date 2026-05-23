@@ -108,6 +108,20 @@ function pushPromptHistory(text) {
     if (promptHistory.length > 50) promptHistory.pop();
     localStorage.setItem("promptHistory", JSON.stringify(promptHistory));
     historyIndex = -1;
+    updateHistoryHint();
+}
+
+function updateHistoryHint() {
+    const el = document.getElementById("history-hint");
+    if (!el) return;
+    if (historyIndex < 0) {
+        el.hidden = true;
+        el.textContent = "";
+    } else {
+        // Show 1-based "current/total" — older prompts have lower display index
+        el.textContent = `↑ history ${historyIndex + 1}/${promptHistory.length}`;
+        el.hidden = false;
+    }
 }
 
 // ── Session history ───────────────────────────────────────────
@@ -561,6 +575,7 @@ textarea.addEventListener("keydown", (e) => {
             historyIndex++;
             textarea.value = promptHistory[historyIndex];
             updateTokenEstimate();
+            updateHistoryHint();
         }
         return;
     }
@@ -574,6 +589,7 @@ textarea.addEventListener("keydown", (e) => {
             textarea.value = historyDraft;
         }
         updateTokenEstimate();
+        updateHistoryHint();
         return;
     }
 
@@ -679,6 +695,7 @@ function sendMessage() {
     const text = textarea.value.trim();
     pushPromptHistory(text);
     historyIndex = -1;
+    updateHistoryHint();
     const activeAttachments = [...attachments.values()];
 
     if (text === "/model") {

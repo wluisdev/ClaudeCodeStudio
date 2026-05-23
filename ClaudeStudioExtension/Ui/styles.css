@@ -732,6 +732,15 @@ html.light-theme .perm-modal-cwd {
 }
 .history-toggle input { margin: 0; cursor: pointer; }
 
+.history-hint {
+    color: #888;
+    font-size: 10px;
+    font-family: inherit;
+    margin-right: 8px;
+    user-select: none;
+}
+html.light-theme .history-hint { color: #777; }
+
 .history-empty { color: #888; font-family: inherit; }
 .history-empty a { color: #d88763; text-decoration: none; }
 .history-empty a:hover { text-decoration: underline; }
