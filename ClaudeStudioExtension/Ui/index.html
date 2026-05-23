@@ -18,7 +18,6 @@
             <div class="topbar-right">
                 <div class="actions">
                     <button class="action-btn" id="btn-layout" title="Toggle layout" onclick="toggleLayout()">◫</button>
-                    <button class="action-btn" id="btn-permission" title="Permission mode" onclick="cyclePermission()">⚡</button>
                     <button class="action-btn" id="btn-diff" title="Git diff" onclick="openDiffModal()">⎇</button>
                     <button class="action-btn" id="btn-usage" title="Usage & cost" onclick="openUsageWindow()">
                         <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
@@ -76,6 +75,21 @@
                     <button class="cmd-trigger" title="Settings" onclick="toggleSettings()">⚙</button>
                     <div class="cmd-menu settings-menu" id="settings-menu">
                         <div class="cmd-section">Settings</div>
+                        <div class="settings-row">
+                            <span class="settings-label">Theme</span>
+                            <select id="theme-override" class="settings-select" onchange="setThemeOverride(this.value)">
+                                <option value="auto">Auto (follow VS)</option>
+                                <option value="dark">Dark</option>
+                                <option value="light">Light</option>
+                            </select>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Accent color</span>
+                            <div class="settings-color-group">
+                                <input type="color" id="accent-custom" class="settings-color" oninput="setAccentCustom(this.value)" />
+                                <button type="button" class="settings-color-reset" title="Reset to default" onclick="resetAccent()">↶</button>
+                            </div>
+                        </div>
                         <div class="settings-row">
                             <span class="settings-label">Auto-resume last session</span>
                             <label class="toggle">
@@ -143,17 +157,6 @@
                             <div class="unit-toggle">
                                 <button class="unit-btn" id="unit-ms" onclick="setTimeUnit('ms')">ms</button>
                                 <button class="unit-btn" id="unit-s" onclick="setTimeUnit('s')">s</button>
-                            </div>
-                        </div>
-                        <div class="cmd-divider"></div>
-                        <div class="settings-row effort-row">
-                            <span class="settings-label">Effort</span>
-                            <span class="effort-value-label" id="effort-label">auto</span>
-                        </div>
-                        <div class="effort-slider-wrap">
-                            <input type="range" class="effort-slider" id="effort-slider" min="0" max="4" step="1" value="0" />
-                            <div class="effort-ticks">
-                                <span>auto</span><span>low</span><span>med</span><span>high</span><span>max</span>
                             </div>
                         </div>
                         <div class="cmd-divider"></div>
@@ -271,11 +274,31 @@
                     <div class="right-buttons">
                         <span class="history-hint" id="history-hint" hidden></span>
                         <span class="token-estimate" id="token-estimate" title="Approximate input tokens"></span>
-                        <select class="permission-select" title="Permission mode">
-                            <option value="ask" selected>🔒 ask</option>
-                            <option value="plan">📋 plan</option>
-                            <option value="yolo">⚡ yolo</option>
-                        </select>
+                        <div class="effort-control" id="effort-control">
+                            <button type="button" class="effort-btn" id="effort-btn" onclick="toggleEffortPopup()" title="Reasoning effort">
+                                <span id="effort-btn-icon">🧭</span>
+                                <span id="effort-btn-label">auto</span>
+                                <span class="effort-btn-caret">▴</span>
+                            </button>
+                            <div class="effort-popup" id="effort-popup" hidden>
+                                <input type="range" class="effort-popup-slider" id="effort-popup-slider" min="0" max="4" step="1" value="0" />
+                                <div class="effort-popup-ticks">
+                                    <span>auto</span><span>low</span><span>med</span><span>high</span><span>max</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="permission-control" id="permission-control">
+                            <button type="button" class="effort-btn" id="permission-btn" onclick="togglePermissionPopup()" title="Permission mode">
+                                <span id="permission-btn-icon">🔒</span>
+                                <span id="permission-btn-label">ask</span>
+                                <span class="effort-btn-caret">▴</span>
+                            </button>
+                            <div class="permission-popup" id="permission-popup" hidden>
+                                <button type="button" class="permission-item" data-value="ask" onclick="setPermission('ask')" title="ask — Claude default"><span>🔒</span><span>ask</span></button>
+                                <button type="button" class="permission-item" data-value="plan" onclick="setPermission('plan')" title="plan — plans only"><span>📋</span><span>plan</span></button>
+                                <button type="button" class="permission-item" data-value="yolo" onclick="setPermission('yolo')" title="yolo — skips ALL permission prompts (dangerous)"><span>⚡</span><span>yolo</span></button>
+                            </div>
+                        </div>
                         <button class="send" id="btn-send">↑</button>
                     </div>
                 </div>

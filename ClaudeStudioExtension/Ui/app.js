@@ -63,25 +63,9 @@ function toggleLayout() {
     });
 })();
 
-// ── Permission mode cycle ─────────────────────────────────────
-const permissionCycle = ["ask", "plan", "yolo"];
-const permissionIcons = { yolo: "⚡", plan: "📋", ask: "🔒" };
-const permissionLabels = { yolo: "yolo — skips ALL permission prompts (dangerous)", plan: "plan — plans only", ask: "ask — Claude default" };
-
-function cyclePermission() {
-    const cur = permissionSelect.value;
-    const next = permissionCycle[(permissionCycle.indexOf(cur) + 1) % permissionCycle.length];
-    permissionSelect.value = next;
-    updatePermissionBtn();
-}
-
-function updatePermissionBtn() {
-    const btn = document.getElementById("btn-permission");
-    const mode = permissionSelect.value;
-    btn.textContent = permissionIcons[mode] || "🔒";
-    btn.title = permissionLabels[mode] || mode;
-    btn.classList.toggle("active", mode !== "yolo");
-}
+// Permission mode is selected via the composer-actions dropdown
+// (.permission-select). The legacy topbar button + cycle/update helpers
+// were removed once the inline dropdown carried that role.
 
 
 // ── Settings panel ───────────────────────────────────────────
@@ -311,16 +295,62 @@ function updateCaption() {
 modelSelect.addEventListener("change", updateCaption);
 window.addEventListener("DOMContentLoaded", updateCaption);
 updateCaption();
-const effortSlider = document.getElementById("effort-slider");
-const effortLabel = document.getElementById("effort-label");
+// Effort selector: compact button in the composer-actions row that opens a
+// popup with a slider above it. Avoids the native <select> dropdown direction
+// flipping (5 options need ~120px vertical and the composer sits at the
+// bottom of the tool window, so the browser keeps wanting to open upward
+// while the 3-option permission select stays downward — visual inconsistency).
 const effortValues = ["", "low", "medium", "high", "max"];
 const effortLabels = ["auto", "low", "med", "high", "max"];
-const effortSelect = { get value() { return effortValues[+effortSlider.value]; } };
-(function () {
-    const saved = localStorage.getItem("effortLevel") || "0";
-    effortSlider.value = saved;
-    effortLabel.textContent = effortLabels[+saved];
+const effortIcons  = ["🧭", "🪶", "⚙", "🧠", "🔥"];
+const effortBtn = document.getElementById("effort-btn");
+const effortBtnIcon = document.getElementById("effort-btn-icon");
+const effortBtnLabel = document.getElementById("effort-btn-label");
+const effortPopup = document.getElementById("effort-popup");
+const effortPopupSlider = document.getElementById("effort-popup-slider");
+const effortControl = document.getElementById("effort-control");
+
+// Shim so the existing send code (`effort: effortSelect.value || null`) still works.
+const effortSelect = { get value() { return effortValues[+effortPopupSlider.value]; } };
+
+(function initEffort() {
+    // Migrate legacy index-based key (effortLevel) or string-based key (effortValue)
+    // to the slider position.
+    let idx = 0;
+    const storedIdx = localStorage.getItem("effortLevel");
+    const storedVal = localStorage.getItem("effortValue");
+    if (storedIdx != null) {
+        const n = parseInt(storedIdx, 10);
+        if (!Number.isNaN(n) && n >= 0 && n < effortValues.length) idx = n;
+    } else if (storedVal != null) {
+        const found = effortValues.indexOf(storedVal);
+        if (found >= 0) idx = found;
+    }
+    effortPopupSlider.value = idx;
+    updateEffortButton(idx);
 })();
+
+function updateEffortButton(idx) {
+    effortBtnIcon.textContent = effortIcons[idx];
+    effortBtnLabel.textContent = effortLabels[idx];
+}
+
+function toggleEffortPopup() {
+    effortPopup.hidden = !effortPopup.hidden;
+}
+
+effortPopupSlider.addEventListener("input", () => {
+    const idx = +effortPopupSlider.value;
+    updateEffortButton(idx);
+    localStorage.setItem("effortLevel", idx);
+});
+
+// Click outside the effort control closes the popup. Capture phase so we
+// catch the click before it lands on inner buttons.
+document.addEventListener("click", (e) => {
+    if (effortPopup.hidden) return;
+    if (!effortControl.contains(e.target)) effortPopup.hidden = true;
+}, true);
 const autoSaveSlider = document.getElementById("autosave-slider");
 const autoSaveLabel = document.getElementById("autosave-label");
 const autoSaveValues = ["none", "active", "all"];
@@ -335,14 +365,54 @@ autoSaveSlider.addEventListener("input", () => {
     localStorage.setItem("autoSaveLevel", i);
 });
 
-effortSlider.addEventListener("input", () => {
-    const i = +effortSlider.value;
-    effortLabel.textContent = effortLabels[i];
-    localStorage.setItem("effortLevel", i);
-});
-const permissionSelect = document.querySelector(".permission-select");
-permissionSelect.addEventListener("change", updatePermissionBtn);
-updatePermissionBtn();
+// Effort is now driven by the dropdown next to permission-select in the
+// composer-actions row (see effortSelect setup above) — the old slider
+// listener that used to live here was removed when the UI moved.
+
+// Permission mode: same button+popup pattern as effort. Categorical (not a
+// slider), so the popup is a list of clickable items. The send code reads
+// `permissionSelect.value` — keep a shim so the existing call site doesn't
+// have to change.
+const PERMISSION_ICONS = { ask: "🔒", plan: "📋", yolo: "⚡" };
+let _permissionValue = "ask";
+const permissionSelect = {
+    get value() { return _permissionValue; },
+    set value(v) { _permissionValue = v; updatePermissionButton(); updatePermissionItems(); }
+};
+const permissionBtnIcon = document.getElementById("permission-btn-icon");
+const permissionBtnLabel = document.getElementById("permission-btn-label");
+const permissionPopup = document.getElementById("permission-popup");
+const permissionControl = document.getElementById("permission-control");
+
+function togglePermissionPopup() {
+    permissionPopup.hidden = !permissionPopup.hidden;
+}
+
+function setPermission(value) {
+    _permissionValue = value;
+    updatePermissionButton();
+    updatePermissionItems();
+    permissionPopup.hidden = true;
+}
+
+function updatePermissionButton() {
+    permissionBtnIcon.textContent = PERMISSION_ICONS[_permissionValue] || "🔒";
+    permissionBtnLabel.textContent = _permissionValue;
+}
+
+function updatePermissionItems() {
+    permissionPopup.querySelectorAll(".permission-item").forEach(el => {
+        el.classList.toggle("active", el.dataset.value === _permissionValue);
+    });
+}
+
+updatePermissionButton();
+updatePermissionItems();
+
+document.addEventListener("click", (e) => {
+    if (permissionPopup.hidden) return;
+    if (!permissionControl.contains(e.target)) permissionPopup.hidden = true;
+}, true);
 const timingSelect = document.getElementById("timing-select");
 (function () {
     const saved = localStorage.getItem("timingMode") || "simple";
@@ -808,7 +878,12 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "theme") {
-        document.documentElement.classList.toggle("light-theme", !event.data.isDark);
+        // Remember the VS-detected theme; override (if not "auto") wins via
+        // applyThemeOverride, but we keep _lastVsIsDark so switching back to
+        // "auto" later snaps to the current VS palette without waiting for a
+        // new VS theme event.
+        _lastVsIsDark = event.data.isDark;
+        applyThemeOverride();
         return;
     }
 
@@ -1083,6 +1158,55 @@ autoResumeToggle.checked = localStorage.getItem("autoResume") === "true";
 function setAutoResume(checked) {
     localStorage.setItem("autoResume", checked);
 }
+
+// Theme override: "auto" follows VS (default), "dark" / "light" force regardless
+// of VS theme. Persists across sessions in localStorage.
+let _lastVsIsDark = true; // assume dark until C# reports otherwise
+const themeOverrideSelect = document.getElementById("theme-override");
+themeOverrideSelect.value = localStorage.getItem("themeOverride") || "auto";
+
+function setThemeOverride(value) {
+    localStorage.setItem("themeOverride", value);
+    applyThemeOverride();
+}
+
+function applyThemeOverride() {
+    const mode = localStorage.getItem("themeOverride") || "auto";
+    let isDark;
+    if (mode === "dark") isDark = true;
+    else if (mode === "light") isDark = false;
+    else isDark = _lastVsIsDark;
+    document.documentElement.classList.toggle("light-theme", !isDark);
+}
+
+// Apply on load so the choice is visible even before the first VS theme event.
+applyThemeOverride();
+
+// Accent color — user picks a HEX via color input. Persists across sessions.
+// Empty localStorage = default (CSS cascade: #d88763 dark, #b05c35 light).
+// Reset button clears the override and snaps back to the brand default.
+const ACCENT_DEFAULT = "#d88763";
+const accentCustomInput = document.getElementById("accent-custom");
+accentCustomInput.value = localStorage.getItem("accentCustom") || ACCENT_DEFAULT;
+
+function setAccentCustom(value) {
+    localStorage.setItem("accentCustom", value);
+    applyAccent();
+}
+
+function resetAccent() {
+    localStorage.removeItem("accentCustom");
+    accentCustomInput.value = ACCENT_DEFAULT;
+    applyAccent();
+}
+
+function applyAccent() {
+    const color = localStorage.getItem("accentCustom");
+    if (color) document.documentElement.style.setProperty("--accent", color);
+    else document.documentElement.style.removeProperty("--accent");
+}
+
+applyAccent();
 
 // Working directory
 const workingDirInput = document.getElementById("working-dir-input");
