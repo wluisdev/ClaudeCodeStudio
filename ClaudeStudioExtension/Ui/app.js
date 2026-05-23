@@ -750,10 +750,25 @@ function addMessage(role, text) {
     }
 
     const message = document.createElement("div");
-
     message.className = `message ${role}`;
 
-    message.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    message.appendChild(bubble);
+
+    // If the message contains a code fence (e.g. snippets inserted via Send
+    // Selection, or pasted markdown), render it so the user sees a real code
+    // block instead of raw backticks. Plain text falls back to escapeHtml.
+    if (text && text.includes("```")) {
+        applyMarkdown(bubble, text);
+        // Apply button is meaningful for assistant suggestions, not for the
+        // user's own message — strip it on the user side.
+        if (role === "user") {
+            bubble.querySelectorAll(".apply-btn").forEach(b => b.remove());
+        }
+    } else {
+        bubble.innerHTML = escapeHtml(text);
+    }
 
     messages.appendChild(message);
     decorateMessage(message);
@@ -1220,7 +1235,13 @@ function appendTiming(text) {
 function applyMarkdown(bubble, raw) {
     bubble.innerHTML = renderMarkdown(raw);
     bubble.querySelectorAll("pre code").forEach(el => {
-        if (typeof hljs !== "undefined") hljs.highlightElement(el);
+        if (typeof hljs !== "undefined") {
+            try { hljs.highlightElement(el); } catch (_) { /* unknown language */ }
+        }
+        // Ensure the .hljs class is present even when the language isn't bundled
+        // (dart, dockerfile, etc.). Without it the GitHub Dark theme's background
+        // rule (pre code.hljs) doesn't apply and the block bleeds into the bubble.
+        if (!el.classList.contains("hljs")) el.classList.add("hljs");
     });
     bubble.querySelectorAll("pre").forEach(pre => {
         if (pre.querySelector(".apply-btn")) return;

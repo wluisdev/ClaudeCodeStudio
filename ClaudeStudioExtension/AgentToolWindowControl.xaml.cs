@@ -830,7 +830,25 @@ public partial class AgentToolWindowControl : UserControl
             ? filePath.Substring(solutionDir.Length).TrimStart('\\', '/')
             : filePath;
 
-        var lang = GetLanguageId(Path.GetExtension(filePath).ToLowerInvariant());
+        var ext = Path.GetExtension(filePath).ToLowerInvariant();
+        var lang = GetLanguageId(ext);
+        if (string.IsNullOrEmpty(lang))
+        {
+            // Extension-less or unmapped files — fall back to filename heuristics
+            // (Dockerfile, Makefile, etc.) so the fence still gets a language ID.
+            var fname = Path.GetFileName(filePath);
+            if (!string.IsNullOrEmpty(fname))
+            {
+                if (fname.Equals("Dockerfile", StringComparison.OrdinalIgnoreCase) ||
+                    fname.StartsWith("Dockerfile.", StringComparison.OrdinalIgnoreCase))
+                    lang = "dockerfile";
+                else if (fname.Equals("Makefile", StringComparison.OrdinalIgnoreCase) ||
+                         fname.Equals("GNUmakefile", StringComparison.OrdinalIgnoreCase))
+                    lang = "makefile";
+                else if (fname.Equals("CMakeLists.txt", StringComparison.OrdinalIgnoreCase))
+                    lang = "cmake";
+            }
+        }
         var lineInfo = startLine == endLine ? $"line {startLine}" : $"lines {startLine}-{endLine}";
         var text = $"File: {displayPath} ({lineInfo})\n```{lang}\n{code.TrimEnd('\r', '\n')}\n```\n";
 
@@ -843,15 +861,27 @@ public partial class AgentToolWindowControl : UserControl
         ".cs" => "csharp", ".vb" => "vb", ".fs" => "fsharp",
         ".py" => "python", ".js" => "javascript", ".ts" => "typescript",
         ".jsx" => "jsx", ".tsx" => "tsx",
-        ".java" => "java", ".kt" => "kotlin",
+        ".java" => "java", ".kt" => "kotlin", ".scala" => "scala",
         ".cpp" or ".cc" or ".cxx" => "cpp", ".c" => "c", ".h" => "c", ".hpp" => "cpp",
         ".go" => "go", ".rs" => "rust", ".swift" => "swift",
-        ".rb" => "ruby", ".php" => "php",
+        ".rb" => "ruby", ".php" => "php", ".lua" => "lua", ".dart" => "dart",
+        ".r" => "r", ".m" or ".mm" => "objectivec",
         ".html" or ".htm" => "html", ".css" => "css",
+        ".scss" => "scss", ".sass" => "sass", ".less" => "less",
         ".xml" or ".xaml" => "xml", ".json" => "json",
-        ".yaml" or ".yml" => "yaml", ".sql" => "sql",
-        ".sh" or ".bash" => "bash", ".ps1" or ".psm1" => "powershell",
-        ".bat" or ".cmd" => "batch", ".md" => "markdown",
+        ".yaml" or ".yml" => "yaml", ".toml" => "toml",
+        ".sql" => "sql",
+        ".sh" or ".bash" => "bash", ".zsh" => "zsh", ".fish" => "fish",
+        ".ps1" or ".psm1" => "powershell",
+        ".bat" or ".cmd" => "batch",
+        ".md" => "markdown", ".rst" => "rst", ".tex" => "latex",
+        ".ex" or ".exs" => "elixir", ".erl" => "erlang",
+        ".zig" => "zig", ".nim" => "nim", ".v" => "v",
+        ".clj" or ".cljs" => "clojure", ".elm" => "elm",
+        ".hs" => "haskell", ".ml" or ".mli" => "ocaml",
+        ".pl" or ".pm" => "perl", ".groovy" => "groovy",
+        ".dockerfile" => "dockerfile", ".gradle" => "groovy",
+        ".tf" => "terraform", ".graphql" or ".gql" => "graphql",
         _ => ""
     };
 
