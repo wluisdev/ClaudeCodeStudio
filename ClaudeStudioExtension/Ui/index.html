@@ -428,6 +428,31 @@
         </div>
     </div>
 
+    <div class="cmd-modal-overlay" id="signin-overlay">
+        <div class="cmd-modal signin-modal">
+            <div class="signin-header">
+                <span class="signin-icon">🔑</span>
+                <div class="signin-title">
+                    <div class="signin-eyebrow">Sign in to Claude</div>
+                    <div class="signin-headline">Complete the steps in the terminal</div>
+                </div>
+            </div>
+            <ol class="signin-steps">
+                <li>A terminal window opened with <code>claude login</code>.</li>
+                <li>It will print a URL — open it in your browser.</li>
+                <li>Authorize and copy the code back.</li>
+                <li>Paste the code into the terminal and press Enter.</li>
+            </ol>
+            <div class="signin-status">
+                <span class="signin-spinner"></span>
+                <span>Waiting for sign-in to complete…</span>
+            </div>
+            <div class="cmd-modal-buttons signin-buttons">
+                <button class="trust-deny" onclick="closeSigninOverlay()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <div class="cmd-modal-overlay" id="mcp-trust-modal-overlay">
         <div class="cmd-modal mcp-trust-modal">
             <div class="trust-modal-header">

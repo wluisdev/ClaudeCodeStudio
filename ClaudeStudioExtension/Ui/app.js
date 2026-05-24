@@ -612,11 +612,15 @@ function renderAccountInfo() {
 
     if (!_accountInfo || !_accountInfo.signedIn) {
         el.textContent = "Not signed in";
-        el.title = "";
+        el.title = "Click to sign in with Claude";
         el.classList.add("account-info-muted");
+        el.classList.add("account-info-clickable");
+        el.onclick = startClaudeLogin;
         return;
     }
     el.classList.remove("account-info-muted");
+    el.classList.remove("account-info-clickable");
+    el.onclick = null;
 
     const customName = (localStorage.getItem("displayName") || "").trim();
     const accountName = _accountInfo.accountDisplayName || "";
@@ -1302,6 +1306,21 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "no-workspace") {
         showNoWorkspaceCard(event.data.path || "");
+        return;
+    }
+
+    if (event.data.type === "auth-required") {
+        showAuthRequiredCard();
+        return;
+    }
+
+    if (event.data.type === "claude-login-started") {
+        openSigninOverlay();
+        return;
+    }
+
+    if (event.data.type === "claude-login-completed") {
+        closeSigninOverlay();
         return;
     }
 
@@ -2599,6 +2618,34 @@ function showNoWorkspaceCard(path) {
 <div class="question-text">⚠️ <strong>No workspace open.</strong> Open a folder or solution first — Claude won't operate in your home directory (<code>${escapeHtml(path)}</code>).</div>`;
     messages.appendChild(card);
     autoScroll();
+}
+
+function showAuthRequiredCard() {
+    if (welcome) { welcome.remove(); welcome = null; }
+    const card = document.createElement("div");
+    card.className = "question-card";
+    card.innerHTML = `
+<div class="question-text">🔑 <strong>Not signed in.</strong> Claude can't run without an account — sign in to continue.</div>
+<div class="question-buttons">
+<button class="q-btn q-yes" onclick="startClaudeLogin(this.closest('.question-card'))">Sign in</button>
+</div>`;
+    messages.appendChild(card);
+    autoScroll();
+}
+
+function startClaudeLogin(card) {
+    try { window.chrome.webview.postMessage({ type: "start-claude-login" }); } catch (e) {}
+    if (card && card.classList) card.classList.add("question-answered");
+}
+
+function openSigninOverlay() {
+    const overlay = document.getElementById("signin-overlay");
+    if (overlay) overlay.classList.add("open");
+}
+
+function closeSigninOverlay() {
+    const overlay = document.getElementById("signin-overlay");
+    if (overlay) overlay.classList.remove("open");
 }
 
 function showFileQuestion(id, displayName) {

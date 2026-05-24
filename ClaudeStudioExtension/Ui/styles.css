@@ -866,6 +866,18 @@ html.light-theme .history-footer {
     color: #777;
 }
 
+.account-info-clickable {
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: rgba(120, 120, 120, 0.4);
+    text-underline-offset: 2px;
+}
+
+.account-info-clickable:hover {
+    color: #cba98c;
+    text-decoration-color: rgba(203, 169, 140, 0.7);
+}
+
 .account-info-plan {
     color: #a87056;
 }
@@ -1013,6 +1025,84 @@ html.light-theme .cwdbar-untrusted-tag { color: #b86040; }
 }
 
 .trust-modal-warning[hidden] { display: none; }
+
+.signin-modal { max-width: 460px; }
+
+.signin-header {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    margin-bottom: 12px;
+}
+
+.signin-icon { font-size: 22px; line-height: 1; }
+
+.signin-title { flex: 1 1 auto; }
+
+.signin-eyebrow {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #cba98c;
+    margin-bottom: 2px;
+}
+
+.signin-headline {
+    font-size: 14px;
+    font-weight: 600;
+    color: #ddd;
+}
+
+.signin-steps {
+    margin: 0 0 12px 0;
+    padding-left: 22px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #b0b0b0;
+}
+
+.signin-steps code {
+    background: rgba(255,255,255,0.06);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11.5px;
+    font-family: Consolas, Menlo, monospace;
+}
+
+.signin-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 12px;
+}
+
+.signin-spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(203, 169, 140, 0.3);
+    border-top-color: #cba98c;
+    border-radius: 50%;
+    animation: signin-spin 0.9s linear infinite;
+    flex: 0 0 auto;
+}
+
+@keyframes signin-spin {
+    to { transform: rotate(360deg); }
+}
+
+.signin-buttons {
+    justify-content: flex-end;
+}
+
+html.light-theme .signin-headline { color: #333; }
+html.light-theme .signin-steps { color: #555; }
+html.light-theme .signin-eyebrow { color: #8a4a10; }
+html.light-theme .signin-status { color: #666; }
+html.light-theme .signin-steps code {
+    background: rgba(0,0,0,0.06);
+}
 
 .trust-modal-warning-icon {
     font-size: 14px;

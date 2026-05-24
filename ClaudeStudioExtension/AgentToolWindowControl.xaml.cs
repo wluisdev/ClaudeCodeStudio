@@ -23,6 +23,9 @@ public partial class AgentToolWindowControl : UserControl
     private string? _lastWorkingDir;
     private DateTime _sessionStart = DateTime.Now;
     private static bool _tempCleanupDone;
+    private FileSystemWatcher? _claudeJsonWatcher;
+    private bool _lastSignedInStatus;
+    private System.Threading.Timer? _claudeJsonDebounceTimer;
 
     public AgentToolWindowControl()
     {
@@ -77,6 +80,12 @@ public partial class AgentToolWindowControl : UserControl
             Dispatcher.BeginInvoke(
                 System.Windows.Threading.DispatcherPriority.ApplicationIdle,
                 new Action(FocusTextarea));
+
+            // Defensive refresh: covers the case where the user finished
+            // `claude login`/`logout` in an external terminal while the tool
+            // window was hidden, and the FileSystemWatcher missed the event
+            // (CLI write patterns vary; safer to also re-poll on focus return).
+            _ = Task.Run(() => { try { SendAccountInfo(); } catch { } });
         }
     }
 
@@ -123,6 +132,7 @@ public partial class AgentToolWindowControl : UserControl
                 JsonSerializer.Serialize(new { type = "version", text = versionString }));
 
             SendCurrentTheme();
+            StartClaudeJsonWatcher();  // seeds _lastSignedInStatus before first SendAccountInfo
             SendAccountInfo();
             SendCwdInfo();
         };
@@ -158,12 +168,27 @@ public partial class AgentToolWindowControl : UserControl
     {
         try
         {
-            if (Browser?.CoreWebView2 == null) return;
-
+            // File reads are safe on any thread.
             var info = ReadAccountInfo();
+            var nowSignedIn = IsSignedIn();
+            var prevSignedIn = _lastSignedInStatus;
+            _lastSignedInStatus = nowSignedIn;
+
+            // Browser is a WPF control — touching it from a threadpool thread
+            // (watcher debounce timer, IsVisibleChanged Task.Run) throws
+            // "calling thread cannot access this object". Marshal everything
+            // that touches Browser to the UI thread.
             var dispatcher = System.Windows.Application.Current.Dispatcher;
             dispatcher.Invoke(() =>
-                Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(info)));
+            {
+                if (Browser?.CoreWebView2 == null) return;
+                Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(info));
+                if (nowSignedIn && !prevSignedIn)
+                {
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "claude-login-completed" }));
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -383,11 +408,34 @@ public partial class AgentToolWindowControl : UserControl
         }
     }
 
+    private static string ClaudeJsonPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".claude.json");
+
+    // Lightweight check used by the pre-flight gate. Mirrors ReadAccountInfo's
+    // signed-in determination (presence of oauthAccount with any identity field)
+    // but avoids allocating the full payload.
+    private static bool IsSignedIn()
+    {
+        var path = ClaudeJsonPath;
+        if (!File.Exists(path)) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            if (!doc.RootElement.TryGetProperty("oauthAccount", out var acct) ||
+                acct.ValueKind != JsonValueKind.Object)
+                return false;
+            return TryGetString(acct, "organizationName") != null
+                || TryGetString(acct, "emailAddress") != null
+                || TryGetString(acct, "email") != null
+                || TryGetString(acct, "displayName") != null;
+        }
+        catch { return false; }
+    }
+
     private static object ReadAccountInfo()
     {
-        var path = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".claude.json");
+        var path = ClaudeJsonPath;
 
         if (!File.Exists(path))
             return new { type = "account-info", signedIn = false };
@@ -486,6 +534,112 @@ public partial class AgentToolWindowControl : UserControl
         System.Windows.RoutedEventArgs e)
     {
         VSColorTheme.ThemeChanged -= OnVsThemeChanged;
+        // Intentionally NOT calling StopClaudeJsonWatcher() — Unloaded fires on
+        // tool window tab switches, but Loaded is guarded by _initialized so the
+        // watcher would never restart. Keep it alive for the control's lifetime.
+    }
+
+    // Watches ~/.claude.json so the titlebar/auth state updates when the user
+    // signs in (or out) via an external `claude login` / `claude logout`. The
+    // file gets multiple writes per save, so we debounce ~500ms before re-reading.
+    private void StartClaudeJsonWatcher()
+    {
+        try
+        {
+            if (_claudeJsonWatcher != null) return;
+
+            var dir = Path.GetDirectoryName(ClaudeJsonPath);
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+
+            _lastSignedInStatus = IsSignedIn();
+
+            // Watch the whole user-profile dir without a Filter — the CLI may
+            // write via temp+rename, delete+recreate, or in-place, and filter
+            // patterns on dot-prefixed names have been unreliable. We re-check
+            // the FullPath inside the handler instead.
+            _claudeJsonWatcher = new FileSystemWatcher(dir)
+            {
+                NotifyFilter = NotifyFilters.LastWrite
+                    | NotifyFilters.CreationTime
+                    | NotifyFilters.FileName
+                    | NotifyFilters.Size,
+                EnableRaisingEvents = true,
+            };
+            var targetPath = ClaudeJsonPath;
+            FileSystemEventHandler onChange = (_, args) =>
+            {
+                if (string.Equals(args.FullPath, targetPath, StringComparison.OrdinalIgnoreCase))
+                    DebouncedReloadAccountInfo();
+            };
+            _claudeJsonWatcher.Changed += onChange;
+            _claudeJsonWatcher.Created += onChange;
+            _claudeJsonWatcher.Deleted += onChange;
+            _claudeJsonWatcher.Renamed += (_, args) =>
+            {
+                if (string.Equals(args.FullPath, targetPath, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(args.OldFullPath, targetPath, StringComparison.OrdinalIgnoreCase))
+                    DebouncedReloadAccountInfo();
+            };
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"~/.claude.json watcher setup failed: {ex.Message}");
+        }
+    }
+
+    private void StopClaudeJsonWatcher()
+    {
+        try
+        {
+            _claudeJsonWatcher?.Dispose();
+            _claudeJsonWatcher = null;
+            _claudeJsonDebounceTimer?.Dispose();
+            _claudeJsonDebounceTimer = null;
+        }
+        catch { }
+    }
+
+    private void DebouncedReloadAccountInfo()
+    {
+        try
+        {
+            _claudeJsonDebounceTimer?.Dispose();
+            _claudeJsonDebounceTimer = new System.Threading.Timer(
+                _ => { try { SendAccountInfo(); } catch { } },
+                null, 500, System.Threading.Timeout.Infinite);
+        }
+        catch { }
+    }
+
+    // Opens a visible cmd window running `claude login` so the user can complete
+    // the OAuth flow. cmd /K keeps the window open after the command exits so
+    // any error message is readable. The watcher picks up the ~/.claude.json
+    // update and posts claude-login-completed when oauthAccount appears.
+    private void StartClaudeLogin()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = "/K \"claude login\"",
+                UseShellExecute = true,
+                WindowStyle = ProcessWindowStyle.Normal,
+            };
+            Process.Start(psi);
+
+            if (Browser?.CoreWebView2 != null)
+            {
+                var dispatcher = System.Windows.Application.Current.Dispatcher;
+                dispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "claude-login-started" })));
+            }
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"claude login spawn failed: {ex.Message}");
+        }
     }
 
     private async void CoreWebView2_WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -522,6 +676,12 @@ public partial class AgentToolWindowControl : UserControl
             if (request.Type == "refresh-cwd")
             {
                 SendCwdInfo();
+                return;
+            }
+
+            if (request.Type == "start-claude-login")
+            {
+                StartClaudeLogin();
                 return;
             }
 
@@ -799,6 +959,22 @@ public partial class AgentToolWindowControl : UserControl
             var workingDir = (!string.IsNullOrEmpty(request.WorkingDirectory) && Directory.Exists(request.WorkingDirectory))
                 ? request.WorkingDirectory
                 : currentSolutionDir;
+
+            // Pre-flight auth check: if ~/.claude.json has no oauthAccount, the
+            // agent will spawn and fail with a generic stream error. Surface an
+            // actionable CTA inline instead of letting that happen.
+            if (!IsSignedIn())
+            {
+                var authDispatcher = System.Windows.Application.Current.Dispatcher;
+                authDispatcher.Invoke(() =>
+                {
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "auth-required" }));
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "stream-done" }));
+                });
+                return;
+            }
 
             // No-workspace block: when ResolveCwd falls through to UserProfile, there's
             // no real workspace open. Showing the trust modal here would let the user
