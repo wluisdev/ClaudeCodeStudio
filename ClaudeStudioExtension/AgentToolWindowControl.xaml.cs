@@ -124,6 +124,7 @@ public partial class AgentToolWindowControl : UserControl
 
             SendCurrentTheme();
             SendAccountInfo();
+            SendCwdInfo();
         };
 
         VSColorTheme.ThemeChanged += OnVsThemeChanged;
@@ -167,6 +168,33 @@ public partial class AgentToolWindowControl : UserControl
         catch (Exception ex)
         {
             OutputLog.Warn($"account info read failed: {ex.Message}");
+        }
+    }
+
+    public void SendCwdInfo()
+    {
+        try
+        {
+            if (Browser?.CoreWebView2 == null) return;
+
+            string? cwd = null;
+#pragma warning disable VSTHRD010
+            try
+            {
+                var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+                cwd = ResolveWorkspaceCwd(dte);
+            }
+            catch { }
+#pragma warning restore VSTHRD010
+
+            var dispatcher = System.Windows.Application.Current.Dispatcher;
+            dispatcher.Invoke(() =>
+                Browser.CoreWebView2.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new { type = "cwd-info", path = cwd })));
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"cwd info send failed: {ex.Message}");
         }
     }
 
@@ -838,6 +866,8 @@ public partial class AgentToolWindowControl : UserControl
                 JsonSerializer.Serialize(new { type = "reset-chat" })));
         }
         catch { }
+
+        SendCwdInfo();
     }
 
     private (decimal sessionCost, decimal dailyCost) ComputeCosts(string? cwd)

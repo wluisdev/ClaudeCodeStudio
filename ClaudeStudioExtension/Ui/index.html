@@ -162,6 +162,13 @@
                         <div class="cmd-divider"></div>
                         <div class="settings-row">
                             <span class="settings-label">Working directory</span>
+                            <div class="inline-toggle-wrap">
+                                <span class="inline-toggle-label">Show</span>
+                                <label class="toggle" title="Show working directory bar">
+                                    <input type="checkbox" id="cwdbar-toggle" checked onchange="setShowCwdbar(this.checked)" />
+                                    <span class="toggle-track"></span>
+                                </label>
+                            </div>
                         </div>
                         <div class="settings-input-wrap">
                             <input type="text" id="working-dir-input" class="settings-input" placeholder="Auto (solution directory)" oninput="setWorkingDirectory(this.value)" />
@@ -238,6 +245,11 @@
                 </select>
                 <button class="new-chat" title="New chat">✎</button>
             </div>
+        </div>
+
+        <div class="cwdbar cwdbar-empty" id="cwdbar" onclick="copyCwd()" title="">
+            <span class="cwdbar-icon">📁</span>
+            <span class="cwdbar-path" id="cwdbar-path">No workspace</span>
         </div>
 
         <div class="content">

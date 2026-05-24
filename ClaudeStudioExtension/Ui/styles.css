@@ -870,6 +870,65 @@ html.light-theme .history-footer {
     color: #a87056;
 }
 
+.cwdbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 18px;
+    height: 22px;
+    font-size: 11px;
+    color: #888;
+    border-bottom: 1px solid #2a2a2a;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cwdbar:hover {
+    background: #262626;
+    color: #b8b8b8;
+}
+
+.cwdbar-icon {
+    flex: 0 0 auto;
+    opacity: 0.85;
+}
+
+.cwdbar-path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.cwdbar-empty .cwdbar-path {
+    font-style: italic;
+    opacity: 0.7;
+}
+
+.cwdbar-override-tag {
+    opacity: 0.55;
+    margin-left: 2px;
+    font-size: 10px;
+}
+
+.inline-toggle-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.inline-toggle-label {
+    font-size: 11px;
+    color: #999;
+}
+
+.cwdbar-copied {
+    background: #2b3a2b !important;
+    color: #b8d8b8 !important;
+}
+
 .model-select,
 .effort-select,
 .timing-select {
@@ -2257,6 +2316,9 @@ html.light-theme .action-btn:hover { color: #000; }
 html.light-theme .titlebar { background: #f5f5f5; border-bottom-color: #d0d0d0; color: #1e1e1e; }
 html.light-theme .account-info-muted { color: #888; }
 html.light-theme .account-info-plan { color: #b88066; }
+html.light-theme .cwdbar { color: #777; border-bottom-color: #d8d8d8; }
+html.light-theme .cwdbar:hover { background: #ebebeb; color: #333; }
+html.light-theme .cwdbar-copied { background: #d4ecd4 !important; color: #2a5a2a !important; }
 html.light-theme .cmd-trigger,
 html.light-theme .new-chat { color: #555; }
 html.light-theme .cmd-trigger:hover,

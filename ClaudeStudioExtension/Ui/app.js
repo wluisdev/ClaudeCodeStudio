@@ -286,6 +286,84 @@ const sendButton = null; // replaced by btnSend with streaming toggle
 const newChatButton = document.querySelector(".new-chat");
 const modelSelect = document.querySelector(".model-select");
 
+// ── Cwd bar ────────────────────────────────────────────────
+let _cwdVsPath = "";    // resolved from VS (Solution / Open Folder), via C#
+let _cwdFullPath = "";  // effective cwd shown / copied (override wins when set)
+
+function truncateCwdPath(full) {
+    if (!full) return "";
+    const parts = full.split(/[\\/]+/).filter(Boolean);
+    if (parts.length === 0) return full;
+    // Two last segments when available, single when not — matches IDE conventions.
+    return parts.length >= 2
+        ? parts[parts.length - 2] + "\\" + parts[parts.length - 1]
+        : parts[parts.length - 1];
+}
+
+function renderCwd(vsPath) {
+    if (vsPath !== undefined) _cwdVsPath = vsPath || "";
+    const override = (localStorage.getItem("workingDirectory") || "").trim();
+
+    const bar = document.getElementById("cwdbar");
+    const pathEl = document.getElementById("cwdbar-path");
+    if (!bar || !pathEl) return;
+
+    // Override wins when set; otherwise the VS-resolved path.
+    const effective = override || _cwdVsPath;
+    _cwdFullPath = effective;
+
+    bar.classList.remove("cwdbar-override");
+
+    if (!effective) {
+        bar.classList.add("cwdbar-empty");
+        bar.title = "No workspace open";
+        pathEl.innerHTML = "";
+        pathEl.textContent = "No workspace";
+        return;
+    }
+
+    bar.classList.remove("cwdbar-empty");
+
+    const isOverride = override && override !== _cwdVsPath;
+    if (isOverride) bar.classList.add("cwdbar-override");
+
+    bar.title = isOverride
+        ? `${effective}  (override — VS workspace: ${_cwdVsPath || "none"})`
+        : effective;
+
+    pathEl.innerHTML = "";
+    pathEl.appendChild(document.createTextNode(truncateCwdPath(effective)));
+    if (isOverride) {
+        const tag = document.createElement("span");
+        tag.className = "cwdbar-override-tag";
+        tag.textContent = " (override)";
+        pathEl.appendChild(tag);
+    }
+}
+
+function copyCwd() {
+    if (!_cwdFullPath) return;
+    const bar = document.getElementById("cwdbar");
+    const done = () => {
+        if (!bar) return;
+        bar.classList.add("cwdbar-copied");
+        setTimeout(() => bar.classList.remove("cwdbar-copied"), 600);
+    };
+    try {
+        navigator.clipboard.writeText(_cwdFullPath).then(done, done);
+    } catch (e) {
+        // Fallback for older WebView2 builds without async clipboard.
+        const ta = document.createElement("textarea");
+        ta.value = _cwdFullPath;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand("copy"); } catch (_) {}
+        document.body.removeChild(ta);
+        done();
+    }
+}
+// ────────────────────────────────────────────────────────────
+
 let _accountInfo = null;
 function renderAccountInfo() {
     const el = document.getElementById("account-info");
@@ -964,6 +1042,15 @@ window.chrome.webview.addEventListener("message", event => {
         return;
     }
 
+    if (event.data.type === "cwd-info") {
+        renderCwd(event.data.path || "");
+        return;
+    }
+
+    // (renderCwd also picks up changes from setWorkingDirectory/clearWorkingDirectory
+    // below; those handlers call renderCwd() with no argument so the cached vsPath
+    // is preserved and only the override layer flips.)
+
     if (event.data.type === "toast") {
         showToast(event.data.text || "");
         return;
@@ -1189,6 +1276,21 @@ function setShowTokens(checked) {
     localStorage.setItem("showTokens", checked);
 }
 
+const cwdbarToggle = document.getElementById("cwdbar-toggle");
+const _cwdbarVisible = localStorage.getItem("showCwdbar") !== "false";
+cwdbarToggle.checked = _cwdbarVisible;
+applyCwdbarVisibility(_cwdbarVisible);
+
+function setShowCwdbar(checked) {
+    localStorage.setItem("showCwdbar", checked);
+    applyCwdbarVisibility(checked);
+}
+
+function applyCwdbarVisibility(visible) {
+    const bar = document.getElementById("cwdbar");
+    if (bar) bar.style.display = visible ? "" : "none";
+}
+
 // ── Token estimate ────────────────────────────────────────────
 const tokenEstimateToggle = document.getElementById("token-estimate-toggle");
 const tokenEstimateEl = document.getElementById("token-estimate");
@@ -1291,11 +1393,13 @@ workingDirInput.value = localStorage.getItem("workingDirectory") || "";
 
 function setWorkingDirectory(value) {
     localStorage.setItem("workingDirectory", value.trim());
+    renderCwd();
 }
 
 function clearWorkingDirectory() {
     workingDirInput.value = "";
     localStorage.setItem("workingDirectory", "");
+    renderCwd();
     workingDirInput.focus();
 }
 
