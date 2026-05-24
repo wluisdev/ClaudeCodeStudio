@@ -424,6 +424,36 @@
         </div>
     </div>
 
+    <div class="cmd-modal-overlay" id="mcp-trust-modal-overlay">
+        <div class="cmd-modal mcp-trust-modal">
+            <div class="trust-modal-header">
+                <span class="trust-modal-icon">🔌</span>
+                <div class="trust-modal-title">
+                    <div class="trust-modal-eyebrow">MCP servers awaiting trust</div>
+                    <div class="trust-modal-headline">Approve servers before claude loads them</div>
+                </div>
+            </div>
+            <div class="trust-modal-body">
+                Each MCP server below can run code on your machine or talk to a remote
+                endpoint. Tick the ones you recognize and trust — they're saved to
+                <code>trusted-mcp-servers.json</code>. Unchecked ones get skipped for
+                this VS session only, so the prompt stops looping. Disable a server in
+                the MCP panel if you want to block it from loading entirely.
+            </div>
+            <div class="mcp-trust-list" id="mcp-trust-list"></div>
+            <div class="mcp-trust-actions">
+                <label class="mcp-trust-select-all">
+                    <span>Select all</span>
+                    <input type="checkbox" id="mcp-trust-select-all" onchange="mcpTrustToggleAll(this.checked)" />
+                </label>
+            </div>
+            <div class="cmd-modal-buttons trust-modal-buttons">
+                <button class="trust-deny" onclick="mcpTrustCancel()" title="Don't trust or remember; just stop asking this VS session">Skip for this session</button>
+                <button class="trust-allow" id="mcp-trust-submit" onclick="mcpTrustSubmit()" title="Trust checked, skip unchecked for this session">Apply</button>
+            </div>
+        </div>
+    </div>
+
     <div class="cmd-modal-overlay" id="cmd-modal-overlay" onclick="if(event.target===this)closeAddCommand()">
         <div class="cmd-modal">
             <h3>Add command</h3>

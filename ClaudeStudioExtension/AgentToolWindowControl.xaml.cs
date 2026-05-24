@@ -176,6 +176,24 @@ public partial class AgentToolWindowControl : UserControl
         SendCwdInfoCore(retryAttempt: 0);
     }
 
+    public void SendMcpTrustCheck(string? workingDir)
+    {
+        try
+        {
+            if (Browser?.CoreWebView2 == null) return;
+            var pending = CollectUntrustedMcpServers(workingDir);
+            if (pending.Count == 0) return;
+            var dispatcher = System.Windows.Application.Current.Dispatcher;
+            dispatcher.Invoke(() =>
+                Browser.CoreWebView2.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new { type = "mcp-trust-required", servers = pending })));
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"mcp trust scan (boot) failed: {ex.Message}");
+        }
+    }
+
     // Open Folder in VS populates IVsSolution.GetSolutionInfo asynchronously, sometimes
     // after the 1500ms ScheduleReset delay has elapsed. When the initial resolve returns
     // null but we're not at the entry point (NavigationCompleted on a fresh tool window),
@@ -204,9 +222,10 @@ public partial class AgentToolWindowControl : UserControl
             // Trust gate: if a workspace is open and not yet trusted, prompt the
             // user before the agent does anything in it. Skipped when there's no
             // workspace (cwd null) — UserProfile fallback isn't covered by trust.
-            if (!string.IsNullOrEmpty(cwd) && !Trust.TrustedWorkspacesStore.IsTrusted(cwd))
+            var workspaceTrusted = string.IsNullOrEmpty(cwd) || Trust.TrustedWorkspacesStore.IsTrusted(cwd);
+            if (!workspaceTrusted)
             {
-                var parent = TryGetParent(cwd);
+                var parent = TryGetParent(cwd!);
                 dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "trust-required", path = cwd, parent })));
@@ -216,6 +235,10 @@ public partial class AgentToolWindowControl : UserControl
                 dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "workspace-trusted", path = cwd })));
+
+                // Only scan MCPs once the workspace is past the gate — chaining
+                // both modals at once would be confusing.
+                SendMcpTrustCheck(cwd);
             }
 
             // Retry if we got nothing — Open Folder may still be initializing.
@@ -245,6 +268,48 @@ public partial class AgentToolWindowControl : UserControl
             return string.IsNullOrEmpty(p) ? null : p;
         }
         catch { return null; }
+    }
+
+    private static List<object> CollectUntrustedMcpServers(string? projectDir)
+    {
+        var pending = new List<object>();
+        try
+        {
+            CollectFromScope(Mcp.McpScope.User, null, pending);
+            if (!string.IsNullOrEmpty(projectDir))
+                CollectFromScope(Mcp.McpScope.Project, projectDir, pending);
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"mcp trust scan failed: {ex.Message}");
+        }
+        return pending;
+    }
+
+    private static void CollectFromScope(Mcp.McpScope scope, string? projectDir, List<object> pending)
+    {
+        List<Mcp.McpServer> servers;
+        try { servers = Mcp.McpConfigStore.Load(scope, projectDir); }
+        catch { return; }
+
+        var projectPath = scope == Mcp.McpScope.Project ? projectDir : null;
+
+        foreach (var s in servers)
+        {
+            if (s.Disabled) continue;
+            var hash = Trust.McpServerHash.Compute(s);
+            if (Trust.TrustedMcpServersStore.IsTrusted(s.Name, scope, hash, projectPath)) continue;
+
+            pending.Add(new
+            {
+                name = s.Name,
+                scope = scope == Mcp.McpScope.Project ? "project" : "user",
+                transport = s.Transport.ToString().ToLowerInvariant(),
+                summary = Trust.McpServerHash.ShortSummary(s),
+                hash,
+                projectPath
+            });
+        }
     }
 
     private static object ReadAccountInfo()
@@ -399,6 +464,8 @@ public partial class AgentToolWindowControl : UserControl
                     trustDispatcher.Invoke(() =>
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "workspace-trusted", path = request.Path })));
+                    // Workspace just cleared the gate — surface any pending MCP servers now.
+                    SendMcpTrustCheck(currentSolutionDir);
                 }
                 return;
             }
@@ -410,6 +477,36 @@ public partial class AgentToolWindowControl : UserControl
                 untrustDispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "workspace-untrusted", path = request.Path })));
+                return;
+            }
+
+            if (request.Type == "trust-mcp-servers")
+            {
+                if (request.Servers != null)
+                {
+                    foreach (var entry in request.Servers)
+                    {
+                        if (string.IsNullOrWhiteSpace(entry.Name) || string.IsNullOrWhiteSpace(entry.Hash)) continue;
+                        var scope = string.Equals(entry.Scope, "project", StringComparison.OrdinalIgnoreCase)
+                            ? Mcp.McpScope.Project
+                            : Mcp.McpScope.User;
+
+                        if (string.Equals(entry.Action, "skip", StringComparison.OrdinalIgnoreCase))
+                        {
+                            Trust.TrustedMcpServersStore.SkipForSession(entry.Name, scope, entry.Hash, entry.ProjectPath);
+                            OutputLog.Info($"mcp skipped for session: {entry.Scope}/{entry.Name}");
+                        }
+                        else
+                        {
+                            Trust.TrustedMcpServersStore.Trust(entry.Name, scope, entry.Hash, entry.ProjectPath);
+                            OutputLog.Info($"mcp trusted: {entry.Scope}/{entry.Name}");
+                        }
+                    }
+                }
+                var mcpTrustDispatcher = System.Windows.Application.Current.Dispatcher;
+                mcpTrustDispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "mcp-trust-completed" })));
                 return;
             }
 
@@ -643,6 +740,23 @@ public partial class AgentToolWindowControl : UserControl
                 {
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "trust-required", path = workingDir, parent }));
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "stream-done" }));
+                });
+                return;
+            }
+
+            // MCP trust gate — surface enabled servers the user hasn't approved (or
+            // whose payload changed) before spawning the agent. The user marks which
+            // ones to trust; sending again proceeds normally.
+            var pendingMcp = CollectUntrustedMcpServers(workingDir);
+            if (pendingMcp.Count > 0)
+            {
+                var mcpGateDispatcher = System.Windows.Application.Current.Dispatcher;
+                mcpGateDispatcher.Invoke(() =>
+                {
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "mcp-trust-required", servers = pendingMcp }));
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "stream-done" }));
                 });
@@ -1922,5 +2036,26 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("showAll")]
         public bool ShowAll { get; set; }
+
+        [JsonPropertyName("servers")]
+        public List<McpTrustEntry>? Servers { get; set; }
+    }
+
+    private class McpTrustEntry
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = "";
+
+        [JsonPropertyName("scope")]
+        public string Scope { get; set; } = "user";
+
+        [JsonPropertyName("hash")]
+        public string Hash { get; set; } = "";
+
+        [JsonPropertyName("projectPath")]
+        public string? ProjectPath { get; set; }
+
+        [JsonPropertyName("action")]
+        public string Action { get; set; } = "trust";  // "trust" | "skip"
     }
 }

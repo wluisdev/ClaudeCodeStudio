@@ -1064,6 +1064,137 @@ html.light-theme .trust-deny:hover { background: #e6e6e6; color: #000; }
 html.light-theme .trust-parent { background: #ebebeb; color: #333; border-color: #c8c8c8; }
 html.light-theme .trust-parent:hover { background: #ddd; color: #000; }
 
+/* ── MCP trust modal ──────────────────────────────────────── */
+.mcp-trust-modal {
+    width: 560px;
+    max-width: calc(100vw - 40px);
+}
+
+.mcp-trust-list {
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid #333;
+    border-radius: 6px;
+    background: #1a1a1a;
+    margin-bottom: 10px;
+}
+
+.mcp-trust-item {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 10px;
+    padding: 6px 14px 6px 10px;
+    border-bottom: 1px solid #2a2a2a;
+    cursor: pointer;
+}
+
+.mcp-trust-item:last-child { border-bottom: none; }
+
+.mcp-trust-item:hover { background: #232323; }
+
+.mcp-trust-item input[type="checkbox"] {
+    flex: 0 0 16px;
+    flex-shrink: 0;
+    cursor: pointer;
+    margin: 0 0 0 auto;
+    padding: 0;
+    accent-color: var(--accent, #d88763);
+    width: 16px;
+    height: 16px;
+}
+
+.mcp-trust-item-body {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.mcp-trust-item-head {
+    min-width: 0;
+}
+
+.mcp-trust-item-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+}
+
+.mcp-trust-item-name {
+    font-weight: 600;
+    color: #eee;
+    font-size: 13px;
+}
+
+.mcp-trust-chip {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: #2a2a2a;
+    color: #aaa;
+}
+
+.mcp-trust-chip-scope { background: #3a3a4a; color: #aab; }
+.mcp-trust-chip-transport { background: #2a3a2a; color: #aba; }
+
+.mcp-trust-item-summary {
+    font-family: Consolas, Menlo, monospace;
+    font-size: 11px;
+    color: #999;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mcp-trust-actions {
+    margin-bottom: 12px;
+    padding: 0 4px;
+}
+
+.mcp-trust-select-all {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 4px;
+    font-size: 11px;
+    color: #999;
+    cursor: pointer;
+    white-space: nowrap;
+    width: fit-content;
+}
+
+.mcp-trust-select-all > span {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 0;
+}
+
+.mcp-trust-select-all > input {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 0;
+    accent-color: var(--accent, #d88763);
+    width: 14px;
+    height: 14px;
+}
+
+.mcp-trust-select-all input { cursor: pointer; }
+
+/* Light theme */
+html.light-theme .mcp-trust-list { background: #fafafa; border-color: #d8d8d8; }
+html.light-theme .mcp-trust-item { border-bottom-color: #ebebeb; }
+html.light-theme .mcp-trust-item:hover { background: #ececec; }
+html.light-theme .mcp-trust-item-name { color: #1e1e1e; }
+html.light-theme .mcp-trust-chip { background: #e8e8e8; color: #555; }
+html.light-theme .mcp-trust-chip-scope { background: #dfe0ef; color: #556; }
+html.light-theme .mcp-trust-chip-transport { background: #dfeadf; color: #565; }
+html.light-theme .mcp-trust-item-summary { color: #666; }
+html.light-theme .mcp-trust-select-all { color: #666; }
+
 .model-select,
 .effort-select,
 .timing-select {

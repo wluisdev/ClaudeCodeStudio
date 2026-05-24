@@ -286,6 +286,143 @@ const sendButton = null; // replaced by btnSend with streaming toggle
 const newChatButton = document.querySelector(".new-chat");
 const modelSelect = document.querySelector(".model-select");
 
+// ── Trust MCP servers modal ────────────────────────────────
+let _mcpTrustPending = [];  // [{name, scope, transport, summary, hash}]
+
+function openMcpTrustModal(servers) {
+    if (!servers || servers.length === 0) return;
+    _mcpTrustPending = servers.slice();
+
+    const overlay = document.getElementById("mcp-trust-modal-overlay");
+    if (!overlay) return;
+
+    mcpTrustRenderList();
+    const selectAll = document.getElementById("mcp-trust-select-all");
+    if (selectAll) selectAll.checked = true;
+    overlay.classList.add("open");
+}
+
+function mergeMcpTrustModal(servers) {
+    if (!servers || servers.length === 0) return;
+    const seen = new Set(_mcpTrustPending.map(mcpTrustKey));
+    for (const s of servers) {
+        if (!seen.has(mcpTrustKey(s))) _mcpTrustPending.push(s);
+    }
+    mcpTrustRenderList();
+    mcpTrustUpdateSelectAllState();
+}
+
+function mcpTrustKey(s) {
+    return `${s.scope || "user"}\0${s.name || ""}\0${s.hash || ""}\0${s.projectPath || ""}`;
+}
+
+function mcpTrustRenderList() {
+    const list = document.getElementById("mcp-trust-list");
+    if (!list) return;
+    list.innerHTML = "";
+    _mcpTrustPending.forEach((s, idx) => {
+        const item = document.createElement("label");
+        item.className = "mcp-trust-item";
+
+        const body = document.createElement("div");
+        body.className = "mcp-trust-item-body";
+
+        const head = document.createElement("div");
+        head.className = "mcp-trust-item-head";
+
+        const name = document.createElement("span");
+        name.className = "mcp-trust-item-name";
+        name.textContent = s.name;
+        head.appendChild(name);
+
+        const scopeChip = document.createElement("span");
+        scopeChip.className = "mcp-trust-chip mcp-trust-chip-scope";
+        scopeChip.textContent = s.scope || "user";
+        head.appendChild(scopeChip);
+
+        const transportChip = document.createElement("span");
+        transportChip.className = "mcp-trust-chip mcp-trust-chip-transport";
+        transportChip.textContent = s.transport || "stdio";
+        head.appendChild(transportChip);
+
+        body.appendChild(head);
+
+        const summary = document.createElement("div");
+        summary.className = "mcp-trust-item-summary";
+        summary.textContent = s.summary || "";
+        summary.title = s.summary || "";
+        body.appendChild(summary);
+
+        item.appendChild(body);
+
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = true;
+        cb.dataset.idx = String(idx);
+        cb.addEventListener("change", mcpTrustUpdateSelectAllState);
+        item.appendChild(cb);
+
+        list.appendChild(item);
+    });
+}
+
+function closeMcpTrustModal() {
+    const overlay = document.getElementById("mcp-trust-modal-overlay");
+    if (overlay) overlay.classList.remove("open");
+    _mcpTrustPending = [];
+}
+
+function mcpTrustToggleAll(checked) {
+    const list = document.getElementById("mcp-trust-list");
+    if (!list) return;
+    list.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = checked);
+}
+
+function mcpTrustUpdateSelectAllState() {
+    const list = document.getElementById("mcp-trust-list");
+    const selectAll = document.getElementById("mcp-trust-select-all");
+    if (!list || !selectAll) return;
+    const boxes = list.querySelectorAll('input[type="checkbox"]');
+    const total = boxes.length;
+    const checked = Array.from(boxes).filter(cb => cb.checked).length;
+    selectAll.checked = checked === total;
+    selectAll.indeterminate = checked > 0 && checked < total;
+}
+
+function mcpTrustSubmit() {
+    const list = document.getElementById("mcp-trust-list");
+    if (!list) return closeMcpTrustModal();
+    const decisions = [];
+    list.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        const idx = parseInt(cb.dataset.idx, 10);
+        const s = _mcpTrustPending[idx];
+        if (!s) return;
+        decisions.push({
+            name: s.name,
+            scope: s.scope,
+            hash: s.hash,
+            projectPath: s.projectPath || null,
+            action: cb.checked ? "trust" : "skip"
+        });
+    });
+    window.chrome.webview.postMessage({ type: "trust-mcp-servers", servers: decisions });
+}
+
+function mcpTrustCancel() {
+    // Skip everything for this session — silences the prompt loop without trusting anything.
+    const skips = _mcpTrustPending.map(s => ({
+        name: s.name, scope: s.scope, hash: s.hash,
+        projectPath: s.projectPath || null,
+        action: "skip"
+    }));
+    if (skips.length > 0) {
+        window.chrome.webview.postMessage({ type: "trust-mcp-servers", servers: skips });
+    } else {
+        closeMcpTrustModal();
+    }
+}
+// ───────────────────────────────────────────────────────────
+
 // ── Trust workspace modal ──────────────────────────────────
 let _trustPendingPath = "";
 let _trustPendingParent = "";
@@ -1144,6 +1281,24 @@ window.chrome.webview.addEventListener("message", event => {
     if (event.data.type === "workspace-untrusted") {
         _workspaceTrusted = false;
         renderCwd();
+        return;
+    }
+
+    if (event.data.type === "mcp-trust-required") {
+        const overlay = document.getElementById("mcp-trust-modal-overlay");
+        if (overlay && overlay.classList.contains("open")) {
+            // Modal already open from an earlier scan — merge new servers in
+            // (e.g. project scope that resolved later than user scope) instead
+            // of nuking the current state.
+            mergeMcpTrustModal(event.data.servers || []);
+        } else {
+            openMcpTrustModal(event.data.servers || []);
+        }
+        return;
+    }
+
+    if (event.data.type === "mcp-trust-completed") {
+        closeMcpTrustModal();
         return;
     }
 
