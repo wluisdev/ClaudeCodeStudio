@@ -173,6 +173,15 @@ public partial class AgentToolWindowControl : UserControl
 
     public void SendCwdInfo()
     {
+        SendCwdInfoCore(retryAttempt: 0);
+    }
+
+    // Open Folder in VS populates IVsSolution.GetSolutionInfo asynchronously, sometimes
+    // after the 1500ms ScheduleReset delay has elapsed. When the initial resolve returns
+    // null but we're not at the entry point (NavigationCompleted on a fresh tool window),
+    // schedule a couple of retries with backoff so the cwdbar/trust gate catches up.
+    private void SendCwdInfoCore(int retryAttempt)
+    {
         try
         {
             if (Browser?.CoreWebView2 == null) return;
@@ -191,11 +200,51 @@ public partial class AgentToolWindowControl : UserControl
             dispatcher.Invoke(() =>
                 Browser.CoreWebView2.PostWebMessageAsJson(
                     JsonSerializer.Serialize(new { type = "cwd-info", path = cwd })));
+
+            // Trust gate: if a workspace is open and not yet trusted, prompt the
+            // user before the agent does anything in it. Skipped when there's no
+            // workspace (cwd null) — UserProfile fallback isn't covered by trust.
+            if (!string.IsNullOrEmpty(cwd) && !Trust.TrustedWorkspacesStore.IsTrusted(cwd))
+            {
+                var parent = TryGetParent(cwd);
+                dispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "trust-required", path = cwd, parent })));
+            }
+            else
+            {
+                dispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "workspace-trusted", path = cwd })));
+            }
+
+            // Retry if we got nothing — Open Folder may still be initializing.
+            // Two retries (3s then 5s) cover slow disks without spamming.
+            if (cwd == null && retryAttempt < 2)
+            {
+                var nextDelayMs = retryAttempt == 0 ? 3000 : 5000;
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(nextDelayMs);
+                    await System.Windows.Application.Current.Dispatcher.InvokeAsync(
+                        () => SendCwdInfoCore(retryAttempt + 1));
+                });
+            }
         }
         catch (Exception ex)
         {
             OutputLog.Warn($"cwd info send failed: {ex.Message}");
         }
+    }
+
+    private static string? TryGetParent(string path)
+    {
+        try
+        {
+            var p = Path.GetDirectoryName(path);
+            return string.IsNullOrEmpty(p) ? null : p;
+        }
+        catch { return null; }
     }
 
     private static object ReadAccountInfo()
@@ -331,6 +380,36 @@ public partial class AgentToolWindowControl : UserControl
                 OutputLog.Info("ui: clear");
                 await _agentClient.StopAsync();
                 _sessionStart = DateTime.Now;
+                return;
+            }
+
+            if (request.Type == "refresh-cwd")
+            {
+                SendCwdInfo();
+                return;
+            }
+
+            if (request.Type == "trust-workspace")
+            {
+                if (!string.IsNullOrWhiteSpace(request.Path))
+                {
+                    Trust.TrustedWorkspacesStore.Trust(request.Path);
+                    OutputLog.Info($"workspace trusted: {request.Path}");
+                    var trustDispatcher = System.Windows.Application.Current.Dispatcher;
+                    trustDispatcher.Invoke(() =>
+                        Browser.CoreWebView2.PostWebMessageAsJson(
+                            JsonSerializer.Serialize(new { type = "workspace-trusted", path = request.Path })));
+                }
+                return;
+            }
+
+            if (request.Type == "untrust-workspace")
+            {
+                OutputLog.Info($"workspace untrusted (declined): {request.Path}");
+                var untrustDispatcher = System.Windows.Application.Current.Dispatcher;
+                untrustDispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "workspace-untrusted", path = request.Path })));
                 return;
             }
 
@@ -552,6 +631,23 @@ public partial class AgentToolWindowControl : UserControl
             var workingDir = (!string.IsNullOrEmpty(request.WorkingDirectory) && Directory.Exists(request.WorkingDirectory))
                 ? request.WorkingDirectory
                 : currentSolutionDir;
+
+            // Trust gate (defense-in-depth — the boot-time prompt already covers the
+            // common case, but a stale UI / cleared settings could let an untrusted
+            // send slip through). Block before spawning the agent.
+            if (!string.IsNullOrEmpty(workingDir) && !Trust.TrustedWorkspacesStore.IsTrusted(workingDir))
+            {
+                var parent = TryGetParent(workingDir!);
+                var trustGateDispatcher = System.Windows.Application.Current.Dispatcher;
+                trustGateDispatcher.Invoke(() =>
+                {
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "trust-required", path = workingDir, parent }));
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "stream-done" }));
+                });
+                return;
+            }
 
             var preLimits = Usage.CostLimits.Load();
             if (preLimits.Block && !preLimits.IsEmpty)

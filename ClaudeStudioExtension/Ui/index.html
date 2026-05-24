@@ -395,6 +395,35 @@
         </div>
     </div>
 
+    <div class="cmd-modal-overlay" id="trust-modal-overlay">
+        <div class="cmd-modal trust-modal">
+            <div class="trust-modal-header">
+                <span class="trust-modal-icon">⚠</span>
+                <div class="trust-modal-title">
+                    <div class="trust-modal-eyebrow">Untrusted workspace</div>
+                    <div class="trust-modal-headline">Do you trust the files in this folder?</div>
+                </div>
+            </div>
+            <div class="trust-modal-path-row">
+                <span class="trust-modal-path-icon">📁</span>
+                <span class="trust-modal-path" id="trust-modal-path"></span>
+            </div>
+            <div class="trust-modal-body">
+                Claude will be able to read, modify, and execute code in this folder
+                on your behalf. Trust it only if you wrote the code yourself or
+                obtained it from a source you trust.
+            </div>
+            <div class="trust-modal-parent" id="trust-modal-parent-row" hidden>
+                Parent: <span id="trust-modal-parent-path"></span>
+            </div>
+            <div class="cmd-modal-buttons trust-modal-buttons">
+                <button class="trust-deny" onclick="trustDeny()">Don't trust</button>
+                <button class="trust-parent" id="trust-parent-btn" onclick="trustParent()">Trust parent</button>
+                <button class="trust-allow" onclick="trustAllow()">Trust</button>
+            </div>
+        </div>
+    </div>
+
     <div class="cmd-modal-overlay" id="cmd-modal-overlay" onclick="if(event.target===this)closeAddCommand()">
         <div class="cmd-modal">
             <h3>Add command</h3>

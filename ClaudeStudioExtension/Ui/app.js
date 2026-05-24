@@ -286,9 +286,71 @@ const sendButton = null; // replaced by btnSend with streaming toggle
 const newChatButton = document.querySelector(".new-chat");
 const modelSelect = document.querySelector(".model-select");
 
+// ── Trust workspace modal ──────────────────────────────────
+let _trustPendingPath = "";
+let _trustPendingParent = "";
+
+function openTrustModal(path, parent) {
+    if (!path) return;
+    _trustPendingPath = path;
+    _trustPendingParent = parent || "";
+
+    const overlay = document.getElementById("trust-modal-overlay");
+    const pathEl = document.getElementById("trust-modal-path");
+    const parentRow = document.getElementById("trust-modal-parent-row");
+    const parentPath = document.getElementById("trust-modal-parent-path");
+    const parentBtn = document.getElementById("trust-parent-btn");
+    if (!overlay) return;
+
+    pathEl.textContent = path;
+    pathEl.title = path;
+
+    if (_trustPendingParent && _trustPendingParent !== path) {
+        parentRow.hidden = false;
+        parentPath.textContent = _trustPendingParent;
+        const parentName = _trustPendingParent.split(/[\\/]+/).filter(Boolean).pop() || _trustPendingParent;
+        parentBtn.textContent = `Trust parent (${parentName})`;
+        parentBtn.title = `Trust ${_trustPendingParent}`;
+        parentBtn.style.display = "";
+    } else {
+        parentRow.hidden = true;
+        parentBtn.style.display = "none";
+    }
+
+    overlay.classList.add("open");
+}
+
+function closeTrustModal() {
+    const overlay = document.getElementById("trust-modal-overlay");
+    if (overlay) overlay.classList.remove("open");
+    _trustPendingPath = "";
+    _trustPendingParent = "";
+}
+
+function trustAllow() {
+    if (!_trustPendingPath) return closeTrustModal();
+    window.chrome.webview.postMessage({ type: "trust-workspace", path: _trustPendingPath });
+    closeTrustModal();
+}
+
+function trustParent() {
+    if (!_trustPendingParent) return closeTrustModal();
+    window.chrome.webview.postMessage({ type: "trust-workspace", path: _trustPendingParent });
+    closeTrustModal();
+}
+
+function trustDeny() {
+    if (_trustPendingPath) {
+        window.chrome.webview.postMessage({ type: "untrust-workspace", path: _trustPendingPath });
+    }
+    closeTrustModal();
+}
+// ───────────────────────────────────────────────────────────
+
 // ── Cwd bar ────────────────────────────────────────────────
 let _cwdVsPath = "";    // resolved from VS (Solution / Open Folder), via C#
 let _cwdFullPath = "";  // effective cwd shown / copied (override wins when set)
+let _workspaceTrusted = true;  // updated by trust-required / workspace-trusted events
 
 function truncateCwdPath(full) {
     if (!full) return "";
@@ -323,13 +385,15 @@ function renderCwd(vsPath) {
     }
 
     bar.classList.remove("cwdbar-empty");
+    bar.classList.toggle("cwdbar-untrusted", !_workspaceTrusted);
 
     const isOverride = override && override !== _cwdVsPath;
     if (isOverride) bar.classList.add("cwdbar-override");
 
-    bar.title = isOverride
-        ? `${effective}  (override — VS workspace: ${_cwdVsPath || "none"})`
-        : effective;
+    let tooltip = effective;
+    if (isOverride) tooltip += `  (override — VS workspace: ${_cwdVsPath || "none"})`;
+    if (!_workspaceTrusted) tooltip += "  · not trusted";
+    bar.title = tooltip;
 
     pathEl.innerHTML = "";
     pathEl.appendChild(document.createTextNode(truncateCwdPath(effective)));
@@ -339,10 +403,26 @@ function renderCwd(vsPath) {
         tag.textContent = " (override)";
         pathEl.appendChild(tag);
     }
+    if (!_workspaceTrusted) {
+        const tag = document.createElement("span");
+        tag.className = "cwdbar-untrusted-tag";
+        tag.textContent = " · not trusted";
+        pathEl.appendChild(tag);
+    }
 }
 
 function copyCwd() {
     if (!_cwdFullPath) return;
+    // Untrusted workspace: reopen the trust prompt instead of copying — more useful
+    // than silently copying a path the user can't actually act on yet.
+    if (!_workspaceTrusted) {
+        const parts = _cwdFullPath.split(/[\\/]+/).filter(Boolean);
+        const parent = parts.length > 1
+            ? _cwdFullPath.substring(0, _cwdFullPath.length - parts[parts.length - 1].length - 1)
+            : "";
+        openTrustModal(_cwdFullPath, parent);
+        return;
+    }
     const bar = document.getElementById("cwdbar");
     const done = () => {
         if (!bar) return;
@@ -1047,6 +1127,26 @@ window.chrome.webview.addEventListener("message", event => {
         return;
     }
 
+    if (event.data.type === "trust-required") {
+        _workspaceTrusted = false;
+        renderCwd();
+        openTrustModal(event.data.path || "", event.data.parent || "");
+        return;
+    }
+
+    if (event.data.type === "workspace-trusted") {
+        _workspaceTrusted = true;
+        renderCwd();
+        closeTrustModal();
+        return;
+    }
+
+    if (event.data.type === "workspace-untrusted") {
+        _workspaceTrusted = false;
+        renderCwd();
+        return;
+    }
+
     // (renderCwd also picks up changes from setWorkingDirectory/clearWorkingDirectory
     // below; those handlers call renderCwd() with no argument so the cached vsPath
     // is preserved and only the override layer flips.)
@@ -1394,13 +1494,19 @@ workingDirInput.value = localStorage.getItem("workingDirectory") || "";
 function setWorkingDirectory(value) {
     localStorage.setItem("workingDirectory", value.trim());
     renderCwd();
+    requestCwdRefresh();
 }
 
 function clearWorkingDirectory() {
     workingDirInput.value = "";
     localStorage.setItem("workingDirectory", "");
     renderCwd();
+    requestCwdRefresh();
     workingDirInput.focus();
+}
+
+function requestCwdRefresh() {
+    try { window.chrome.webview.postMessage({ type: "refresh-cwd" }); } catch (e) {}
 }
 
 // Display name (override shown in titlebar)

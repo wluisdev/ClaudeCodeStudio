@@ -913,6 +913,15 @@ html.light-theme .history-footer {
     font-size: 10px;
 }
 
+.cwdbar-untrusted-tag {
+    margin-left: 4px;
+    font-size: 10px;
+    color: #d88763;
+    font-weight: 500;
+}
+
+html.light-theme .cwdbar-untrusted-tag { color: #b86040; }
+
 .inline-toggle-wrap {
     display: flex;
     align-items: center;
@@ -928,6 +937,132 @@ html.light-theme .history-footer {
     background: #2b3a2b !important;
     color: #b8d8b8 !important;
 }
+
+/* ── Trust workspace modal ─────────────────────────────────── */
+.trust-modal {
+    width: 460px;
+    max-width: calc(100vw - 40px);
+}
+
+.trust-modal-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.trust-modal-icon {
+    font-size: 28px;
+    line-height: 1;
+    color: #d88763;
+}
+
+.trust-modal-title { flex: 1; min-width: 0; }
+
+.trust-modal-eyebrow {
+    font-size: 10px;
+    font-weight: 600;
+    color: #d88763;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.trust-modal-headline {
+    font-size: 15px;
+    font-weight: 600;
+    color: #eee;
+    margin-top: 2px;
+}
+
+.trust-modal-path-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: #2a2a2a;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    min-width: 0;
+}
+
+.trust-modal-path-icon { flex: 0 0 auto; }
+
+.trust-modal-path {
+    font-family: Consolas, Menlo, monospace;
+    font-size: 12px;
+    color: #d6d6d6;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.trust-modal-body {
+    font-size: 12px;
+    color: #b0b0b0;
+    line-height: 1.5;
+    margin-bottom: 12px;
+}
+
+.trust-modal-parent {
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 12px;
+    font-family: Consolas, Menlo, monospace;
+}
+
+.trust-modal-parent span { color: #aaa; }
+
+.trust-modal-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.trust-modal-buttons button {
+    padding: 7px 14px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid transparent;
+    cursor: pointer;
+}
+
+.trust-deny {
+    background: transparent;
+    color: #bbb;
+    border-color: #555;
+}
+
+.trust-deny:hover { background: #4a2a2a; color: #ffb8b8; border-color: #804040; }
+
+.trust-parent {
+    background: #2a2a2a;
+    color: #ddd;
+    border-color: #555;
+}
+
+.trust-parent:hover { background: #3a3a3a; color: #fff; border-color: #777; }
+
+.trust-allow {
+    background: #d88763;
+    color: white;
+    border-color: #d88763;
+}
+
+.trust-allow:hover { background: #c4734f; border-color: #c4734f; }
+
+/* Light theme */
+html.light-theme .trust-modal-path-row { background: #f0f0f0; }
+html.light-theme .trust-modal-path { color: #333; }
+html.light-theme .trust-modal-body { color: #555; }
+html.light-theme .trust-modal-parent { color: #888; }
+html.light-theme .trust-modal-headline { color: #1e1e1e; }
+html.light-theme .trust-deny { color: #555; border-color: #c8c8c8; }
+html.light-theme .trust-deny:hover { background: #e6e6e6; color: #000; }
+html.light-theme .trust-parent { background: #ebebeb; color: #333; border-color: #c8c8c8; }
+html.light-theme .trust-parent:hover { background: #ddd; color: #000; }
 
 .model-select,
 .effort-select,
