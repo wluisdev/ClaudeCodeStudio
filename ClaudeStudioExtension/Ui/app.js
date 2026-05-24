@@ -286,6 +286,77 @@ const sendButton = null; // replaced by btnSend with streaming toggle
 const newChatButton = document.querySelector(".new-chat");
 const modelSelect = document.querySelector(".model-select");
 
+let _accountInfo = null;
+function renderAccountInfo() {
+    const el = document.getElementById("account-info");
+    if (!el) return;
+    el.classList.remove("account-info-loading");
+
+    if (!_accountInfo || !_accountInfo.signedIn) {
+        el.textContent = "Not signed in";
+        el.title = "";
+        el.classList.add("account-info-muted");
+        return;
+    }
+    el.classList.remove("account-info-muted");
+
+    const customName = (localStorage.getItem("displayName") || "").trim();
+    const accountName = _accountInfo.accountDisplayName || "";
+    const org = _accountInfo.organizationName || "";
+    const email = _accountInfo.email || "";
+    const source = localStorage.getItem("accountInfoSource") || "auto";
+
+    let name = "";
+    let tooltip = "";
+
+    if (source === "account") {
+        name = accountName || "—";
+        tooltip = accountName ? (email ? `${accountName} (${email})` : accountName) : "Account name unavailable";
+    } else if (source === "organization") {
+        name = org || "—";
+        tooltip = org || "Organization unavailable";
+    } else if (source === "email") {
+        name = email || "—";
+        tooltip = email || "Email unavailable";
+    } else if (source === "custom") {
+        name = customName || "—";
+        tooltip = customName || "Set a custom name in settings";
+    } else {
+        // auto cascade: custom → account → organization → email → Anonymous
+        if (customName) {
+            name = customName;
+            tooltip = email || customName;
+        } else if (accountName) {
+            name = accountName;
+            tooltip = email ? `${accountName} (${email})` : accountName;
+        } else if (org) {
+            name = org;
+            tooltip = email ? `${org} (${email})` : org;
+        } else if (email) {
+            name = email;
+            tooltip = email;
+        } else {
+            name = "Anonymous";
+            tooltip = "";
+        }
+    }
+
+    const plan = _accountInfo.plan || "";
+    el.innerHTML = "";
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = name;
+    el.appendChild(nameSpan);
+    if (plan) {
+        const sep = document.createTextNode(" · ");
+        el.appendChild(sep);
+        const planSpan = document.createElement("span");
+        planSpan.className = "account-info-plan";
+        planSpan.textContent = plan;
+        el.appendChild(planSpan);
+    }
+    el.title = tooltip;
+}
+
 function updateCaption() {
     const label = modelSelect.options[modelSelect.selectedIndex]?.text || modelSelect.value;
     try {
@@ -887,6 +958,12 @@ window.chrome.webview.addEventListener("message", event => {
         return;
     }
 
+    if (event.data.type === "account-info") {
+        _accountInfo = event.data;
+        renderAccountInfo();
+        return;
+    }
+
     if (event.data.type === "toast") {
         showToast(event.data.text || "");
         return;
@@ -1220,6 +1297,30 @@ function clearWorkingDirectory() {
     workingDirInput.value = "";
     localStorage.setItem("workingDirectory", "");
     workingDirInput.focus();
+}
+
+// Display name (override shown in titlebar)
+const displayNameInput = document.getElementById("display-name-input");
+displayNameInput.value = localStorage.getItem("displayName") || "";
+
+const accountInfoSourceSelect = document.getElementById("account-info-source");
+accountInfoSourceSelect.value = localStorage.getItem("accountInfoSource") || "auto";
+
+function setDisplayName(value) {
+    localStorage.setItem("displayName", value.trim());
+    renderAccountInfo();
+}
+
+function clearDisplayName() {
+    displayNameInput.value = "";
+    localStorage.setItem("displayName", "");
+    renderAccountInfo();
+    displayNameInput.focus();
+}
+
+function setAccountInfoSource(value) {
+    localStorage.setItem("accountInfoSource", value);
+    renderAccountInfo();
 }
 
 // ── Cost limits ────────────────────────────────────────────────

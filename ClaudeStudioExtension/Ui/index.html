@@ -170,6 +170,22 @@
 
                         <div class="cmd-divider"></div>
                         <div class="settings-row">
+                            <span class="settings-label">Titlebar name</span>
+                            <select id="account-info-source" class="settings-select" onchange="setAccountInfoSource(this.value)">
+                                <option value="auto">Auto (cascade)</option>
+                                <option value="account">Account name</option>
+                                <option value="organization">Organization</option>
+                                <option value="email">Email</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                        </div>
+                        <div class="settings-input-wrap">
+                            <input type="text" id="display-name-input" class="settings-input" placeholder="Custom name (used when 'Custom' is selected or as cascade fallback)" oninput="setDisplayName(this.value)" />
+                            <button type="button" class="settings-input-clear" title="Clear" onclick="clearDisplayName()">✕</button>
+                        </div>
+
+                        <div class="cmd-divider"></div>
+                        <div class="settings-row">
                             <span class="settings-label">Cost limit warning ($)</span>
                         </div>
                         <div class="cost-limits-row">
@@ -213,7 +229,7 @@
         </div>
 
         <div class="titlebar">
-            <span>Claude Code</span>
+            <span id="account-info" class="account-info account-info-loading" title="">···</span>
             <div class="titlebar-right">
                 <select class="model-select">
                     <option value="claude-sonnet-4-6">Sonnet 4.6</option>

@@ -123,6 +123,7 @@ public partial class AgentToolWindowControl : UserControl
                 JsonSerializer.Serialize(new { type = "version", text = versionString }));
 
             SendCurrentTheme();
+            SendAccountInfo();
         };
 
         VSColorTheme.ThemeChanged += OnVsThemeChanged;
@@ -150,6 +151,121 @@ public partial class AgentToolWindowControl : UserControl
         {
             OutputLog.Warn($"theme change propagation failed: {ex.Message}");
         }
+    }
+
+    private void SendAccountInfo()
+    {
+        try
+        {
+            if (Browser?.CoreWebView2 == null) return;
+
+            var info = ReadAccountInfo();
+            var dispatcher = System.Windows.Application.Current.Dispatcher;
+            dispatcher.Invoke(() =>
+                Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(info)));
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"account info read failed: {ex.Message}");
+        }
+    }
+
+    private static object ReadAccountInfo()
+    {
+        var path = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".claude.json");
+
+        if (!File.Exists(path))
+            return new { type = "account-info", signedIn = false };
+
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            var root = doc.RootElement;
+
+            string? organizationName = null;
+            string? email = null;
+            string? accountDisplayName = null;
+
+            if (root.TryGetProperty("oauthAccount", out var acct) && acct.ValueKind == JsonValueKind.Object)
+            {
+                organizationName = TryGetString(acct, "organizationName");
+                email = TryGetString(acct, "emailAddress") ?? TryGetString(acct, "email");
+                accountDisplayName = TryGetString(acct, "displayName");
+            }
+
+            // No oauthAccount object — treat as signed out (CLI hasn't logged in yet).
+            if (organizationName == null && email == null && accountDisplayName == null)
+                return new { type = "account-info", signedIn = false };
+
+            // Personal Claude Pro accounts use email-like org names; drop those so
+            // the cascade in JS can fall back to a real display name.
+            if (organizationName != null && organizationName.Contains("@"))
+                organizationName = null;
+
+            // Plan comes from oauthAccount.organizationType (e.g. "claude_pro",
+            // "claude_max_5x"). Map known values; capitalize anything new as a
+            // fallback so a future plan still shows something readable.
+            var orgType = TryGetString(acct, "organizationType");
+            var plan = MapPlan(orgType);
+
+            return new
+            {
+                type = "account-info",
+                signedIn = true,
+                organizationName,
+                accountDisplayName,
+                email,
+                plan
+            };
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"~/.claude.json parse failed: {ex.Message}");
+            return new { type = "account-info", signedIn = false };
+        }
+    }
+
+    private static string? TryGetString(JsonElement el, string name)
+    {
+        if (el.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String)
+        {
+            var s = v.GetString();
+            return string.IsNullOrWhiteSpace(s) ? null : s;
+        }
+        return null;
+    }
+
+    private static bool TryGetBool(JsonElement el, string name)
+    {
+        return el.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+    }
+
+    private static string MapPlan(string? orgType)
+    {
+        if (string.IsNullOrEmpty(orgType)) return "Free";
+        switch (orgType)
+        {
+            case "claude_pro": return "Pro";
+            case "claude_max": return "Max";
+            case "claude_max_5x": return "Max 5x";
+            case "claude_max_20x": return "Max 20x";
+            case "claude_team": return "Team";
+            case "claude_enterprise": return "Enterprise";
+            case "claude_free": return "Free";
+        }
+        // Unknown: strip "claude_" prefix and Title-Case underscores.
+        var s = orgType!.StartsWith("claude_", StringComparison.OrdinalIgnoreCase)
+            ? orgType.Substring(7)
+            : orgType;
+        var parts = s.Split('_');
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (parts[i].Length > 0)
+                parts[i] = char.ToUpperInvariant(parts[i][0]) + parts[i].Substring(1);
+        }
+        return string.Join(" ", parts);
     }
 
     private void AgentToolWindowControl_Unloaded(

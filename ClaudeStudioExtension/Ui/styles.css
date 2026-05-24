@@ -847,6 +847,29 @@ html.light-theme .history-footer {
     gap: 8px;
 }
 
+.account-info {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1 1 auto;
+    margin-right: 12px;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+.account-info-loading {
+    opacity: 0.35;
+}
+
+.account-info-muted {
+    color: #777;
+}
+
+.account-info-plan {
+    color: #a87056;
+}
+
 .model-select,
 .effort-select,
 .timing-select {
@@ -2232,6 +2255,8 @@ html.light-theme .brand { color: #1e1e1e; }
 html.light-theme .action-btn { color: #444; }
 html.light-theme .action-btn:hover { color: #000; }
 html.light-theme .titlebar { background: #f5f5f5; border-bottom-color: #d0d0d0; color: #1e1e1e; }
+html.light-theme .account-info-muted { color: #888; }
+html.light-theme .account-info-plan { color: #b88066; }
 html.light-theme .cmd-trigger,
 html.light-theme .new-chat { color: #555; }
 html.light-theme .cmd-trigger:hover,
