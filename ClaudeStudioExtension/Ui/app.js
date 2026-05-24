@@ -427,7 +427,12 @@ function mcpTrustCancel() {
 let _trustPendingPath = "";
 let _trustPendingParent = "";
 
-function openTrustModal(path, parent) {
+const TRUST_RISK_MESSAGES = {
+    "drive-root": "Trusting this folder grants Claude access to the entire drive — Windows, Program Files, every existing and future folder on it.",
+    "users-container": "Trusting this folder grants Claude access to every user profile on this machine.",
+};
+
+function openTrustModal(path, parent, parentIsBlocked, riskWarning) {
     if (!path) return;
     _trustPendingPath = path;
     _trustPendingParent = parent || "";
@@ -437,12 +442,18 @@ function openTrustModal(path, parent) {
     const parentRow = document.getElementById("trust-modal-parent-row");
     const parentPath = document.getElementById("trust-modal-parent-path");
     const parentBtn = document.getElementById("trust-parent-btn");
+    const warningEl = document.getElementById("trust-modal-warning");
+    const warningText = document.getElementById("trust-modal-warning-text");
     if (!overlay) return;
 
     pathEl.textContent = path;
     pathEl.title = path;
 
-    if (_trustPendingParent && _trustPendingParent !== path) {
+    // Hide "Trust parent" when the parent is a wide-trust trap (home, drive root,
+    // C:\Users). Clicking it would prefix-trust an exponentially larger surface
+    // via IsTrusted's prefix match — same reason home is blocked outright.
+    const showParent = _trustPendingParent && _trustPendingParent !== path && !parentIsBlocked;
+    if (showParent) {
         parentRow.hidden = false;
         parentPath.textContent = _trustPendingParent;
         const parentName = _trustPendingParent.split(/[\\/]+/).filter(Boolean).pop() || _trustPendingParent;
@@ -452,6 +463,20 @@ function openTrustModal(path, parent) {
     } else {
         parentRow.hidden = true;
         parentBtn.style.display = "none";
+    }
+
+    // Surface a high-risk warning when the user is about to trust a drive root
+    // or C:\Users — both legitimate choices in rare cases (test VMs, sysadmin)
+    // but catastrophic in normal use. Decision stays with the user.
+    if (warningEl && warningText) {
+        const msg = riskWarning ? TRUST_RISK_MESSAGES[riskWarning] : null;
+        if (msg) {
+            warningText.textContent = msg;
+            warningEl.hidden = false;
+        } else {
+            warningEl.hidden = true;
+            warningText.textContent = "";
+        }
     }
 
     overlay.classList.add("open");
@@ -551,13 +576,11 @@ function renderCwd(vsPath) {
 function copyCwd() {
     if (!_cwdFullPath) return;
     // Untrusted workspace: reopen the trust prompt instead of copying — more useful
-    // than silently copying a path the user can't actually act on yet.
+    // than silently copying a path the user can't actually act on yet. Round-trip
+    // through the backend so parentIsHome is computed authoritatively (JS has no
+    // access to %USERPROFILE%).
     if (!_workspaceTrusted) {
-        const parts = _cwdFullPath.split(/[\\/]+/).filter(Boolean);
-        const parent = parts.length > 1
-            ? _cwdFullPath.substring(0, _cwdFullPath.length - parts[parts.length - 1].length - 1)
-            : "";
-        openTrustModal(_cwdFullPath, parent);
+        try { window.chrome.webview.postMessage({ type: "refresh-cwd" }); } catch (e) {}
         return;
     }
     const bar = document.getElementById("cwdbar");
@@ -653,7 +676,9 @@ function renderAccountInfo() {
 }
 
 function updateCaption() {
-    const label = modelSelect.options[modelSelect.selectedIndex]?.text || modelSelect.value;
+    const opt = modelSelect.options[modelSelect.selectedIndex];
+    const label = opt?.text || modelSelect.value;
+    modelSelect.title = opt?.title || modelSelect.value;
     try {
         window.chrome.webview.postMessage({ type: "set-caption", text: `Claude Code Studio — ${label}` });
     } catch (e) { /* webview not ready yet */ }
@@ -1267,7 +1292,16 @@ window.chrome.webview.addEventListener("message", event => {
     if (event.data.type === "trust-required") {
         _workspaceTrusted = false;
         renderCwd();
-        openTrustModal(event.data.path || "", event.data.parent || "");
+        openTrustModal(
+            event.data.path || "",
+            event.data.parent || "",
+            event.data.parentIsBlocked === true,
+            event.data.riskWarning || null);
+        return;
+    }
+
+    if (event.data.type === "no-workspace") {
+        showNoWorkspaceCard(event.data.path || "");
         return;
     }
 
@@ -2555,6 +2589,16 @@ function addAttachment(filename, content, isBinary, filePath) {
     attachmentsEl.appendChild(chip);
 
     showFileQuestion(id, displayName);
+}
+
+function showNoWorkspaceCard(path) {
+    if (welcome) { welcome.remove(); welcome = null; }
+    const card = document.createElement("div");
+    card.className = "question-card";
+    card.innerHTML = `
+<div class="question-text">⚠️ <strong>No workspace open.</strong> Open a folder or solution first — Claude won't operate in your home directory (<code>${escapeHtml(path)}</code>).</div>`;
+    messages.appendChild(card);
+    autoScroll();
 }
 
 function showFileQuestion(id, displayName) {

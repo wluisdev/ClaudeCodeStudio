@@ -239,9 +239,9 @@
             <span id="account-info" class="account-info account-info-loading" title="">···</span>
             <div class="titlebar-right">
                 <select class="model-select">
-                    <option value="claude-sonnet-4-6">Sonnet 4.6</option>
-                    <option value="claude-opus-4-7">Opus 4.7</option>
-                    <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+                    <option value="claude-sonnet-4-6"         title="Sonnet 4.6 · claude-sonnet-4-6">Sonnet 4.6</option>
+                    <option value="claude-opus-4-7"           title="Opus 4.7 · claude-opus-4-7">Opus 4.7</option>
+                    <option value="claude-haiku-4-5-20251001" title="Haiku 4.5 · claude-haiku-4-5-20251001">Haiku 4.5</option>
                 </select>
                 <button class="new-chat" title="New chat">✎</button>
             </div>
@@ -407,6 +407,10 @@
             <div class="trust-modal-path-row">
                 <span class="trust-modal-path-icon">📁</span>
                 <span class="trust-modal-path" id="trust-modal-path"></span>
+            </div>
+            <div class="trust-modal-warning" id="trust-modal-warning" hidden>
+                <span class="trust-modal-warning-icon">⚠️</span>
+                <span class="trust-modal-warning-text" id="trust-modal-warning-text"></span>
             </div>
             <div class="trust-modal-body">
                 Claude will be able to read, modify, and execute code in this folder
