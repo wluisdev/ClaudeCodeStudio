@@ -226,9 +226,11 @@ public partial class AgentToolWindowControl : UserControl
             if (!workspaceTrusted)
             {
                 var parent = TryGetParent(cwd!);
+                var parentIsBlocked = IsBlockedRoot(parent);
+                var riskWarning = GetRiskWarning(cwd);
                 dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = "trust-required", path = cwd, parent })));
+                        JsonSerializer.Serialize(new { type = "trust-required", path = cwd, parent, parentIsBlocked, riskWarning })));
             }
             else
             {
@@ -268,6 +270,75 @@ public partial class AgentToolWindowControl : UserControl
             return string.IsNullOrEmpty(p) ? null : p;
         }
         catch { return null; }
+    }
+
+    // Exact match against %USERPROFILE%. Subfolders (e.g. C:\Users\was\source\repos\Foo)
+    // are real workspaces and go through the normal trust flow — trusting the root
+    // would wide-trust everything under home due to prefix matching in IsTrusted.
+    // Used by: the no-workspace send block, and IsBlockedRoot below.
+    private static bool IsHomeDirectory(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return false;
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return PathEquals(path, home);
+    }
+
+    // Drive root like "C:\" / "D:\". Trusting here wide-trusts the entire drive
+    // (Windows, Program Files, every future folder).
+    private static bool IsDriveRoot(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return false;
+        try
+        {
+            var full = Path.GetFullPath(path!);
+            var root = Path.GetPathRoot(full);
+            return !string.IsNullOrEmpty(root) && PathEquals(full, root);
+        }
+        catch { return false; }
+    }
+
+    // Parent of %USERPROFILE%, usually "C:\Users". Trusting here covers every
+    // user profile on the machine.
+    private static bool IsUsersContainer(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return false;
+        try
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (string.IsNullOrEmpty(home)) return false;
+            var parent = Directory.GetParent(home)?.FullName;
+            return PathEquals(path, parent);
+        }
+        catch { return false; }
+    }
+
+    // Used to suppress the "Trust parent" button — escalating to any of these
+    // roots via the parent shortcut would re-introduce the wide-trust trap.
+    private static bool IsBlockedRoot(string? path) =>
+        IsHomeDirectory(path) || IsDriveRoot(path) || IsUsersContainer(path);
+
+    // Returns a key describing why a path is high-risk, or null when it's a
+    // regular folder. Used by the UI to render a contextual warning banner
+    // inside the trust modal (home is blocked upstream, so it's not surfaced
+    // here — the user gets the no-workspace card instead).
+    private static string? GetRiskWarning(string? path)
+    {
+        if (IsDriveRoot(path)) return "drive-root";
+        if (IsUsersContainer(path)) return "users-container";
+        return null;
+    }
+
+    private static bool PathEquals(string? a, string? b)
+    {
+        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b)) return false;
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(a!).TrimEnd('\\', '/'),
+                Path.GetFullPath(b!).TrimEnd('\\', '/'),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
     }
 
     private static List<object> CollectUntrustedMcpServers(string? projectDir)
@@ -729,17 +800,36 @@ public partial class AgentToolWindowControl : UserControl
                 ? request.WorkingDirectory
                 : currentSolutionDir;
 
+            // No-workspace block: when ResolveCwd falls through to UserProfile, there's
+            // no real workspace open. Showing the trust modal here would let the user
+            // accidentally wide-trust their entire home (prefix match in IsTrusted).
+            // Block with an inline message that nudges them to open a folder/solution.
+            if (IsHomeDirectory(workingDir))
+            {
+                var noWorkspaceDispatcher = System.Windows.Application.Current.Dispatcher;
+                noWorkspaceDispatcher.Invoke(() =>
+                {
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "no-workspace", path = workingDir }));
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "stream-done" }));
+                });
+                return;
+            }
+
             // Trust gate (defense-in-depth — the boot-time prompt already covers the
             // common case, but a stale UI / cleared settings could let an untrusted
             // send slip through). Block before spawning the agent.
             if (!string.IsNullOrEmpty(workingDir) && !Trust.TrustedWorkspacesStore.IsTrusted(workingDir))
             {
                 var parent = TryGetParent(workingDir!);
+                var parentIsBlocked = IsBlockedRoot(parent);
+                var riskWarning = GetRiskWarning(workingDir);
                 var trustGateDispatcher = System.Windows.Application.Current.Dispatcher;
                 trustGateDispatcher.Invoke(() =>
                 {
                     Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = "trust-required", path = workingDir, parent }));
+                        JsonSerializer.Serialize(new { type = "trust-required", path = workingDir, parent, parentIsBlocked, riskWarning }));
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "stream-done" }));
                 });
@@ -940,9 +1030,16 @@ public partial class AgentToolWindowControl : UserControl
             var solutionPath = dte?.Solution?.FullName;
             if (!string.IsNullOrEmpty(solutionPath))
             {
-                var dir = Path.GetDirectoryName(solutionPath);
-                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
-                    return dir;
+                // Open Folder mode: Solution.FullName is the folder itself, not a
+                // .sln file — applying Path.GetDirectoryName would jump up one level.
+                if (Directory.Exists(solutionPath))
+                    return solutionPath;
+                if (File.Exists(solutionPath))
+                {
+                    var dir = Path.GetDirectoryName(solutionPath);
+                    if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                        return dir;
+                }
             }
         }
         catch { }
@@ -963,17 +1060,27 @@ public partial class AgentToolWindowControl : UserControl
 
     private static string? ResolveCwd(EnvDTE.DTE? dte)
     {
-        // 1. Loaded .sln (most common case)
+        // 1. Loaded .sln or Open Folder (most common case)
         try
         {
             var solutionPath = dte?.Solution?.FullName;
             if (!string.IsNullOrEmpty(solutionPath))
             {
-                var dir = Path.GetDirectoryName(solutionPath);
-                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                // Open Folder mode: Solution.FullName is the folder itself, not a
+                // .sln file — applying Path.GetDirectoryName would jump up one level.
+                if (Directory.Exists(solutionPath))
                 {
-                    OutputLog.Info($"cwd resolved via Solution.FullName: {dir}");
-                    return dir;
+                    OutputLog.Info($"cwd resolved via Solution.FullName (folder): {solutionPath}");
+                    return solutionPath;
+                }
+                if (File.Exists(solutionPath))
+                {
+                    var dir = Path.GetDirectoryName(solutionPath);
+                    if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                    {
+                        OutputLog.Info($"cwd resolved via Solution.FullName: {dir}");
+                        return dir;
+                    }
                 }
             }
         }

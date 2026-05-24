@@ -6,7 +6,7 @@ using Microsoft.VisualStudio.Shell.Interop;
 
 namespace ClaudeStudioExtension;
 
-public class SolutionEventsHandler : IVsSolutionEvents, IVsSolutionEvents4
+public class SolutionEventsHandler : IVsSolutionEvents, IVsSolutionEvents4, IVsSolutionEvents7
 {
     // ── IVsSolutionEvents ─────────────────────────────────────────
     public int OnAfterOpenSolution(object pUnkReserved, int fNewSolution)
@@ -31,12 +31,21 @@ public class SolutionEventsHandler : IVsSolutionEvents, IVsSolutionEvents4
     public int OnBeforeCloseSolution(object pUnkReserved) => VSConstants.S_OK;
 
     // ── IVsSolutionEvents4 ────────────────────────────────────────
-    // Covers "Open Folder" mode in VS 2019+ where no .sln is loaded.
+    // Project rename / change parent — kept for completeness, not used here.
     public int OnAfterRenameProject(IVsHierarchy pHierarchy) => VSConstants.S_OK;
     public int OnQueryChangeProjectParent(IVsHierarchy pHierarchy, IVsHierarchy pNewParentHier, ref int pfCancel) => VSConstants.S_OK;
     public int OnAfterChangeProjectParent(IVsHierarchy pHierarchy) => VSConstants.S_OK;
     public int OnAfterAsynchOpenProject(IVsHierarchy pHierarchy, int fAdded) => VSConstants.S_OK;
     public int OnAfterMergeSolution(object pUnkReserved) => VSConstants.S_OK;
+
+    // ── IVsSolutionEvents7 ────────────────────────────────────────
+    // Covers "Open Folder" mode (VS 2017+). OnAfterOpenSolution does NOT fire
+    // reliably for folder open, so we explicitly hook the folder events here.
+    public void OnAfterOpenFolder(string folderPath) => ScheduleReset();
+    public void OnBeforeCloseFolder(string folderPath) { }
+    public void OnQueryCloseFolder(string folderPath, ref int pfCancel) { }
+    public void OnAfterCloseFolder(string folderPath) => ScheduleReset();
+    public void OnAfterLoadAllDeferredProjects() { }
 
     /// <summary>
     /// Schedule a reset off the UI thread with a delay so VS has time to

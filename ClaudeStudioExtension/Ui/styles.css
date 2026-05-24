@@ -998,6 +998,38 @@ html.light-theme .cwdbar-untrusted-tag { color: #b86040; }
     flex: 1 1 auto;
 }
 
+.trust-modal-warning {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    background: rgba(220, 120, 40, 0.12);
+    border: 1px solid rgba(220, 120, 40, 0.45);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #f0c89a;
+}
+
+.trust-modal-warning[hidden] { display: none; }
+
+.trust-modal-warning-icon {
+    font-size: 14px;
+    line-height: 1.2;
+    flex: 0 0 auto;
+}
+
+.trust-modal-warning-text {
+    flex: 1 1 auto;
+}
+
+html.light-theme .trust-modal-warning {
+    background: rgba(220, 120, 40, 0.10);
+    border-color: rgba(180, 90, 20, 0.55);
+    color: #8a4a10;
+}
+
 .trust-modal-body {
     font-size: 12px;
     color: #b0b0b0;
