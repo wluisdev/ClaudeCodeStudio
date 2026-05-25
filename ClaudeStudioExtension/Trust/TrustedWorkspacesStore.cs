@@ -83,7 +83,15 @@ public static class TrustedWorkspacesStore
                 if (el.ValueKind == JsonValueKind.String)
                 {
                     var s = el.GetString();
-                    if (!string.IsNullOrWhiteSpace(s)) list.Add(Normalize(s!));
+                    if (string.IsNullOrWhiteSpace(s)) continue;
+                    var normalized = Normalize(s!);
+                    // Passive cleanup of orphans: drop entries whose folder no
+                    // longer exists. The file isn't rewritten here — Trust/Untrust
+                    // will persist the cleaned list naturally on the next mutation.
+                    // Network paths that are temporarily unreachable also fail
+                    // Directory.Exists; users dealing with those can re-trust.
+                    try { if (!Directory.Exists(normalized)) continue; } catch { continue; }
+                    list.Add(normalized);
                 }
             }
             return list;

@@ -26,6 +26,8 @@ public partial class AgentToolWindowControl : UserControl
     private FileSystemWatcher? _claudeJsonWatcher;
     private bool _lastSignedInStatus;
     private System.Threading.Timer? _claudeJsonDebounceTimer;
+    private FileSystemWatcher? _trustedWorkspacesWatcher;
+    private System.Threading.Timer? _trustedWorkspacesDebounceTimer;
 
     public AgentToolWindowControl()
     {
@@ -133,6 +135,7 @@ public partial class AgentToolWindowControl : UserControl
 
             SendCurrentTheme();
             StartClaudeJsonWatcher();  // seeds _lastSignedInStatus before first SendAccountInfo
+            StartTrustedWorkspacesWatcher();
             SendAccountInfo();
             SendCwdInfo();
         };
@@ -611,6 +614,129 @@ public partial class AgentToolWindowControl : UserControl
         catch { }
     }
 
+    private static string TrustedWorkspacesJsonPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "ClaudeStudio",
+        "trusted-workspaces.json");
+
+    // Watches %APPDATA%/ClaudeStudio/trusted-workspaces.json so the trust gate
+    // refreshes when the file is edited externally (another VS instance, manual
+    // edit, sync tool). Mirrors StartClaudeJsonWatcher 1:1 — same long-lived
+    // pattern, same broad NotifyFilter, same FullPath equality check.
+    private void StartTrustedWorkspacesWatcher()
+    {
+        try
+        {
+            if (_trustedWorkspacesWatcher != null) return;
+
+            var dir = Path.GetDirectoryName(TrustedWorkspacesJsonPath);
+            if (string.IsNullOrEmpty(dir)) return;
+
+            // Directory only gets created on first Trust() call; create it now so
+            // the watcher can attach even before the user has trusted anything.
+            try { Directory.CreateDirectory(dir!); } catch { }
+            if (!Directory.Exists(dir)) return;
+
+            _trustedWorkspacesWatcher = new FileSystemWatcher(dir!)
+            {
+                NotifyFilter = NotifyFilters.LastWrite
+                    | NotifyFilters.CreationTime
+                    | NotifyFilters.FileName
+                    | NotifyFilters.Size,
+                EnableRaisingEvents = true,
+            };
+            var targetPath = TrustedWorkspacesJsonPath;
+            FileSystemEventHandler onChange = (_, args) =>
+            {
+                if (string.Equals(args.FullPath, targetPath, StringComparison.OrdinalIgnoreCase))
+                    DebouncedReloadTrustGate();
+            };
+            _trustedWorkspacesWatcher.Changed += onChange;
+            _trustedWorkspacesWatcher.Created += onChange;
+            _trustedWorkspacesWatcher.Deleted += onChange;
+            _trustedWorkspacesWatcher.Renamed += (_, args) =>
+            {
+                if (string.Equals(args.FullPath, targetPath, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(args.OldFullPath, targetPath, StringComparison.OrdinalIgnoreCase))
+                    DebouncedReloadTrustGate();
+            };
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"trusted-workspaces watcher setup failed: {ex.Message}");
+        }
+    }
+
+    // Called from McpToolWindowControl (and potentially other VS tool windows) to
+    // surface the trusted workspaces modal from outside the chat. Trust is global
+    // across all Claude usage, so it deserves access points outside the agent tab.
+    public void ShowTrustedWorkspacesModal()
+    {
+        try
+        {
+            var dispatcher = System.Windows.Application.Current.Dispatcher;
+            dispatcher.Invoke(() =>
+            {
+                if (Browser?.CoreWebView2 == null) return;
+                Browser.CoreWebView2.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new { type = "open-trusted-workspaces-modal" }));
+            });
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"open trusted-workspaces modal failed: {ex.Message}");
+        }
+    }
+
+    private void SendTrustedWorkspacesList()
+    {
+        try
+        {
+            var paths = Trust.TrustedWorkspacesStore.GetAll()
+                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var dispatcher = System.Windows.Application.Current.Dispatcher;
+            dispatcher.Invoke(() =>
+            {
+                if (Browser?.CoreWebView2 == null) return;
+                Browser.CoreWebView2.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new { type = "trusted-workspaces-list", paths }));
+            });
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"trusted-workspaces list send failed: {ex.Message}");
+        }
+    }
+
+    private void DebouncedReloadTrustGate()
+    {
+        try
+        {
+            _trustedWorkspacesDebounceTimer?.Dispose();
+            _trustedWorkspacesDebounceTimer = new System.Threading.Timer(
+                _ =>
+                {
+                    // SendCwdInfo touches DTE (Package.GetGlobalService) — must run
+                    // on the UI thread. Dispatch from the threadpool callback.
+                    // SendTrustedWorkspacesList keeps the management modal in sync
+                    // if it's currently open (cheap no-op if it isn't).
+                    try
+                    {
+                        var dispatcher = System.Windows.Application.Current.Dispatcher;
+                        dispatcher.InvokeAsync(() =>
+                        {
+                            try { SendCwdInfo(); } catch { }
+                            try { SendTrustedWorkspacesList(); } catch { }
+                        });
+                    }
+                    catch { }
+                },
+                null, 500, System.Threading.Timeout.Infinite);
+        }
+        catch { }
+    }
+
     // Opens a visible cmd window running `claude login` so the user can complete
     // the OAuth flow. cmd /K keeps the window open after the command exits so
     // any error message is readable. The watcher picks up the ~/.claude.json
@@ -708,6 +834,26 @@ public partial class AgentToolWindowControl : UserControl
                 untrustDispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "workspace-untrusted", path = request.Path })));
+                return;
+            }
+
+            if (request.Type == "get-trusted-workspaces")
+            {
+                SendTrustedWorkspacesList();
+                return;
+            }
+
+            if (request.Type == "remove-trusted-workspace")
+            {
+                if (!string.IsNullOrWhiteSpace(request.Path))
+                {
+                    Trust.TrustedWorkspacesStore.Untrust(request.Path);
+                    OutputLog.Info($"workspace removed from trusted list: {request.Path}");
+                    SendTrustedWorkspacesList();
+                    // If the removed entry was covering the active cwd, the trust
+                    // gate needs to re-evaluate so the modal can reappear.
+                    SendCwdInfo();
+                }
                 return;
             }
 

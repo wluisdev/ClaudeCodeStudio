@@ -2552,6 +2552,74 @@ html.light-theme .settings-input::placeholder { color: #aaa; }
 html.light-theme .settings-input-clear { color: #999; }
 html.light-theme .settings-input-clear:hover { color: #333; }
 
+.trusted-workspaces-list {
+    padding: 0 2px;
+    max-height: 380px;
+    overflow-y: auto;
+}
+
+.trusted-workspaces-modal { max-width: 520px; min-width: 360px; }
+
+.trusted-workspaces-modal-body {
+    margin: 8px 0 16px;
+}
+
+.trusted-workspaces-buttons {
+    justify-content: flex-end;
+}
+
+.trusted-workspaces-empty {
+    color: #666;
+    font-size: 11px;
+    padding: 4px 2px;
+    font-style: italic;
+}
+
+.trusted-workspace-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 4px;
+    border-radius: 4px;
+    font-size: 11px;
+}
+
+.trusted-workspace-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.trusted-workspace-path {
+    flex: 1 1 auto;
+    color: #bbb;
+    font-family: Cascadia Code, Consolas, monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.trusted-workspace-remove {
+    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+    color: #777;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 2px 6px;
+    line-height: 1;
+    border-radius: 3px;
+}
+
+.trusted-workspace-remove:hover {
+    color: #e87060;
+    background: rgba(232, 112, 96, 0.1);
+}
+
+html.light-theme .trusted-workspaces-empty { color: #888; }
+html.light-theme .trusted-workspace-path { color: #444; }
+html.light-theme .trusted-workspace-row:hover { background: rgba(0, 0, 0, 0.04); }
+html.light-theme .trusted-workspace-remove { color: #888; }
+html.light-theme .trusted-workspace-remove:hover { color: #c04030; background: rgba(192, 64, 48, 0.1); }
+
 /* ── History delete button ─────────────────────────────────── */
 .history-item {
     display: flex;

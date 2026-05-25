@@ -26,6 +26,12 @@
                             <rect x="11" y="2.5" width="3" height="11.5"/>
                         </svg>
                     </button>
+                    <button class="action-btn" id="btn-trusted" title="Trusted workspaces" onclick="openTrustedWorkspacesModal()">
+                        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="7" width="10" height="7" rx="1.2"/>
+                            <path d="M 5 7 V 5 a 3 3 0 0 1 6 0 V 7"/>
+                        </svg>
+                    </button>
                     <button class="action-btn" id="btn-mcp" title="MCP servers" onclick="openMcpWindow()">
                         <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="2" y="3" width="12" height="4" rx="1"/>
@@ -424,6 +430,26 @@
                 <button class="trust-deny" onclick="trustDeny()">Don't trust</button>
                 <button class="trust-parent" id="trust-parent-btn" onclick="trustParent()">Trust parent</button>
                 <button class="trust-allow" onclick="trustAllow()">Trust</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="cmd-modal-overlay" id="trusted-workspaces-overlay">
+        <div class="cmd-modal trusted-workspaces-modal">
+            <div class="trust-modal-header">
+                <span class="trust-modal-icon">🔒</span>
+                <div>
+                    <div class="trust-modal-eyebrow">Trusted workspaces</div>
+                    <div class="trust-modal-headline">Folders Claude can run code in</div>
+                </div>
+            </div>
+            <div class="trusted-workspaces-modal-body">
+                <div id="trusted-workspaces-list" class="trusted-workspaces-list">
+                    <div class="trusted-workspaces-empty">No trusted workspaces yet.</div>
+                </div>
+            </div>
+            <div class="cmd-modal-buttons trusted-workspaces-buttons">
+                <button class="trust-deny" onclick="closeTrustedWorkspacesModal()">Close</button>
             </div>
         </div>
     </div>

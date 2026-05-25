@@ -74,6 +74,59 @@ function toggleSettings() {
     menu.classList.toggle("open");
 }
 
+function openTrustedWorkspacesModal() {
+    const overlay = document.getElementById("trusted-workspaces-overlay");
+    if (!overlay) return;
+    overlay.classList.add("open");
+    try { window.chrome.webview.postMessage({ type: "get-trusted-workspaces" }); } catch (e) {}
+}
+
+function closeTrustedWorkspacesModal() {
+    const overlay = document.getElementById("trusted-workspaces-overlay");
+    if (overlay) overlay.classList.remove("open");
+}
+
+function renderTrustedWorkspacesList(paths) {
+    const container = document.getElementById("trusted-workspaces-list");
+    if (!container) return;
+    if (!paths || paths.length === 0) {
+        container.innerHTML = '<div class="trusted-workspaces-empty">No trusted workspaces yet.</div>';
+        return;
+    }
+    container.innerHTML = "";
+    for (const path of paths) {
+        const row = document.createElement("div");
+        row.className = "trusted-workspace-row";
+
+        const label = document.createElement("span");
+        label.className = "trusted-workspace-path";
+        label.textContent = shortenTrustedPath(path);
+        label.title = path;
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "trusted-workspace-remove";
+        remove.title = "Remove from trusted list";
+        remove.textContent = "✕";
+        remove.onclick = () => removeTrustedWorkspace(path);
+
+        row.appendChild(label);
+        row.appendChild(remove);
+        container.appendChild(row);
+    }
+}
+
+function shortenTrustedPath(full) {
+    if (!full) return "";
+    const parts = full.replace(/\\/g, "/").split("/").filter(Boolean);
+    if (parts.length <= 2) return full;
+    return "…/" + parts.slice(-2).join("/");
+}
+
+function removeTrustedWorkspace(path) {
+    try { window.chrome.webview.postMessage({ type: "remove-trusted-workspace", path }); } catch (e) {}
+}
+
 document.addEventListener("click", e => {
     const wrap = document.getElementById("settings-wrap");
     if (wrap && !wrap.contains(e.target))
@@ -1334,6 +1387,16 @@ window.chrome.webview.addEventListener("message", event => {
     if (event.data.type === "workspace-untrusted") {
         _workspaceTrusted = false;
         renderCwd();
+        return;
+    }
+
+    if (event.data.type === "trusted-workspaces-list") {
+        renderTrustedWorkspacesList(event.data.paths || []);
+        return;
+    }
+
+    if (event.data.type === "open-trusted-workspaces-modal") {
+        openTrustedWorkspacesModal();
         return;
     }
 
