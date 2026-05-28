@@ -27,7 +27,7 @@ public static class Pricing
     private static readonly Dictionary<string, (decimal input, decimal output)> _base = new(StringComparer.OrdinalIgnoreCase)
     {
         ["claude-sonnet-4-6"] = (3m, 15m),
-        ["claude-opus-4-7"]   = (15m, 75m),
+        ["claude-opus-4-8"]   = (5m, 25m),
         ["claude-haiku-4-5"]  = (1m, 5m),
     };
 
@@ -36,7 +36,7 @@ public static class Pricing
         foreach (var kv in _base)
             if (model.StartsWith(kv.Key, StringComparison.OrdinalIgnoreCase))
                 return kv.Value;
-        if (model.Contains("opus", StringComparison.OrdinalIgnoreCase))   return (15m, 75m);
+        if (model.Contains("opus", StringComparison.OrdinalIgnoreCase))   return (5m, 25m);
         if (model.Contains("haiku", StringComparison.OrdinalIgnoreCase))  return (1m, 5m);
         return (3m, 15m); // sonnet default
     }
