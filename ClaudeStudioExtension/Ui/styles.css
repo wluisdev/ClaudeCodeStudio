@@ -2721,6 +2721,21 @@ html.light-theme .trusted-workspace-remove:hover { color: #c04030; background: r
     margin-top: 10px;
 }
 
+.ask-question-confirm:disabled,
+.ask-question-confirm:disabled:hover {
+    background: #3a3a3a;
+    border-color: #4a4a4a;
+    color: #777;
+    cursor: not-allowed;
+}
+
+html.light-theme .ask-question-confirm:disabled,
+html.light-theme .ask-question-confirm:disabled:hover {
+    background: #e2e2e2;
+    border-color: #cfcfcf;
+    color: #aaa;
+}
+
 .ask-question-card.ask-question-answered {
     opacity: 0.65;
 }

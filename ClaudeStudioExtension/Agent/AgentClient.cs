@@ -138,6 +138,33 @@ public class AgentClient
         await _writer.FlushAsync();
     }
 
+    // Answer to an AskUserQuestion. The agent translates tool_use_id → the pending
+    // control_request's request_id and writes a control_response to claude.stdin.
+    public async Task SendAskAnswerAsync(string toolUseId, string answersJson, bool dismissed)
+    {
+        if (_writer == null)
+        {
+            OutputLog.Warn($"ask-answer dropped — agent not running (toolUseId={toolUseId})");
+            return;
+        }
+
+        var request = new ChatRequest
+        {
+            Message = "",
+            AskAnswer = new AskAnswer
+            {
+                ToolUseId = toolUseId,
+                AnswersJson = answersJson,
+                Dismissed = dismissed
+            }
+        };
+        var json = JsonSerializer.Serialize(request);
+
+        OutputLog.Info($"ask-answer → toolUseId={toolUseId} dismissed={dismissed}");
+        await _writer.WriteLineAsync(json);
+        await _writer.FlushAsync();
+    }
+
     public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null)
     {
         await _streamingSemaphore.WaitAsync();

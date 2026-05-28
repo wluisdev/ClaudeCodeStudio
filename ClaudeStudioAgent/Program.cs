@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using ClaudeStudioAgent;
 using ClaudeStudioShared;
@@ -101,6 +103,21 @@ var stdinReader = Task.Run(async () =>
                     pipeServer.AllowForSession(pr.AllowSession);
                 if (!pipeServer.Respond(pr.ToolUseId, pr.Allow, pr.Reason))
                     EmitError($"no pending permission request for tool_use_id {pr.ToolUseId}");
+                continue;
+            }
+
+            if (request.AskAnswer != null)
+            {
+                // AskUserQuestion answer → write control_response to claude.stdin.
+                // The main loop is blocked awaiting claude's stdout (claude is
+                // blocked awaiting this very reply), so bypass the request channel.
+                if (session == null)
+                {
+                    EmitError($"ask-answer received but no active session (toolUseId={request.AskAnswer.ToolUseId})");
+                    continue;
+                }
+                try { await session.SendControlResponseAsync(request.AskAnswer); }
+                catch (Exception ex) { EmitError($"ask-answer write failed: {ex.Message}"); }
                 continue;
             }
 
@@ -229,6 +246,10 @@ sealed class ClaudeSession : IAsyncDisposable
     private StreamWriter? _stdin;
     // Serializes writes to claude.stdin so partial NDJSON lines can't interleave.
     private readonly SemaphoreSlim _stdinLock = new(1, 1);
+    // Pending AskUserQuestion control_requests, keyed by tool_use_id (the only id
+    // the UI knows). Maps to the request_id needed for the control_response and
+    // the original tool input (echoed back with an `answers` field).
+    private readonly ConcurrentDictionary<string, PendingAsk> _pendingAsks = new();
     private StreamReader? _stdout;
     private readonly StringBuilder _stderrBuffer = new();
     private Task? _stderrPump;
@@ -278,6 +299,17 @@ sealed class ClaudeSession : IAsyncDisposable
         psi.ArgumentList.Add("--include-partial-messages");
         psi.ArgumentList.Add("--model");
         psi.ArgumentList.Add(_model);
+
+        // Bidirectional control channel. Without this, AskUserQuestion auto-errors
+        // in stream-json mode (no TTY to prompt through) and the model falls back
+        // to plain-text noise. With it, claude emits a `control_request`
+        // {subtype:"can_use_tool", tool_name:"AskUserQuestion"} on stdout and we
+        // reply with a `control_response` on stdin that becomes the real
+        // tool_result. PoC-confirmed to coexist with bypassPermissions + the
+        // PreToolUse hook (permission for Bash/Edit/Write still flows through the
+        // named pipe; only intrinsically-interactive tools use this channel).
+        psi.ArgumentList.Add("--permission-prompt-tool");
+        psi.ArgumentList.Add("stdio");
 
         if (_permissionMode == "plan")
         {
@@ -383,6 +415,64 @@ sealed class ClaudeSession : IAsyncDisposable
         // line — waiting for init before sending the first message deadlocks both sides.
         // Instead, init arrives as the first event of the first SendMessageAsync call
         // and is processed by the same loop as everything else.
+    }
+
+    internal readonly record struct PendingAsk(string RequestId, string InputJson);
+
+    // Answers a pending AskUserQuestion control_request (or denies it if the user
+    // dismissed the card). Called from the stdin reader task while SendMessageAsync's
+    // read loop is draining stdout — claude is blocked waiting for this reply.
+    public async Task SendControlResponseAsync(AskAnswer answer)
+    {
+        if (_stdin == null || _proc == null || _proc.HasExited)
+            throw new InvalidOperationException("session not started or already exited");
+        if (!_pendingAsks.TryRemove(answer.ToolUseId, out var pending))
+            throw new InvalidOperationException($"no pending control_request for tool_use_id {answer.ToolUseId}");
+
+        object inner;
+        if (answer.Dismissed)
+        {
+            inner = new { behavior = "deny", message = "User dismissed the question." };
+        }
+        else
+        {
+            var inputNode = JsonNode.Parse(pending.InputJson) as JsonObject ?? new JsonObject();
+            inputNode["answers"] = JsonNode.Parse(
+                string.IsNullOrWhiteSpace(answer.AnswersJson) ? "{}" : answer.AnswersJson);
+            inner = new { behavior = "allow", updatedInput = inputNode };
+        }
+
+        await WriteControlResponseAsync(pending.RequestId, inner);
+    }
+
+    // Auto-allow an unexpected control_request, echoing the input unchanged.
+    private Task WriteControlAllowAsync(string requestId, string inputRawJson)
+    {
+        var input = JsonNode.Parse(string.IsNullOrWhiteSpace(inputRawJson) ? "{}" : inputRawJson);
+        return WriteControlResponseAsync(requestId, new { behavior = "allow", updatedInput = input });
+    }
+
+    private async Task WriteControlResponseAsync(string requestId, object innerResponse)
+    {
+        var msg = new
+        {
+            type = "control_response",
+            response = new
+            {
+                subtype = "success",
+                request_id = requestId,
+                response = innerResponse
+            }
+        };
+        var ndjson = JsonSerializer.Serialize(msg);
+
+        await _stdinLock.WaitAsync();
+        try
+        {
+            await _stdin!.WriteLineAsync(ndjson);
+            await _stdin.FlushAsync();
+        }
+        finally { _stdinLock.Release(); }
     }
 
     public async Task SendMessageAsync(string userText)
@@ -595,6 +685,37 @@ sealed class ClaudeSession : IAsyncDisposable
                     Console.Out.Flush();
                 }
             }
+            else if (type == "control_request")
+            {
+                // Bidirectional control channel (--permission-prompt-tool stdio).
+                // claude blocks waiting for our control_response, so every one MUST
+                // be answered or the turn hangs.
+                var reqId = evt.TryGetProperty("request_id", out var ridProp) ? ridProp.GetString() : null;
+                if (reqId != null && evt.TryGetProperty("request", out var reqObj)
+                    && reqObj.TryGetProperty("subtype", out var subEl) && subEl.GetString() == "can_use_tool")
+                {
+                    var toolName = reqObj.TryGetProperty("tool_name", out var tnEl) ? tnEl.GetString() : null;
+                    var toolUseId = reqObj.TryGetProperty("tool_use_id", out var tuEl) ? tuEl.GetString() : null;
+                    var inputRaw = reqObj.TryGetProperty("input", out var inEl) ? inEl.GetRawText() : "{}";
+
+                    if (toolName == "AskUserQuestion" && toolUseId != null)
+                    {
+                        // The card is already rendered from the preceding tool_use
+                        // chunk. Just remember the request_id so SendControlResponseAsync
+                        // can answer it when the user picks. claude waits on stdin.
+                        _pendingAsks[toolUseId] = new PendingAsk(reqId, inputRaw);
+                    }
+                    else
+                    {
+                        // Non-interactive tool routed through the prompt tool. Under
+                        // bypassPermissions this shouldn't happen (the hook is the gate),
+                        // but auto-allow so claude never hangs on an unhandled request.
+                        EmitError($"auto-allowing unexpected control_request for tool '{toolName}'");
+                        try { await WriteControlAllowAsync(reqId, inputRaw); }
+                        catch (Exception ex) { EmitError($"control auto-allow write failed: {ex.Message}"); }
+                    }
+                }
+            }
             else if (type == "result")
             {
                 EmitTiming("result received", sw.ElapsedMilliseconds);
@@ -672,6 +793,12 @@ sealed class ClaudeSession : IAsyncDisposable
     private static void EmitTiming(string label, long ms)
     {
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"{label}: {ms}ms" }));
+        Console.Out.Flush();
+    }
+
+    private static void EmitError(string text)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = text }));
         Console.Out.Flush();
     }
 

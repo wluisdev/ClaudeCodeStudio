@@ -935,6 +935,17 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "ask-answer")
+            {
+                if (string.IsNullOrEmpty(request.ToolUseId))
+                {
+                    OutputLog.Warn("ask-answer missing toolUseId");
+                    return;
+                }
+                await _agentClient.SendAskAnswerAsync(request.ToolUseId, request.Answers ?? "", request.Dismissed);
+                return;
+            }
+
             if (request.Type == "get-history")
             {
                 // For the history filter we use ResolveWorkspaceCwd (no ActiveDocument
@@ -2450,6 +2461,12 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("toolUseId")]
         public string? ToolUseId { get; set; }
+
+        [JsonPropertyName("answers")]
+        public string? Answers { get; set; }
+
+        [JsonPropertyName("dismissed")]
+        public bool Dismissed { get; set; }
 
         [JsonPropertyName("allow")]
         public bool Allow { get; set; }

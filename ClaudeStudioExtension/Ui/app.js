@@ -1210,10 +1210,6 @@ textarea.addEventListener("paste", e => {
 
 function sendMessage() {
     _userScrolledUp = false;
-    // Any new user-initiated turn clears the AskUserQuestion suppression flag —
-    // otherwise the flag stays true forever after the first AskUserQuestion and
-    // silently drops every subsequent claude text response.
-    _suppressFallbackText = false;
     const text = textarea.value.trim();
     pushPromptHistory(text);
     historyIndex = -1;
@@ -2120,11 +2116,6 @@ function finalizeBubbleStream(bubble) {
 }
 
 function appendChunk(text) {
-    // Drop claude's fallback prose that always follows AskUserQuestion in
-    // stream-json mode ("the selector didn't render, please type..."). The
-    // card already provides the UI. Flag clears on the next user-initiated
-    // send (sendMessage resets it).
-    if (_suppressFallbackText) return;
     removeLoading();
     const bubble = ensureStreamBubble();
     const seg = getActiveTextSeg(bubble);
@@ -2154,12 +2145,7 @@ function summarizeToolInput(name, inputJson) {
 // ---- diff viewer state ----
 const DIFF_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
 const toolInputData = new Map();      // toolId → parsed input object
-const askUserQuestionIds = new Set(); // toolIds of AskUserQuestion calls whose auto-error should be ignored
-// After claude's CLI auto-errors AskUserQuestion in stream-json mode, it
-// continues the turn with fallback text ("the selector didn't render, please
-// type your answer..."). That text is noise in our UI because the card IS
-// rendered — suppress it until the next user-initiated turn.
-let _suppressFallbackText = false;
+const askUserQuestionIds = new Set(); // toolIds rendered as a question card — suppress their tool_result chip (the card shows the answer)
 const gitBaselineCache = new Map();   // filePath → { content|null, error|null }
 const pendingGitBaselineRequests = new Map(); // requestId → resolve()
 const PREVIEW_MAX_LINES = 30;
@@ -2372,9 +2358,9 @@ function appendToolEvent(kind, name, inputJson, text, id) {
     const bubble = ensureStreamBubble();
 
     // AskUserQuestion is a meta tool whose entire purpose is interactive UI.
-    // Render a question card with selectable options + write-in; the user's
-    // pick is forwarded as a regular user message (claude.exe auto-errors the
-    // tool in stream-json mode, so tool_result via stdin doesn't work).
+    // Render a question card with selectable options + write-in. The user's pick
+    // is sent back as a control_response (the agent runs claude with
+    // --permission-prompt-tool stdio), which becomes the tool's real tool_result.
     if (kind === "tool_use" && name === "AskUserQuestion" && id && inputJson) {
         // Dedupe: JSONL watcher may re-emit the same tool_use after stream-json
         if (bubble.querySelector(`.ask-question-card[data-tool-id="${CSS.escape(id)}"]`)) {
@@ -2383,9 +2369,9 @@ function appendToolEvent(kind, name, inputJson, text, id) {
         }
         try {
             renderAskUserQuestionCard(bubble, id, inputJson);
-            askUserQuestionIds.add(id);  // suppress the auto-error that follows
-            _suppressFallbackText = true; // suppress claude's "selector didn't render" noise
-            if (isStreaming) ensureLiveTimer();
+            askUserQuestionIds.add(id);  // suppress the real tool_result chip (card shows the answer)
+            // claude is now blocked waiting for the answer — freeze the timer.
+            pauseLiveTimer();
             autoScroll();
             return;
         } catch (err) {
@@ -2394,11 +2380,10 @@ function appendToolEvent(kind, name, inputJson, text, id) {
         }
     }
 
-    // claude.exe emits a tool_error (~1ms after the tool_use) for every
-    // AskUserQuestion in stream-json mode. Without this guard the generic
-    // tool_result/tool_error branch below falls back to "last chip" when it
-    // can't find a chip with the matching id, and falsely marks an unrelated
-    // chip as errored.
+    // The AskUserQuestion answer comes back as a real tool_result ("User has
+    // answered your questions: ..."). The card already shows the choice, so skip
+    // rendering a redundant chip (and avoid the generic branch mislabeling the
+    // "last chip" when it can't find one with this id).
     if ((kind === "tool_error" || kind === "tool_result") && id && askUserQuestionIds.has(id)) {
         return;
     }
@@ -2677,72 +2662,38 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
         else updateConfirmState();
     }
 
-    async function submitAnswers() {
+    function submitAnswers() {
         if (card.classList.contains("ask-question-answered")) return;
+
+        // `answers` is already keyed by question text → chosen label (multi-select
+        // joined with ", "), which is exactly the shape claude expects in the
+        // control_response. Require every question answered before sending.
+        const allAnswered = questions.every(q => {
+            const v = answers[q.question];
+            return v && String(v).trim().length > 0;
+        });
+        if (!allAnswered) return;
+
         card.classList.add("ask-question-answered");
         card.querySelectorAll("button, input").forEach(el => el.disabled = true);
 
-        // claude.exe in stream-json mode auto-errors AskUserQuestion within ~1ms
-        // (no interactive terminal), so a late tool_result is stale — the turn
-        // has already ended with claude's text fallback ("please type your
-        // answer"). Instead, forward the picked option(s) as a regular user
-        // message — starts a new turn, claude sees it in context and responds.
-        let formatted;
-        if (questions.length === 1) {
-            formatted = (answers[questions[0].question] || "").trim();
-        } else {
-            formatted = questions
-                .map(q => {
-                    const label = q.header
-                        || (q.question && q.question.length > 50
-                            ? q.question.slice(0, 47) + "…"
-                            : q.question || "");
-                    const ans = (answers[q.question] || "").trim();
-                    return ans ? `${label}: ${ans}` : null;
-                })
-                .filter(Boolean)
-                .join("\n");
-        }
+        // claude resumes working as soon as it gets the answer — unfreeze the timer.
+        resumeLiveTimer();
 
-        if (!formatted) return;
-
-        // If claude is still mid-turn (typically generating the "selector didn't
-        // render" fallback text), we must wait for the stream to wind down
-        // before sending a new message — AskStreamingAsync isn't reentrant and
-        // a concurrent ReadLineAsync throws "stream in use". Cancel also drops
-        // further chunk callbacks, so the fallback noise stops appearing in chat.
-        if (isStreaming) {
-            try { window.chrome.webview.postMessage({ type: "cancel" }); } catch (e) {}
-            await waitForStreamEnd();
-        }
-
+        // Send the picks back as a control_response (agent forwards to
+        // claude.stdin via --permission-prompt-tool stdio). claude unblocks and
+        // emits the real tool_result, continuing the SAME turn — no cancel, no
+        // new user message, no concurrent-stream juggling.
         try {
-            textarea.value = formatted;
-            sendMessage();
+            window.chrome.webview.postMessage({
+                type: "ask-answer",
+                toolUseId: toolId,
+                answers: JSON.stringify(answers)
+            });
         } catch (e) {
-            console.warn("AskUserQuestion follow-up send failed:", e);
+            console.warn("AskUserQuestion answer send failed:", e);
         }
     }
-}
-
-// Resolves when `isStreaming` flips to false, or after maxMs (returns false on
-// timeout). Used by the AskUserQuestion submit flow to avoid concurrent reads
-// on the agent stream. 50ms poll is fast enough to feel snappy without burning
-// cycles.
-function waitForStreamEnd(maxMs = 30000) {
-    return new Promise(resolve => {
-        if (!isStreaming) return resolve(true);
-        const start = Date.now();
-        const interval = setInterval(() => {
-            if (!isStreaming) {
-                clearInterval(interval);
-                resolve(true);
-            } else if (Date.now() - start > maxMs) {
-                clearInterval(interval);
-                resolve(false);
-            }
-        }, 50);
-    });
 }
 
 let _loadingTimer = null;
@@ -2775,6 +2726,11 @@ function removeLoading() {
 
 let _liveTimerStart = 0;
 let _liveTimerInterval = null;
+// While an AskUserQuestion card awaits the user's pick, claude is blocked on our
+// control_response — the elapsed time shouldn't count as "working" time. Freeze
+// the timer between pause and resume and shift the start forward so the waited
+// span is excluded from the displayed elapsed.
+let _liveTimerPausedAt = 0;
 let _liveTokens = { in: 0, out: 0, cached: 0 };
 let _estimatedOutChars = 0;
 let _realOutTokens = 0;
@@ -2818,11 +2774,32 @@ function ensureLiveTimer() {
         const innerTimer = messages.querySelector(".loading .live-timer");
         if (innerTimer) innerTimer.style.display = "none";
     }
-    if (!_liveTimerInterval) {
+    // Don't restart the ticking interval while paused (awaiting a question answer).
+    if (!_liveTimerInterval && !_liveTimerPausedAt) {
         _liveTimerInterval = setInterval(renderLiveTimer, 100);
     }
     messages.appendChild(el);
     autoScroll();
+}
+
+// Freeze the live timer while an AskUserQuestion card is pending. No claude
+// events arrive during the wait (it's blocked on our reply), so simply stopping
+// the interval freezes the display at its last value.
+function pauseLiveTimer() {
+    if (_liveTimerPausedAt) return;
+    _liveTimerPausedAt = Date.now();
+    if (_liveTimerInterval) { clearInterval(_liveTimerInterval); _liveTimerInterval = null; }
+}
+
+// Resume after the user answers: push the start forward by the paused span so
+// the displayed elapsed continues from where it froze.
+function resumeLiveTimer() {
+    if (!_liveTimerPausedAt) return;
+    _liveTimerStart += Date.now() - _liveTimerPausedAt;
+    _liveTimerPausedAt = 0;
+    if (isStreaming && !_liveTimerInterval && messages.querySelector(".stream-timer")) {
+        _liveTimerInterval = setInterval(renderLiveTimer, 100);
+    }
 }
 
 function updateLiveTokens(text) {
@@ -2853,6 +2830,7 @@ function bumpEstimatedOut(chars) {
 
 function removeLiveTimer() {
     if (_liveTimerInterval) { clearInterval(_liveTimerInterval); _liveTimerInterval = null; }
+    _liveTimerPausedAt = 0;
     const el = messages.querySelector(".stream-timer");
     if (el) el.remove();
     _liveTokens = { in: 0, out: 0, cached: 0 };
