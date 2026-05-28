@@ -165,12 +165,33 @@ public class AgentClient
         await _writer.FlushAsync();
     }
 
-    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null)
+    // Reply to a diagnostics_request with the formatted VS Error List entries.
+    public async Task SendDiagnosticsResponseAsync(string requestId, string text)
+    {
+        if (_writer == null)
+        {
+            OutputLog.Warn($"diagnostics-response dropped — agent not running (id={requestId})");
+            return;
+        }
+
+        var request = new ChatRequest
+        {
+            Message = "",
+            DiagnosticsResponse = new DiagnosticsResponse { RequestId = requestId, Text = text ?? "" }
+        };
+        var json = JsonSerializer.Serialize(request);
+
+        OutputLog.Info($"diagnostics-response → id={requestId} chars={text?.Length ?? 0}");
+        await _writer.WriteLineAsync(json);
+        await _writer.FlushAsync();
+    }
+
+    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null)
     {
         await _streamingSemaphore.WaitAsync();
         try
         {
-            await AskStreamingCoreAsync(message, model, effort, permissionMode, onChunk, onTiming, onTokens, workingDirectory, autoResume, onSession, onTool, onPermissionRequest);
+            await AskStreamingCoreAsync(message, model, effort, permissionMode, onChunk, onTiming, onTokens, workingDirectory, autoResume, onSession, onTool, onPermissionRequest, onDiagnosticsRequest);
         }
         finally
         {
@@ -178,7 +199,7 @@ public class AgentClient
         }
     }
 
-    private async Task AskStreamingCoreAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null)
+    private async Task AskStreamingCoreAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null)
     {
         var resumeId = PendingResumeSessionId;
         PendingResumeSessionId = null;
@@ -282,6 +303,13 @@ public class AgentClient
                 OutputLog.Info($"permission_request: {chunk.Tool ?? "-"} id={chunk.ToolId ?? "-"} cwd={chunk.Cwd ?? "-"}");
                 onPermissionRequest?.Invoke(chunk.Tool ?? "", chunk.ToolInput, chunk.ToolId ?? "", chunk.Cwd);
             }
+
+            if (chunk.Type == "diagnostics_request")
+            {
+                // Text carries the file path, ToolId the correlation id.
+                OutputLog.Info($"diagnostics_request: file={chunk.Text} id={chunk.ToolId ?? "-"}");
+                onDiagnosticsRequest?.Invoke(chunk.Text ?? "", chunk.ToolId ?? "");
+            }
         }
 
         _cancelTcs = null;
@@ -309,6 +337,17 @@ public class AgentClient
         if (proc == null) return;
         _process = null; // claim it — subsequent callers see null and bail out
 
+        // Claim the streams too, atomically with _process. Killing the agent can
+        // take seconds (WaitForExit timeout), during which a `clear` may already
+        // have called StartAsync and set _writer/_reader to the NEW agent. If we
+        // disposed/nulled the live fields in the delayed finally we'd clobber the
+        // new agent's streams (→ NullRef in the in-flight read loop). Operate only
+        // on these locals so a concurrent StartAsync's fresh fields are untouched.
+        var writer = _writer;
+        var reader = _reader;
+        _writer = null;
+        _reader = null;
+
         var pid = proc.Id;
         OutputLog.Info($"stopping agent (pid {pid})");
 
@@ -316,7 +355,7 @@ public class AgentClient
         {
             if (!proc.HasExited)
             {
-                _writer?.Close();
+                writer?.Close();
 
                 var exited = await Task.Run(() =>
                     proc.WaitForExit(2000));
@@ -331,12 +370,9 @@ public class AgentClient
         }
         finally
         {
-            _reader?.Dispose();
-            _writer?.Dispose();
+            reader?.Dispose();
+            writer?.Dispose();
             proc.Dispose();
-
-            _reader = null;
-            _writer = null;
             OutputLog.Info($"agent (pid {pid}) stopped");
         }
     }

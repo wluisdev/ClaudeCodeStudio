@@ -18,6 +18,11 @@ public class ChatRequest
     // channel), which becomes the tool's real tool_result.
     public AskAnswer? AskAnswer { get; set; }
 
+    // Reply to a diagnostics_request: the formatted VS Error List entries for the
+    // edited file, which the agent forwards back to the blocked PostToolUse hook
+    // (it surfaces them to claude as additionalContext).
+    public DiagnosticsResponse? DiagnosticsResponse { get; set; }
+
     // Hard cancel: dispose the current claude.exe session so SendMessageAsync's
     // read loop unblocks and emits `done`. Without this, the extension's read
     // loop stays pending on ReadLineAsync forever (claude keeps streaming),
@@ -44,6 +49,14 @@ public class PermissionResponse
     // When set, adds the tool name to the agent's session allowlist so future
     // calls of this same tool auto-approve without prompting the UI.
     public string? AllowSession { get; set; }
+}
+
+public class DiagnosticsResponse
+{
+    // Correlates with the diagnostics_request (we reuse the tool_use_id).
+    public string RequestId { get; set; } = "";
+    // Formatted diagnostics block, or empty when the file has no errors/warnings.
+    public string Text { get; set; } = "";
 }
 
 public class AskAnswer

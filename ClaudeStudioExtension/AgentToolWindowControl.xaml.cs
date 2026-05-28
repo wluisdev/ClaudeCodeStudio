@@ -1246,7 +1246,8 @@ public partial class AgentToolWindowControl : UserControl
                         JsonSerializer.Serialize(new { type = kind, name, input, text, id }))),
                 onPermissionRequest: (tool, input, id, cwd) => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = "permission_request", tool, input, id, cwd }))));
+                        JsonSerializer.Serialize(new { type = "permission_request", tool, input, id, cwd }))),
+                onDiagnosticsRequest: (filePath, requestId) => _ = HandleDiagnosticsRequestAsync(filePath, requestId));
 
             VsStatusBar.Clear();
 
@@ -2397,6 +2398,27 @@ public partial class AgentToolWindowControl : UserControl
         catch (Exception ex)
         {
             return (null, ex.Message);
+        }
+    }
+
+    // Handles a diagnostics_request from the agent's PostToolUse hook: give VS a
+    // moment to re-analyze the just-edited file, read its Error List entries, and
+    // send them back so the (blocked) hook can surface them to claude. Never
+    // throws — on any failure the agent's hook times out and just adds no context.
+    private async Task HandleDiagnosticsRequestAsync(string filePath, string requestId)
+    {
+        try
+        {
+            // The edit just hit disk; the language service needs a beat to refresh
+            // the Error List. Stay well under the agent's 8s hook timeout.
+            await Task.Delay(900);
+            var text = await Diagnostics.ErrorListReader.ReadForFileAsync(filePath);
+            await _agentClient.SendDiagnosticsResponseAsync(requestId, text);
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"diagnostics request handling failed: {ex.Message}");
+            try { await _agentClient.SendDiagnosticsResponseAsync(requestId, ""); } catch { }
         }
     }
 

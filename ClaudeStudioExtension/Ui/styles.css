@@ -1878,6 +1878,34 @@ html.light-theme .permission-item.active {
     position: relative;
 }
 
+/* Inline marker dropped into the transcript when the model changes: a centered
+   label flanked by hairlines, so it reads as "everything above used the prior
+   model, everything below uses this one". Deliberately muted — it's a waypoint,
+   not a message. */
+.model-divider {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 2px;
+    color: #888;
+    font-size: 11px;
+    user-select: none;
+}
+.model-divider::before,
+.model-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: #3a3a3a;
+}
+.model-divider-label {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    letter-spacing: 0.2px;
+}
+html.light-theme .model-divider::before,
+html.light-theme .model-divider::after { background: #d8d8d8; }
+
 .msg-branch {
     position: absolute;
     top: -8px;

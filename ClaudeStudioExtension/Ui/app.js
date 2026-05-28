@@ -338,6 +338,10 @@ const textarea = document.querySelector("textarea");
 const sendButton = null; // replaced by btnSend with streaming toggle
 const newChatButton = document.querySelector(".new-chat");
 const modelSelect = document.querySelector(".model-select");
+// Tracks which model is currently in effect, so noteModelSwitch() can tell a
+// real change from a no-op and drop a divider in the transcript at the point
+// the model changed. Seeded with the initial selection (no divider at startup).
+let activeModelId = modelSelect.value;
 
 // ── Trust MCP servers modal ────────────────────────────────
 let _mcpTrustPending = [];  // [{name, scope, transport, summary, hash}]
@@ -743,6 +747,38 @@ function updateCaption() {
 modelSelect.addEventListener("change", updateCaption);
 window.addEventListener("DOMContentLoaded", updateCaption);
 updateCaption();
+
+// Drops a marker into the transcript when the model changes, so it's clear
+// which model produced the messages above vs below the line. No-op when nothing
+// actually changed, or before the conversation has started (a divider above an
+// empty chat is just noise). Consecutive switches with no message in between
+// collapse into one divider that's updated in place.
+function noteModelSwitch() {
+    const newId = modelSelect.value;
+    if (newId === activeModelId) return;
+    activeModelId = newId;
+
+    // Nothing above the line to attribute to the old model yet — skip.
+    if (!messages.querySelector(".message")) return;
+
+    const label = modelSelect.options[modelSelect.selectedIndex]?.text || newId;
+    const text = `🤖 Switched to ${label}`;
+
+    const last = messages.lastElementChild;
+    if (last && last.classList.contains("model-divider")) {
+        last.querySelector(".model-divider-label").textContent = text;
+        autoScroll();
+        return;
+    }
+
+    const div = document.createElement("div");
+    div.className = "model-divider";
+    div.innerHTML = `<span class="model-divider-label"></span>`;
+    div.querySelector(".model-divider-label").textContent = text;
+    messages.appendChild(div);
+    autoScroll();
+}
+modelSelect.addEventListener("change", noteModelSwitch);
 // Effort selector: compact button in the composer-actions row that opens a
 // popup with a slider above it. Avoids the native <select> dropdown direction
 // flipping (5 options need ~120px vertical and the composer sits at the
@@ -1158,6 +1194,9 @@ function selectModel(id, card) {
     card.innerHTML = `<div class="question-text">🤖 Model: <strong>${escapeHtml(label)}</strong></div>`;
     card.classList.add("question-answered");
     updateCaption();
+    // Setting .value programmatically doesn't fire the change event, so the
+    // transcript marker has to be triggered explicitly here.
+    noteModelSwitch();
 }
 
 // ── Drag & drop ───────────────────────────────────────────────

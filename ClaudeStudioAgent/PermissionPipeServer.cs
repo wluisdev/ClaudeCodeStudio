@@ -13,8 +13,13 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
 
     public string PipeName { get; }
 
+    // Diagnostics requests time out faster than permission — they're a courtesy,
+    // never worth stalling the turn for long.
+    private static readonly TimeSpan DiagnosticsTimeout = TimeSpan.FromSeconds(8);
+
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<Decision>> _pending = new();
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<string>> _pendingDiag = new();
     private readonly HashSet<string> _sessionAllowed = new();
     private readonly object _sessionAllowedLock = new();
     private Task? _acceptLoop;
@@ -33,6 +38,13 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
     {
         if (_pending.TryGetValue(toolUseId, out var tcs))
             return tcs.TrySetResult(new Decision(allow, reason));
+        return false;
+    }
+
+    public bool RespondDiagnostics(string requestId, string text)
+    {
+        if (_pendingDiag.TryGetValue(requestId, out var tcs))
+            return tcs.TrySetResult(text ?? "");
         return false;
     }
 
@@ -91,6 +103,13 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
             catch (Exception ex)
             {
                 EmitError($"pipe: failed to parse request: {ex.Message}");
+                return;
+            }
+
+            var reqType = req.TryGetProperty("type", out var rt) ? rt.GetString() : "perm_request";
+            if (reqType == "diag_request")
+            {
+                await HandleDiagRequestAsync(pipe, req, ct);
                 return;
             }
 
@@ -173,6 +192,45 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
         }
     }
 
+    private async Task HandleDiagRequestAsync(NamedPipeServerStream pipe, JsonElement req, CancellationToken ct)
+    {
+        string? requestId = req.TryGetProperty("request_id", out var ri) ? ri.GetString() : null;
+        var filePath = req.TryGetProperty("file_path", out var fp) ? fp.GetString() : null;
+        var text = "";
+
+        if (!string.IsNullOrEmpty(requestId) && !string.IsNullOrEmpty(filePath))
+        {
+            var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (_pendingDiag.TryAdd(requestId!, tcs))
+            {
+                try
+                {
+                    // Ask the extension to read the VS Error List for this file.
+                    EmitChunk(new ChatChunk
+                    {
+                        Type = "diagnostics_request",
+                        ToolId = requestId,
+                        Text = filePath
+                    });
+
+                    var completed = await Task.WhenAny(tcs.Task, Task.Delay(DiagnosticsTimeout, ct));
+                    if (completed == tcs.Task) text = await tcs.Task;
+                }
+                catch (OperationCanceledException) { }
+                finally { _pendingDiag.TryRemove(requestId!, out _); }
+            }
+        }
+
+        var responseObj = new { type = "diag_response", request_id = requestId, text };
+        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(responseObj) + "\n");
+        try
+        {
+            await pipe.WriteAsync(bytes, ct);
+            await pipe.FlushAsync(ct);
+        }
+        catch (OperationCanceledException) { }
+    }
+
     private static void EmitChunk(ChatChunk chunk)
     {
         Console.WriteLine(JsonSerializer.Serialize(chunk));
@@ -191,6 +249,9 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
         foreach (var kvp in _pending)
             kvp.Value.TrySetCanceled();
         _pending.Clear();
+        foreach (var kvp in _pendingDiag)
+            kvp.Value.TrySetResult("");
+        _pendingDiag.Clear();
         if (_acceptLoop != null)
         {
             try { await _acceptLoop.WaitAsync(TimeSpan.FromSeconds(2)); } catch { }

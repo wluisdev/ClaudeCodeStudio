@@ -14,6 +14,13 @@ if (args.Length >= 2 && args[0] == "--hook")
     return await HookMode.RunAsync(args[1]);
 }
 
+// PostToolUse hook: queries the extension for the edited file's diagnostics and
+// surfaces them to claude. Also a one-shot subprocess, never the request loop.
+if (args.Length >= 2 && args[0] == "--hook-post")
+{
+    return await HookMode.RunPostAsync(args[1]);
+}
+
 // Phase 2 (gated): when enabled, the agent stands up a named pipe server that
 // hook helper processes connect to in order to broker permission prompts.
 PermissionPipeServer? pipeServer = null;
@@ -106,6 +113,18 @@ var stdinReader = Task.Run(async () =>
                 continue;
             }
 
+            if (request.DiagnosticsResponse != null)
+            {
+                if (pipeServer == null)
+                {
+                    EmitError("diagnostics response received but hook server is disabled");
+                    continue;
+                }
+                var dr = request.DiagnosticsResponse;
+                pipeServer.RespondDiagnostics(dr.RequestId, dr.Text);
+                continue;
+            }
+
             if (request.AskAnswer != null)
             {
                 // AskUserQuestion answer → write control_response to claude.stdin.
@@ -167,7 +186,11 @@ try
         }
 
         var wantKey = ClaudeSession.MakeKey(request);
-        if (session == null || session.Key != wantKey)
+        // !IsAlive covers the post-cancel case: the session object lingers
+        // (disposed) because SendMessageAsync returned via stdout EOF instead of
+        // throwing, so the catch below never nulled it. Respawn instead of
+        // sending into a dead process (which would throw "session not started").
+        if (session == null || session.Key != wantKey || !session.IsAlive)
         {
             if (session != null) await session.DisposeAsync();
             session = new ClaudeSession(request, pipeServer?.PipeName);
@@ -256,6 +279,13 @@ sealed class ClaudeSession : IAsyncDisposable
     private string? _settingsTempDir;
     public string? SessionId { get; private set; }
     public string Key { get; }
+
+    // True only while the underlying claude.exe is started and running. A hard
+    // cancel (CancelTurn) disposes the session out-of-band, after which claude's
+    // stdout EOF makes SendMessageAsync return normally (no exception) — so the
+    // main loop can't rely on a catch to drop the dead session. The reuse check
+    // consults this instead and respawns when false.
+    public bool IsAlive => _proc != null && !_proc.HasExited && _stdin != null && _stdout != null;
 
     public ClaudeSession(ChatRequest request, string? pipeName)
     {
@@ -831,6 +861,24 @@ sealed class ClaudeSession : IAsyncDisposable
                             {
                                 type = "command",
                                 command = $"\"{agentPathFwd}\" --hook {_pipeName}"
+                            }
+                        }
+                    }
+                },
+                // After a file edit, pull the VS Error List for that file and feed
+                // any errors/warnings back to claude as additionalContext so it can
+                // self-correct. Informational only — the hook never blocks.
+                PostToolUse = new[]
+                {
+                    new
+                    {
+                        matcher = "Edit|Write|MultiEdit|NotebookEdit",
+                        hooks = new[]
+                        {
+                            new
+                            {
+                                type = "command",
+                                command = $"\"{agentPathFwd}\" --hook-post {_pipeName}"
                             }
                         }
                     }

@@ -8,11 +8,21 @@ internal static class HookMode
 {
     private const int PipeConnectTimeoutMs = 5000;
 
+    // claude writes the hook payload to our stdin as UTF-8. Console.In would
+    // decode it with the console's OEM code page (CP850/437 on pt-BR Windows),
+    // mangling accents (e.g. "execução" → "execu├º├úo") which then surface in
+    // the permission popup. Read the raw stream as UTF-8 instead.
+    private static async Task<string> ReadStdinUtf8Async()
+    {
+        using var stdin = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
+        return await stdin.ReadToEndAsync();
+    }
+
     public static async Task<int> RunAsync(string pipeName)
     {
         try
         {
-            var payload = await Console.In.ReadToEndAsync();
+            var payload = await ReadStdinUtf8Async();
             if (string.IsNullOrWhiteSpace(payload))
             {
                 Console.Error.WriteLine("hook: empty stdin payload");
@@ -102,6 +112,79 @@ internal static class HookMode
         {
             Console.Error.WriteLine($"hook: unexpected error: {ex.Message}");
             return 2;
+        }
+    }
+
+    // PostToolUse hook (Edit/Write/MultiEdit). Asks the agent (→ extension) for
+    // the VS Error List entries of the edited file and surfaces them to claude
+    // via hookSpecificOutput.additionalContext. Always exits 0 — diagnostics are
+    // informational, never blocking. A failure just means no extra context.
+    public static async Task<int> RunPostAsync(string pipeName)
+    {
+        try
+        {
+            var payload = await ReadStdinUtf8Async();
+            if (string.IsNullOrWhiteSpace(payload)) return 0;
+
+            JsonElement hook;
+            try { hook = JsonSerializer.Deserialize<JsonElement>(payload); }
+            catch { return 0; }
+
+            string? toolUseId = hook.TryGetProperty("tool_use_id", out var tid) ? tid.GetString() : null;
+            string? filePath = null;
+            if (hook.TryGetProperty("tool_input", out var ti) && ti.ValueKind == JsonValueKind.Object
+                && ti.TryGetProperty("file_path", out var fp))
+                filePath = fp.GetString();
+
+            if (string.IsNullOrEmpty(toolUseId) || string.IsNullOrEmpty(filePath))
+                return 0; // nothing to query
+
+            await using var pipe = new NamedPipeClientStream(
+                ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            try { await pipe.ConnectAsync(PipeConnectTimeoutMs); }
+            catch { return 0; }
+
+            var request = new
+            {
+                type = "diag_request",
+                request_id = toolUseId,
+                file_path = filePath,
+                hook_pid = Environment.ProcessId
+            };
+            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request) + "\n");
+            await pipe.WriteAsync(bytes);
+            await pipe.FlushAsync();
+
+            using var reader = new StreamReader(pipe, new UTF8Encoding(false), false, 4096, leaveOpen: true);
+            var responseLine = await reader.ReadLineAsync();
+            if (string.IsNullOrWhiteSpace(responseLine)) return 0;
+
+            JsonElement response;
+            try { response = JsonSerializer.Deserialize<JsonElement>(responseLine); }
+            catch { return 0; }
+
+            var diagText = response.TryGetProperty("text", out var txt) ? txt.GetString() : null;
+            if (string.IsNullOrWhiteSpace(diagText)) return 0; // no problems → no context
+
+            var output = new
+            {
+                hookSpecificOutput = new
+                {
+                    hookEventName = "PostToolUse",
+                    additionalContext = diagText
+                }
+            };
+            // Write UTF-8 explicitly: additionalContext carries the VS Error List
+            // text, whose messages are localized (pt-BR errors have accents). The
+            // OEM-codepage default would garble them on the way back to claude.
+            await using (var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true })
+                await stdout.WriteLineAsync(JsonSerializer.Serialize(output));
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"hook-post: {ex.Message}");
+            return 0;
         }
     }
 }
