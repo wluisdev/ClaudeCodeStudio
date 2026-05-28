@@ -2620,6 +2620,123 @@ html.light-theme .trusted-workspace-row:hover { background: rgba(0, 0, 0, 0.04);
 html.light-theme .trusted-workspace-remove { color: #888; }
 html.light-theme .trusted-workspace-remove:hover { color: #c04030; background: rgba(192, 64, 48, 0.1); }
 
+/* ── AskUserQuestion card ──────────────────────────────────── */
+.ask-question-card {
+    /* extends .question-card layout */
+}
+
+.ask-question-row {
+    margin-bottom: 14px;
+}
+
+.ask-question-row:last-of-type {
+    margin-bottom: 4px;
+}
+
+.ask-question-header {
+    display: inline-block;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #cba98c;
+    background: rgba(203, 169, 140, 0.12);
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-bottom: 6px;
+}
+
+.ask-question-text {
+    font-size: 13px;
+    color: #ddd;
+    margin-bottom: 8px;
+    line-height: 1.4;
+}
+
+.ask-question-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.ask-question-btn.selected {
+    background: rgba(203, 169, 140, 0.22);
+    border-color: #cba98c;
+    color: #f0d9c5;
+}
+
+.ask-question-checkboxes {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.ask-question-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #ccc;
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+.ask-question-check:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.ask-question-check input[type=checkbox] {
+    margin: 0;
+    cursor: pointer;
+}
+
+.ask-question-other {
+    width: 100%;
+    margin-top: 4px;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #ccc;
+    padding: 5px 8px;
+    font-size: 12px;
+    outline: none;
+    box-sizing: border-box;
+    font-family: inherit;
+}
+
+.ask-question-other:focus {
+    border-color: var(--accent, #cba98c);
+}
+
+.ask-question-other::placeholder {
+    color: #666;
+    font-style: italic;
+}
+
+.ask-question-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 10px;
+}
+
+.ask-question-card.ask-question-answered {
+    opacity: 0.65;
+}
+
+.ask-question-card.ask-question-answered .ask-question-btn.selected {
+    opacity: 1;
+}
+
+html.light-theme .ask-question-header { color: #8a4a10; background: rgba(138, 74, 16, 0.1); }
+html.light-theme .ask-question-text { color: #333; }
+html.light-theme .ask-question-check { color: #444; }
+html.light-theme .ask-question-check:hover { background: rgba(0, 0, 0, 0.04); }
+html.light-theme .ask-question-other { background: #fff; border-color: #bbb; color: #333; }
+html.light-theme .ask-question-other::placeholder { color: #999; }
+html.light-theme .ask-question-btn.selected { color: #5a3210; background: rgba(216, 135, 99, 0.18); border-color: #c87a55; }
+
 /* ── History delete button ─────────────────────────────────── */
 .history-item {
     display: flex;

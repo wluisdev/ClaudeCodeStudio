@@ -1210,6 +1210,10 @@ textarea.addEventListener("paste", e => {
 
 function sendMessage() {
     _userScrolledUp = false;
+    // Any new user-initiated turn clears the AskUserQuestion suppression flag —
+    // otherwise the flag stays true forever after the first AskUserQuestion and
+    // silently drops every subsequent claude text response.
+    _suppressFallbackText = false;
     const text = textarea.value.trim();
     pushPromptHistory(text);
     historyIndex = -1;
@@ -2116,6 +2120,11 @@ function finalizeBubbleStream(bubble) {
 }
 
 function appendChunk(text) {
+    // Drop claude's fallback prose that always follows AskUserQuestion in
+    // stream-json mode ("the selector didn't render, please type..."). The
+    // card already provides the UI. Flag clears on the next user-initiated
+    // send (sendMessage resets it).
+    if (_suppressFallbackText) return;
     removeLoading();
     const bubble = ensureStreamBubble();
     const seg = getActiveTextSeg(bubble);
@@ -2145,6 +2154,12 @@ function summarizeToolInput(name, inputJson) {
 // ---- diff viewer state ----
 const DIFF_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
 const toolInputData = new Map();      // toolId → parsed input object
+const askUserQuestionIds = new Set(); // toolIds of AskUserQuestion calls whose auto-error should be ignored
+// After claude's CLI auto-errors AskUserQuestion in stream-json mode, it
+// continues the turn with fallback text ("the selector didn't render, please
+// type your answer..."). That text is noise in our UI because the card IS
+// rendered — suppress it until the next user-initiated turn.
+let _suppressFallbackText = false;
 const gitBaselineCache = new Map();   // filePath → { content|null, error|null }
 const pendingGitBaselineRequests = new Map(); // requestId → resolve()
 const PREVIEW_MAX_LINES = 30;
@@ -2356,6 +2371,38 @@ function appendToolEvent(kind, name, inputJson, text, id) {
     removeLoading();
     const bubble = ensureStreamBubble();
 
+    // AskUserQuestion is a meta tool whose entire purpose is interactive UI.
+    // Render a question card with selectable options + write-in; the user's
+    // pick is forwarded as a regular user message (claude.exe auto-errors the
+    // tool in stream-json mode, so tool_result via stdin doesn't work).
+    if (kind === "tool_use" && name === "AskUserQuestion" && id && inputJson) {
+        // Dedupe: JSONL watcher may re-emit the same tool_use after stream-json
+        if (bubble.querySelector(`.ask-question-card[data-tool-id="${CSS.escape(id)}"]`)) {
+            autoScroll();
+            return;
+        }
+        try {
+            renderAskUserQuestionCard(bubble, id, inputJson);
+            askUserQuestionIds.add(id);  // suppress the auto-error that follows
+            _suppressFallbackText = true; // suppress claude's "selector didn't render" noise
+            if (isStreaming) ensureLiveTimer();
+            autoScroll();
+            return;
+        } catch (err) {
+            console.warn("AskUserQuestion render failed, falling back to chip:", err);
+            // fall through to generic tool_chip path below
+        }
+    }
+
+    // claude.exe emits a tool_error (~1ms after the tool_use) for every
+    // AskUserQuestion in stream-json mode. Without this guard the generic
+    // tool_result/tool_error branch below falls back to "last chip" when it
+    // can't find a chip with the matching id, and falsely marks an unrelated
+    // chip as errored.
+    if ((kind === "tool_error" || kind === "tool_result") && id && askUserQuestionIds.has(id)) {
+        return;
+    }
+
     if (kind === "tool_use") {
         // Dedupe by id — JSONL watcher may emit the same tool_use after stream-json already did
         if (id) {
@@ -2479,6 +2526,223 @@ function appendToolEvent(kind, name, inputJson, text, id) {
     }
     if (isStreaming) ensureLiveTimer();
     autoScroll();
+}
+
+function renderAskUserQuestionCard(bubble, toolId, inputJson) {
+    const input = JSON.parse(inputJson || "{}");
+    const questions = Array.isArray(input.questions) ? input.questions : [];
+    if (questions.length === 0) throw new Error("no questions in payload");
+
+    finalizeActiveSeg(bubble);
+
+    const card = document.createElement("div");
+    card.className = "question-card ask-question-card";
+    card.dataset.toolId = toolId;
+
+    const answers = {};
+    // Multi-select answers are tracked as arrays internally so we can join
+    // them in the final payload (claude harness expects a single string per q).
+    const multiSelectMap = {};
+
+    const needsConfirm = questions.length > 1 || questions.some(q => q && q.multiSelect);
+
+    questions.forEach((q, qIdx) => {
+        const row = document.createElement("div");
+        row.className = "ask-question-row";
+
+        if (q.header) {
+            const header = document.createElement("div");
+            header.className = "ask-question-header";
+            header.textContent = q.header;
+            row.appendChild(header);
+        }
+
+        const text = document.createElement("div");
+        text.className = "ask-question-text";
+        text.textContent = q.question || "";
+        row.appendChild(text);
+
+        const opts = document.createElement("div");
+        opts.className = q.multiSelect ? "ask-question-checkboxes" : "ask-question-options";
+        const options = Array.isArray(q.options) ? q.options : [];
+
+        options.forEach(opt => {
+            if (!opt || !opt.label) return;
+            const titleParts = [];
+            if (opt.description) titleParts.push(opt.description);
+            if (opt.preview) titleParts.push(opt.preview);
+            const tooltip = titleParts.join("\n\n");
+
+            if (q.multiSelect) {
+                multiSelectMap[q.question] = multiSelectMap[q.question] || new Set();
+                const lbl = document.createElement("label");
+                lbl.className = "ask-question-check";
+                if (tooltip) lbl.title = tooltip;
+                const cb = document.createElement("input");
+                cb.type = "checkbox";
+                cb.value = opt.label;
+                cb.onchange = () => {
+                    const set = multiSelectMap[q.question];
+                    if (cb.checked) set.add(opt.label); else set.delete(opt.label);
+                    answers[q.question] = Array.from(set).join(", ");
+                    if (set.size === 0) delete answers[q.question];
+                    // Multi-select clears any write-in for this row
+                    const wi = row.querySelector(".ask-question-other");
+                    if (wi) wi.value = "";
+                    updateConfirmState();
+                };
+                lbl.appendChild(cb);
+                const span = document.createElement("span");
+                span.textContent = opt.label;
+                lbl.appendChild(span);
+                opts.appendChild(lbl);
+            } else {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "q-btn ask-question-btn";
+                btn.textContent = opt.label;
+                if (tooltip) btn.title = tooltip;
+                btn.onclick = () => {
+                    opts.querySelectorAll(".ask-question-btn").forEach(b => b.classList.remove("selected"));
+                    btn.classList.add("selected");
+                    answers[q.question] = opt.label;
+                    const wi = row.querySelector(".ask-question-other");
+                    if (wi) wi.value = "";
+                    maybeAutoSubmit();
+                };
+                opts.appendChild(btn);
+            }
+        });
+
+        row.appendChild(opts);
+
+        const otherInput = document.createElement("input");
+        otherInput.type = "text";
+        otherInput.className = "ask-question-other";
+        otherInput.placeholder = "Other — type your own answer…";
+        otherInput.oninput = () => {
+            const val = otherInput.value.trim();
+            if (val) {
+                // Write-in overrides any clicked option for this row
+                opts.querySelectorAll(".ask-question-btn").forEach(b => b.classList.remove("selected"));
+                if (q.multiSelect) {
+                    opts.querySelectorAll("input[type=checkbox]").forEach(c => c.checked = false);
+                    multiSelectMap[q.question]?.clear();
+                }
+                answers[q.question] = val;
+            } else {
+                delete answers[q.question];
+            }
+            updateConfirmState();
+        };
+        otherInput.onkeydown = e => {
+            if (e.key === "Enter" && otherInput.value.trim()) {
+                e.preventDefault();
+                maybeAutoSubmit();
+            }
+        };
+        row.appendChild(otherInput);
+
+        card.appendChild(row);
+    });
+
+    const footer = document.createElement("div");
+    footer.className = "ask-question-footer";
+
+    let confirmBtn = null;
+    if (needsConfirm) {
+        confirmBtn = document.createElement("button");
+        confirmBtn.type = "button";
+        confirmBtn.className = "q-btn q-yes ask-question-confirm";
+        confirmBtn.textContent = "Submit";
+        confirmBtn.disabled = true;
+        confirmBtn.onclick = submitAnswers;
+        footer.appendChild(confirmBtn);
+    }
+    card.appendChild(footer);
+
+    bubble.appendChild(card);
+
+    function updateConfirmState() {
+        if (!confirmBtn) return;
+        const allAnswered = questions.every(q => {
+            const v = answers[q.question];
+            return v && String(v).trim().length > 0;
+        });
+        confirmBtn.disabled = !allAnswered;
+    }
+
+    function maybeAutoSubmit() {
+        if (!needsConfirm) submitAnswers();
+        else updateConfirmState();
+    }
+
+    async function submitAnswers() {
+        if (card.classList.contains("ask-question-answered")) return;
+        card.classList.add("ask-question-answered");
+        card.querySelectorAll("button, input").forEach(el => el.disabled = true);
+
+        // claude.exe in stream-json mode auto-errors AskUserQuestion within ~1ms
+        // (no interactive terminal), so a late tool_result is stale — the turn
+        // has already ended with claude's text fallback ("please type your
+        // answer"). Instead, forward the picked option(s) as a regular user
+        // message — starts a new turn, claude sees it in context and responds.
+        let formatted;
+        if (questions.length === 1) {
+            formatted = (answers[questions[0].question] || "").trim();
+        } else {
+            formatted = questions
+                .map(q => {
+                    const label = q.header
+                        || (q.question && q.question.length > 50
+                            ? q.question.slice(0, 47) + "…"
+                            : q.question || "");
+                    const ans = (answers[q.question] || "").trim();
+                    return ans ? `${label}: ${ans}` : null;
+                })
+                .filter(Boolean)
+                .join("\n");
+        }
+
+        if (!formatted) return;
+
+        // If claude is still mid-turn (typically generating the "selector didn't
+        // render" fallback text), we must wait for the stream to wind down
+        // before sending a new message — AskStreamingAsync isn't reentrant and
+        // a concurrent ReadLineAsync throws "stream in use". Cancel also drops
+        // further chunk callbacks, so the fallback noise stops appearing in chat.
+        if (isStreaming) {
+            try { window.chrome.webview.postMessage({ type: "cancel" }); } catch (e) {}
+            await waitForStreamEnd();
+        }
+
+        try {
+            textarea.value = formatted;
+            sendMessage();
+        } catch (e) {
+            console.warn("AskUserQuestion follow-up send failed:", e);
+        }
+    }
+}
+
+// Resolves when `isStreaming` flips to false, or after maxMs (returns false on
+// timeout). Used by the AskUserQuestion submit flow to avoid concurrent reads
+// on the agent stream. 50ms poll is fast enough to feel snappy without burning
+// cycles.
+function waitForStreamEnd(maxMs = 30000) {
+    return new Promise(resolve => {
+        if (!isStreaming) return resolve(true);
+        const start = Date.now();
+        const interval = setInterval(() => {
+            if (!isStreaming) {
+                clearInterval(interval);
+                resolve(true);
+            } else if (Date.now() - start > maxMs) {
+                clearInterval(interval);
+                resolve(false);
+            }
+        }, 50);
+    });
 }
 
 let _loadingTimer = null;

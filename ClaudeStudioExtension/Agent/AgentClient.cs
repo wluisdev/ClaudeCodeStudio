@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using ClaudeStudioShared;
 
@@ -18,6 +19,15 @@ public class AgentClient
 
     private TaskCompletionSource<bool>? _cancelTcs;
 
+    // Serializes AskStreamingAsync calls. The StreamReader owned by this client
+    // can't have two concurrent ReadLineAsync — if a new request arrives before
+    // the previous turn's read loop has exited (e.g. user clicked cancel and
+    // immediately typed a new question), the second call throws "stream in use".
+    // The semaphore makes the new call wait for the old one to wind down
+    // naturally (cancel triggers a hard cancel on the agent → done → loop exits
+    // → semaphore released).
+    private readonly SemaphoreSlim _streamingSemaphore = new(1, 1);
+
     private readonly JsonlWatcher _jsonlWatcher = new();
 
     public string? PendingResumeSessionId { get; set; }
@@ -27,6 +37,24 @@ public class AgentClient
     {
         OutputLog.Info("request cancel requested");
         _cancelTcs?.TrySetResult(true);
+        // Hard cancel on the agent side so the read loop unblocks and the next
+        // request can start without "stream in use" errors. Fire-and-forget —
+        // we don't want to block the UI thread; the agent's response will
+        // arrive via the existing read loop and emit `done`.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (_writer == null) return;
+                var json = JsonSerializer.Serialize(new ChatRequest { Message = "", CancelTurn = true });
+                await _writer.WriteLineAsync(json);
+                await _writer.FlushAsync();
+            }
+            catch (Exception ex)
+            {
+                OutputLog.Warn($"cancel-turn write failed: {ex.Message}");
+            }
+        });
     }
 
     public async Task StartAsync()
@@ -111,6 +139,19 @@ public class AgentClient
     }
 
     public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null)
+    {
+        await _streamingSemaphore.WaitAsync();
+        try
+        {
+            await AskStreamingCoreAsync(message, model, effort, permissionMode, onChunk, onTiming, onTokens, workingDirectory, autoResume, onSession, onTool, onPermissionRequest);
+        }
+        finally
+        {
+            _streamingSemaphore.Release();
+        }
+    }
+
+    private async Task AskStreamingCoreAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null)
     {
         var resumeId = PendingResumeSessionId;
         PendingResumeSessionId = null;

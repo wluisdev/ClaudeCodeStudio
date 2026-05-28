@@ -11,6 +11,12 @@ public class ChatRequest
     public string? WorkingDirectory { get; set; }
     public bool AutoResume { get; set; }
     public PermissionResponse? PermissionResponse { get; set; }
+
+    // Hard cancel: dispose the current claude.exe session so SendMessageAsync's
+    // read loop unblocks and emits `done`. Without this, the extension's read
+    // loop stays pending on ReadLineAsync forever (claude keeps streaming),
+    // and the next AskStreamingAsync call hits "stream in use" exception.
+    public bool CancelTurn { get; set; }
 }
 
 public class ChatChunk

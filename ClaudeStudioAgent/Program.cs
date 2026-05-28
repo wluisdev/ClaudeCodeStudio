@@ -104,6 +104,21 @@ var stdinReader = Task.Run(async () =>
                 continue;
             }
 
+            if (request.CancelTurn)
+            {
+                // Hard cancel: dispose the active session so SendMessageAsync's
+                // read loop in the main loop sees ObjectDisposedException, the
+                // catch block then EmitDone()s — extension's reader is freed
+                // and ready for the next request. Setting session = null is
+                // done by that catch block (we can't touch the local var here).
+                if (session != null)
+                {
+                    try { await session.DisposeAsync(); }
+                    catch (Exception ex) { EmitError($"cancel dispose failed: {ex.Message}"); }
+                }
+                continue;
+            }
+
             await requestChannel.Writer.WriteAsync(request);
         }
     }
@@ -212,6 +227,8 @@ sealed class ClaudeSession : IAsyncDisposable
 
     private Process? _proc;
     private StreamWriter? _stdin;
+    // Serializes writes to claude.stdin so partial NDJSON lines can't interleave.
+    private readonly SemaphoreSlim _stdinLock = new(1, 1);
     private StreamReader? _stdout;
     private readonly StringBuilder _stderrBuffer = new();
     private Task? _stderrPump;
@@ -384,8 +401,13 @@ sealed class ClaudeSession : IAsyncDisposable
         };
         var ndjson = JsonSerializer.Serialize(userMsg);
 
-        await _stdin.WriteLineAsync(ndjson);
-        await _stdin.FlushAsync();
+        await _stdinLock.WaitAsync();
+        try
+        {
+            await _stdin.WriteLineAsync(ndjson);
+            await _stdin.FlushAsync();
+        }
+        finally { _stdinLock.Release(); }
 
         EmitTiming("message sent", sw.ElapsedMilliseconds);
 
