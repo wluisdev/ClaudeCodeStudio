@@ -2349,11 +2349,13 @@ async function toggleToolDiff(chip) {
         const noteHtml = (data.name === "Write" && hasBaseline === false)
             ? '<div class="tool-diff-note">new file (no git baseline)</div>'
             : "";
+        const vsBtnHtml = filePath ? `<button class="tool-diff-vs-btn">abrir no VS</button>` : "";
         container.innerHTML =
             noteHtml +
             `<div class="tool-diff-body">${renderDiffHtml(preview)}</div>` +
             `<div class="tool-diff-actions">
                 ${truncated ? `<span class="tool-diff-truncated">+${trimmed.length - PREVIEW_MAX_LINES} mais</span>` : ""}
+                ${vsBtnHtml}
                 <button class="tool-diff-full-btn">ver completo</button>
             </div>`;
         const btn = container.querySelector(".tool-diff-full-btn");
@@ -2361,14 +2363,33 @@ async function toggleToolDiff(chip) {
             e.stopPropagation();
             openDiffModal(filePath, diffLines, data.name, hasBaseline);
         });
+        const vsBtn = container.querySelector(".tool-diff-vs-btn");
+        if (vsBtn) vsBtn.addEventListener("click", e => {
+            e.stopPropagation();
+            openVsDiff(filePath, data.name);
+        });
     } catch (ex) {
         container.innerHTML = `<div class="tool-diff-error">${escapeHtml(String(ex))}</div>`;
     }
     autoScroll();
 }
 
+// Posts a request to C# to open the native VS side-by-side diff tab (git HEAD
+// baseline vs current file). Read-only review.
+function openVsDiff(filePath, toolName) {
+    if (!filePath) return;
+    try {
+        window.chrome.webview.postMessage({ type: "open-vs-diff", path: filePath, toolName: toolName || "" });
+    } catch (e) { console.warn("open-vs-diff post failed:", e); }
+}
+
+// File/tool of the per-tool diff modal currently open, so its "abrir no VS"
+// header button knows what to compare.
+let toolDiffModalFile = "";
+let toolDiffModalTool = "";
+
 function openDiffModal(filePath, diffLines, toolName, hasBaseline) {
-    const overlay = document.getElementById("diff-modal-overlay");
+    const overlay = document.getElementById("tool-diff-modal-overlay");
     document.getElementById("diff-modal-path").textContent = filePath || "(no path)";
     const subtitle = document.getElementById("diff-modal-subtitle");
     const added = diffLines.filter(l => l.type === "+").length;
@@ -2377,7 +2398,15 @@ function openDiffModal(filePath, diffLines, toolName, hasBaseline) {
     if (toolName === "Write" && hasBaseline === false) sub += " • new file";
     subtitle.textContent = sub;
     document.getElementById("diff-modal-body").innerHTML = renderDiffHtml(diffLines);
+    toolDiffModalFile = filePath || "";
+    toolDiffModalTool = toolName || "";
+    const vsBtn = document.getElementById("tool-diff-modal-vs");
+    if (vsBtn) vsBtn.style.display = filePath ? "" : "none";
     overlay.classList.add("open");
+}
+
+function closeToolDiffModal() {
+    document.getElementById("tool-diff-modal-overlay").classList.remove("open");
 }
 
 function closeDiffModal() {
@@ -2386,10 +2415,13 @@ function closeDiffModal() {
 
 document.addEventListener("keydown", e => {
     if (e.key !== "Escape") return;
-    const overlay = document.getElementById("diff-modal-overlay");
-    if (!overlay || !overlay.classList.contains("open")) return;
+    const tool = document.getElementById("tool-diff-modal-overlay");
+    const git = document.getElementById("diff-modal-overlay");
+    const openOne = (tool && tool.classList.contains("open")) ? tool
+                  : (git && git.classList.contains("open")) ? git : null;
+    if (!openOne) return;
     e.stopPropagation();
-    closeDiffModal();
+    openOne.classList.remove("open");
 }, true);
 
 function appendToolEvent(kind, name, inputJson, text, id) {

@@ -1013,6 +1013,12 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "open-vs-diff")
+            {
+                await HandleOpenVsDiffAsync(request.Path ?? "", request.ToolName ?? "");
+                return;
+            }
+
             if (request.Type == "open-usage")
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -2401,6 +2407,63 @@ public partial class AgentToolWindowControl : UserControl
         }
     }
 
+    // Opens a native VS side-by-side diff tab for an edited file: left = the git
+    // HEAD baseline (reusing GetGitBaselineAsync), right = the current on-disk
+    // content. Read-only review — both sides are written to throwaway temp files
+    // that VS deletes on close (the *FileIsTemporary flags). New/untracked files
+    // get an empty left side (renders as all-added). Never throws — failures just
+    // log and no tab opens.
+    private async Task HandleOpenVsDiffAsync(string filePath, string toolName)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+            {
+                OutputLog.Warn($"open-vs-diff: file not found: {filePath}");
+                return;
+            }
+
+            var current = await Task.Run(() => File.ReadAllText(filePath));
+            var (baseline, baselineErr) = await GetGitBaselineAsync(filePath);
+            // No git baseline (new file / untracked / no repo) → empty left side.
+            baseline ??= "";
+
+            var fileName = Path.GetFileName(filePath);
+            var diffDir = Path.Combine(Path.GetTempPath(), "ClaudeStudio", "diffs", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(diffDir);
+            // Keep the original extension on both sides so VS picks the right
+            // language service for syntax highlighting.
+            var leftPath = Path.Combine(diffDir, "BASE_" + fileName);
+            var rightPath = Path.Combine(diffDir, fileName);
+            File.WriteAllText(leftPath, baseline, new UTF8Encoding(false));
+            File.WriteAllText(rightPath, current, new UTF8Encoding(false));
+
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            if (Package.GetGlobalService(typeof(SVsDifferenceService)) is not IVsDifferenceService diffService)
+            {
+                OutputLog.Warn("open-vs-diff: IVsDifferenceService unavailable");
+                return;
+            }
+
+            var tool = string.IsNullOrEmpty(toolName) ? "Diff" : toolName;
+            var caption = $"{tool}: {fileName}";
+            var leftLabel = string.IsNullOrEmpty(baselineErr) ? "HEAD (baseline)" : "(no baseline)";
+            var grfDiffOptions = (uint)(__VSDIFFSERVICEOPTIONS.VSDIFFOPT_LeftFileIsTemporary
+                                      | __VSDIFFSERVICEOPTIONS.VSDIFFOPT_RightFileIsTemporary);
+
+            diffService.OpenComparisonWindow2(
+                leftPath, rightPath,
+                caption, filePath,
+                leftLabel, "Current",
+                fileName, null, grfDiffOptions);
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"open-vs-diff failed: {ex.Message}");
+        }
+    }
+
     // Handles a diagnostics_request from the agent's PostToolUse hook: give VS a
     // moment to re-analyze the just-edited file, read its Error List entries, and
     // send them back so the (blocked) hook can surface them to claude. Never
@@ -2483,6 +2546,9 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("toolUseId")]
         public string? ToolUseId { get; set; }
+
+        [JsonPropertyName("toolName")]
+        public string? ToolName { get; set; }
 
         [JsonPropertyName("answers")]
         public string? Answers { get; set; }

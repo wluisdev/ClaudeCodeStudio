@@ -366,14 +366,17 @@
         </div>
     </div>
 
-    <div class="cmd-modal-overlay" id="diff-modal-overlay" onclick="if(event.target===this)closeDiffModal()">
+    <div class="cmd-modal-overlay" id="tool-diff-modal-overlay" onclick="if(event.target===this)closeToolDiffModal()">
         <div class="cmd-modal diff-modal">
             <div class="diff-modal-header">
                 <div class="diff-modal-title">
                     <div class="diff-modal-path" id="diff-modal-path"></div>
                     <div class="diff-modal-subtitle" id="diff-modal-subtitle"></div>
                 </div>
-                <button class="diff-modal-close" onclick="closeDiffModal()">×</button>
+                <div class="diff-modal-header-actions">
+                    <button class="diff-modal-vs-btn" id="tool-diff-modal-vs" onclick="openVsDiff(toolDiffModalFile, toolDiffModalTool)">Abrir no VS</button>
+                    <button class="diff-modal-close" onclick="closeToolDiffModal()">×</button>
+                </div>
             </div>
             <div class="diff-modal-body" id="diff-modal-body"></div>
         </div>

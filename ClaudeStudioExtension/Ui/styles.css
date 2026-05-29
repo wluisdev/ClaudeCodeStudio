@@ -2249,6 +2249,17 @@ html.light-theme .assistant .bubble .md-table tbody tr:nth-child(even) { backgro
     margin-left: auto;
 }
 .tool-diff-full-btn:hover { background: rgba(255,255,255,0.04); color: #ddd; }
+.tool-diff-vs-btn {
+    background: transparent;
+    border: 1px solid #3a3a3a;
+    color: #bbb;
+    padding: 3px 10px;
+    font-size: 11px;
+    border-radius: 3px;
+    cursor: pointer;
+    margin-left: auto;
+}
+.tool-diff-vs-btn:hover { background: rgba(255,255,255,0.04); color: #ddd; }
 
 .diff-modal {
     width: min(960px, calc(100vw - 60px));
@@ -2276,6 +2287,22 @@ html.light-theme .assistant .bubble .md-table tbody tr:nth-child(even) { backgro
     font-size: 11px;
     color: #888;
 }
+.diff-modal-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.diff-modal-vs-btn {
+    background: transparent;
+    border: 1px solid #3a3a3a;
+    color: #bbb;
+    padding: 3px 10px;
+    font-size: 11px;
+    border-radius: 3px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.diff-modal-vs-btn:hover { background: rgba(255,255,255,0.04); color: #ddd; }
 .diff-modal-close {
     background: transparent;
     border: 0;
@@ -2305,6 +2332,10 @@ html.light-theme .diff-line.diff-gap { background: #ececec; color: #888; }
 html.light-theme .diff-line .diff-lineno { color: #888; }
 html.light-theme .tool-diff-full-btn { border-color: #ccc; color: #444; }
 html.light-theme .tool-diff-full-btn:hover { background: rgba(0,0,0,0.04); }
+html.light-theme .tool-diff-vs-btn,
+html.light-theme .diff-modal-vs-btn { border-color: #ccc; color: #444; }
+html.light-theme .tool-diff-vs-btn:hover,
+html.light-theme .diff-modal-vs-btn:hover { background: rgba(0,0,0,0.04); }
 html.light-theme .diff-modal-path { color: #222; }
 html.light-theme .diff-modal-subtitle { color: #666; }
 html.light-theme .diff-modal-body { background: #fafafa; }
