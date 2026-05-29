@@ -1266,6 +1266,15 @@ public partial class AgentToolWindowControl : UserControl
 
             VsStatusBar.ShowThinking();
 
+            // User-configurable claude settings (V7). Booleans default to true
+            // when the webview omits them (older payloads).
+            _agentClient.ClaudeSettings = new ClaudeStudioShared.ClaudeSettings
+            {
+                CoAuthoredBy = request.CoAuthoredBy ?? true,
+                CleanupPeriodDays = request.CleanupPeriodDays,
+                AutoCompact = request.AutoCompact ?? true
+            };
+
             var dispatcher = System.Windows.Application.Current.Dispatcher;
 
             await _agentClient.AskStreamingAsync(request.Text, request.Model, request.Effort, request.PermissionMode,
@@ -2679,6 +2688,16 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("dryRun")]
         public bool DryRun { get; set; }
+
+        // V7 claude settings (nullable so an absent field means "use default").
+        [JsonPropertyName("coAuthoredBy")]
+        public bool? CoAuthoredBy { get; set; }
+
+        [JsonPropertyName("cleanupPeriodDays")]
+        public int? CleanupPeriodDays { get; set; }
+
+        [JsonPropertyName("autoCompact")]
+        public bool? AutoCompact { get; set; }
 
         [JsonPropertyName("code")]
         public string? Code { get; set; }

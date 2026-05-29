@@ -784,9 +784,9 @@ modelSelect.addEventListener("change", noteModelSwitch);
 // flipping (5 options need ~120px vertical and the composer sits at the
 // bottom of the tool window, so the browser keeps wanting to open upward
 // while the 3-option permission select stays downward — visual inconsistency).
-const effortValues = ["", "low", "medium", "high", "max"];
-const effortLabels = ["auto", "low", "med", "high", "max"];
-const effortIcons  = ["🧭", "🪶", "⚙", "🧠", "🔥"];
+const effortValues = ["", "low", "medium", "high", "xhigh", "max"];
+const effortLabels = ["auto", "low", "med", "high", "xhigh", "max"];
+const effortIcons  = ["🧭", "🪶", "⚙", "🧠", "🚀", "🔥"];
 const effortBtn = document.getElementById("effort-btn");
 const effortBtnIcon = document.getElementById("effort-btn-icon");
 const effortBtnLabel = document.getElementById("effort-btn-label");
@@ -1362,7 +1362,11 @@ function sendMessage() {
             // claude.exe gets --continue and reuses the previous session instead of
             // creating a fresh one (turn count keeps going up in the old row).
             autoResume: _suppressNextAutoResume ? false : localStorage.getItem("autoResume") === "true",
-            autoSave: autoSaveValues[+autoSaveSlider.value]
+            autoSave: autoSaveValues[+autoSaveSlider.value],
+            // V7 claude settings (default ON; only deviations affect the spawn).
+            coAuthoredBy: localStorage.getItem("coAuthoredBy") !== "false",
+            autoCompact: localStorage.getItem("autoCompact") !== "false",
+            cleanupPeriodDays: (() => { const v = parseInt(localStorage.getItem("cleanupPeriodDays") || "", 10); return Number.isNaN(v) || v < 1 ? null : v; })()
         });
         _suppressNextAutoResume = false;
     }
@@ -1818,6 +1822,23 @@ autoResumeToggle.checked = localStorage.getItem("autoResume") === "true";
 
 function setAutoResume(checked) {
     localStorage.setItem("autoResume", checked);
+}
+
+// ── V7 claude settings (apply to new/restarted sessions) ──────
+const coAuthoredToggle = document.getElementById("coauthored-toggle");
+if (coAuthoredToggle) coAuthoredToggle.checked = localStorage.getItem("coAuthoredBy") !== "false";
+function setCoAuthoredBy(checked) { localStorage.setItem("coAuthoredBy", checked); }
+
+const autoCompactToggle = document.getElementById("autocompact-toggle");
+if (autoCompactToggle) autoCompactToggle.checked = localStorage.getItem("autoCompact") !== "false";
+function setAutoCompact(checked) { localStorage.setItem("autoCompact", checked); }
+
+const cleanupDaysInput = document.getElementById("cleanup-days-input");
+if (cleanupDaysInput) cleanupDaysInput.value = localStorage.getItem("cleanupPeriodDays") || "";
+function setCleanupDays(value) {
+    const v = parseInt(value, 10);
+    if (Number.isNaN(v) || v < 1) localStorage.removeItem("cleanupPeriodDays");
+    else localStorage.setItem("cleanupPeriodDays", String(v));
 }
 
 // Theme override: "auto" follows VS (default), "dark" / "light" force regardless

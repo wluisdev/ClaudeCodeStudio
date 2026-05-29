@@ -34,6 +34,21 @@ public class ChatRequest
     // control_request{subtype:"rewind_files"} on claude.stdin and forwards the
     // control_response back as a "rewind-result" chunk.
     public RewindRequest? RewindRequest { get; set; }
+
+    // User-configurable claude.exe settings (V7) the agent writes into the
+    // settings.json passed via --settings. Null = use claude's own defaults.
+    public ClaudeSettings? ClaudeSettings { get; set; }
+}
+
+public class ClaudeSettings
+{
+    // false → write attribution{commit:"",pr:""} to drop the Co-Authored-By /
+    // PR attribution trailers. true (default) → leave claude's default on.
+    public bool CoAuthoredBy { get; set; } = true;
+    // Transcript retention in days; null = claude default (30).
+    public int? CleanupPeriodDays { get; set; }
+    // false → write autoCompactEnabled:false. true (default) → leave default on.
+    public bool AutoCompact { get; set; } = true;
 }
 
 public class RewindRequest

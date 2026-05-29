@@ -129,6 +129,34 @@
                             </label>
                         </div>
                         <div class="cmd-divider"></div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                Co-author commits
+                                <span class="info-icon" title="Add Claude's Co-Authored-By trailer to commits and the attribution line to PR descriptions. Turn off to omit them. Applies to new/restarted sessions.">ⓘ</span>
+                            </span>
+                            <label class="toggle">
+                                <input type="checkbox" id="coauthored-toggle" checked onchange="setCoAuthoredBy(this.checked)" />
+                                <span class="toggle-track"></span>
+                            </label>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                Auto-compact context
+                                <span class="info-icon" title="Automatically compact the conversation when the context window fills. Applies to new/restarted sessions.">ⓘ</span>
+                            </span>
+                            <label class="toggle">
+                                <input type="checkbox" id="autocompact-toggle" checked onchange="setAutoCompact(this.checked)" />
+                                <span class="toggle-track"></span>
+                            </label>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                Transcript retention (days)
+                                <span class="info-icon" title="How many days claude keeps chat transcripts before automatic cleanup. Leave blank for the default (30). Applies to new/restarted sessions.">ⓘ</span>
+                            </span>
+                            <input type="number" id="cleanup-days-input" class="settings-number" min="1" placeholder="30" oninput="setCleanupDays(this.value)" />
+                        </div>
+                        <div class="cmd-divider"></div>
                         <div class="settings-row effort-row">
                             <span class="settings-label">Auto-save before send</span>
                             <span class="effort-value-label" id="autosave-label">active</span>
@@ -315,7 +343,7 @@
                                 <span class="effort-btn-caret">▴</span>
                             </button>
                             <div class="effort-popup" id="effort-popup" hidden>
-                                <input type="range" class="effort-popup-slider" id="effort-popup-slider" min="0" max="4" step="1" value="0" />
+                                <input type="range" class="effort-popup-slider" id="effort-popup-slider" min="0" max="5" step="1" value="0" />
                                 <div class="effort-popup-ticks">
                                     <span>auto</span><span>low</span><span>med</span><span>high</span><span>max</span>
                                 </div>

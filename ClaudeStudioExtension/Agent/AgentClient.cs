@@ -33,6 +33,11 @@ public class AgentClient
     public string? PendingResumeSessionId { get; set; }
     public string? CurrentSessionId { get; private set; }
 
+    // User-configurable claude settings (V7). Set by the control from the UI;
+    // attached to each outbound ChatRequest so the agent writes them into the
+    // settings.json it passes to claude.
+    public ClaudeStudioShared.ClaudeSettings? ClaudeSettings { get; set; }
+
     public void CancelCurrent()
     {
         OutputLog.Info("request cancel requested");
@@ -255,7 +260,8 @@ public class AgentClient
             PermissionMode = permissionMode,
             ResumeSessionId = resumeId,
             WorkingDirectory = workingDirectory,
-            AutoResume = autoResume
+            AutoResume = autoResume,
+            ClaudeSettings = ClaudeSettings
         };
         var json = JsonSerializer.Serialize(request);
 

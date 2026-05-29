@@ -291,6 +291,7 @@ sealed class ClaudeSession : IAsyncDisposable
     private readonly string? _resumeSessionId;
     private readonly bool _autoResume;
     private readonly string? _pipeName;
+    private readonly ClaudeSettings? _claudeSettings;
 
     private Process? _proc;
     private StreamWriter? _stdin;
@@ -323,6 +324,7 @@ sealed class ClaudeSession : IAsyncDisposable
         _resumeSessionId = request.ResumeSessionId;
         _autoResume = request.AutoResume;
         _pipeName = pipeName;
+        _claudeSettings = request.ClaudeSettings;
         Key = MakeKey(request);
     }
 
@@ -373,6 +375,11 @@ sealed class ClaudeSession : IAsyncDisposable
         psi.ArgumentList.Add("--permission-prompt-tool");
         psi.ArgumentList.Add("stdio");
 
+        // Set true once we've added a --settings arg (ask mode writes one with the
+        // hooks block); other modes write a settings-only file afterwards if the
+        // user configured any claude settings.
+        bool settingsWritten = false;
+
         if (_permissionMode == "plan")
         {
             psi.ArgumentList.Add("--permission-mode");
@@ -385,10 +392,11 @@ sealed class ClaudeSession : IAsyncDisposable
             // pipe, claude auto-approves everything in stdio mode (PoC-confirmed).
             if (_pipeName != null)
             {
-                var settingsPath = WriteHookSettings();
+                var settingsPath = WriteSettings(includeHooks: true)!;
                 psi.ArgumentList.Add("--settings");
                 psi.ArgumentList.Add(settingsPath);
                 psi.ArgumentList.Add("--include-hook-events");
+                settingsWritten = true;
                 // Claude has an internal permission check for file-modifying tools
                 // (Edit/Write/MultiEdit) that runs BEFORE PreToolUse hooks in stdio
                 // mode. Without acceptEdits, claude blocks these tools with
@@ -424,6 +432,18 @@ sealed class ClaudeSession : IAsyncDisposable
         else // "yolo" (default)
         {
             psi.ArgumentList.Add("--dangerously-skip-permissions");
+        }
+
+        // Apply user-configured claude settings in modes that didn't already write
+        // a settings.json (plan / yolo / ask-without-pipe). No-op if nothing set.
+        if (!settingsWritten)
+        {
+            var claudeSettingsPath = WriteSettings(includeHooks: false);
+            if (claudeSettingsPath != null)
+            {
+                psi.ArgumentList.Add("--settings");
+                psi.ArgumentList.Add(claudeSettingsPath);
+            }
         }
 
         if (!string.IsNullOrEmpty(_effort))
@@ -923,13 +943,8 @@ sealed class ClaudeSession : IAsyncDisposable
         Console.Out.Flush();
     }
 
-    private string WriteHookSettings()
+    private object BuildHooks()
     {
-        var tempBase = Path.GetTempPath();
-        _settingsTempDir = Path.Combine(tempBase, $"claudestudio-{Environment.ProcessId}-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_settingsTempDir);
-
-        var settingsPath = Path.Combine(_settingsTempDir, "settings.json");
         var agentPath = Environment.ProcessPath
             ?? throw new InvalidOperationException("cannot resolve agent executable path");
 
@@ -937,46 +952,64 @@ sealed class ClaudeSession : IAsyncDisposable
         // shell layer interprets backslashes as escape characters and strips them.
         var agentPathFwd = agentPath.Replace('\\', '/');
 
-        var settings = new
+        return new
         {
-            hooks = new
+            PreToolUse = new[]
             {
-                PreToolUse = new[]
+                new
                 {
-                    new
+                    matcher = "Bash|KillBash|Edit|Write|NotebookEdit|Task|WebFetch|CronCreate|mcp__.*",
+                    hooks = new[]
                     {
-                        matcher = "Bash|KillBash|Edit|Write|NotebookEdit|Task|WebFetch|CronCreate|mcp__.*",
-                        hooks = new[]
-                        {
-                            new
-                            {
-                                type = "command",
-                                command = $"\"{agentPathFwd}\" --hook {_pipeName}"
-                            }
-                        }
+                        new { type = "command", command = $"\"{agentPathFwd}\" --hook {_pipeName}" }
                     }
-                },
-                // After a file edit, pull the VS Error List for that file and feed
-                // any errors/warnings back to claude as additionalContext so it can
-                // self-correct. Informational only — the hook never blocks.
-                PostToolUse = new[]
+                }
+            },
+            // After a file edit, pull the VS Error List for that file and feed
+            // any errors/warnings back to claude as additionalContext so it can
+            // self-correct. Informational only — the hook never blocks.
+            PostToolUse = new[]
+            {
+                new
                 {
-                    new
+                    matcher = "Edit|Write|MultiEdit|NotebookEdit",
+                    hooks = new[]
                     {
-                        matcher = "Edit|Write|MultiEdit|NotebookEdit",
-                        hooks = new[]
-                        {
-                            new
-                            {
-                                type = "command",
-                                command = $"\"{agentPathFwd}\" --hook-post {_pipeName}"
-                            }
-                        }
+                        new { type = "command", command = $"\"{agentPathFwd}\" --hook-post {_pipeName}" }
                     }
                 }
             }
         };
+    }
 
+    // User-configurable claude.exe settings surfaced via the extension UI (V7).
+    // Only deviations from claude's defaults are written, so we never clobber the
+    // user's own global/project config when a toggle is left at its default.
+    private Dictionary<string, object?> BuildClaudeSettings()
+    {
+        var d = new Dictionary<string, object?>();
+        if (_claudeSettings == null) return d;
+        if (!_claudeSettings.CoAuthoredBy)
+            d["attribution"] = new { commit = "", pr = "" }; // empty strings hide the trailers
+        if (_claudeSettings.CleanupPeriodDays is int days && days > 0)
+            d["cleanupPeriodDays"] = days;
+        if (!_claudeSettings.AutoCompact)
+            d["autoCompactEnabled"] = false;
+        return d;
+    }
+
+    // Writes the settings.json passed to claude via --settings. Includes the hooks
+    // block only when requested (ask mode with a pipe), plus any user-configured
+    // claude settings (all modes). Returns null when there's nothing to write.
+    private string? WriteSettings(bool includeHooks)
+    {
+        var settings = BuildClaudeSettings();
+        if (includeHooks) settings["hooks"] = BuildHooks();
+        if (settings.Count == 0) return null;
+
+        _settingsTempDir = Path.Combine(Path.GetTempPath(), $"claudestudio-{Environment.ProcessId}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_settingsTempDir);
+        var settingsPath = Path.Combine(_settingsTempDir, "settings.json");
         File.WriteAllText(
             settingsPath,
             JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
