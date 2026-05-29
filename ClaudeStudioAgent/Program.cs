@@ -185,6 +185,19 @@ try
             continue;
         }
 
+        if (request.RewindRequest != null)
+        {
+            if (session == null || !session.IsAlive)
+                EmitError("rewind: no active session");
+            else
+            {
+                try { await session.RewindAsync(request.RewindRequest.UserMessageId, request.RewindRequest.DryRun); }
+                catch (Exception ex) { EmitError($"rewind failed: {ex.Message}"); }
+            }
+            EmitDone();
+            continue;
+        }
+
         var wantKey = ClaudeSession.MakeKey(request);
         // !IsAlive covers the post-cancel case: the session object lingers
         // (disposed) because SendMessageAsync returned via stdout EOF instead of
@@ -334,6 +347,11 @@ sealed class ClaudeSession : IAsyncDisposable
 
         if (!string.IsNullOrEmpty(_workingDirectory) && Directory.Exists(_workingDirectory))
             psi.WorkingDirectory = _workingDirectory;
+
+        // Enable native file checkpointing so the UI can later drive a
+        // rewind_files control_request to revert edits to a prior message.
+        // PoC-confirmed lever; harmless when the feature isn't used.
+        psi.EnvironmentVariables["CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING"] = "true";
 
         psi.ArgumentList.Add("--input-format");
         psi.ArgumentList.Add("stream-json");
@@ -812,6 +830,65 @@ sealed class ClaudeSession : IAsyncDisposable
         }));
         Console.Out.Flush();
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "done" }));
+        Console.Out.Flush();
+    }
+
+    // Sends a rewind_files control_request to the running claude and forwards the
+    // control_response back as a "rewind-result" chunk (Text = the inner response
+    // JSON: {canRewind, filesChanged, insertions, deletions}). Called between
+    // turns (claude is idle), so this owns stdout while waiting for the reply.
+    public async Task RewindAsync(string userMessageId, bool dryRun)
+    {
+        if (_stdin == null || _stdout == null || _proc == null || _proc.HasExited)
+            throw new InvalidOperationException("session not started or already exited");
+
+        var requestId = "rewind-" + Guid.NewGuid().ToString("N");
+        var msg = new
+        {
+            type = "control_request",
+            request_id = requestId,
+            request = new { subtype = "rewind_files", user_message_id = userMessageId, dry_run = dryRun }
+        };
+        var ndjson = JsonSerializer.Serialize(msg);
+
+        await _stdinLock.WaitAsync();
+        try
+        {
+            await _stdin.WriteLineAsync(ndjson);
+            await _stdin.FlushAsync();
+        }
+        finally { _stdinLock.Release(); }
+
+        // claude is idle; read until our matching control_response. Skip anything
+        // else it might emit (rate_limit_event, keep-alive, etc.).
+        string? line;
+        while ((line = await _stdout.ReadLineAsync()) != null)
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            JsonElement evt;
+            try { evt = JsonSerializer.Deserialize<JsonElement>(line); }
+            catch { continue; }
+            if (!evt.TryGetProperty("type", out var tp) || tp.GetString() != "control_response") continue;
+            if (!evt.TryGetProperty("response", out var resp)) continue;
+            if (!resp.TryGetProperty("request_id", out var rid) || rid.GetString() != requestId) continue;
+
+            var subtype = resp.TryGetProperty("subtype", out var st) ? st.GetString() : null;
+            if (subtype == "error")
+            {
+                var errMsg = resp.TryGetProperty("error", out var er) ? er.GetString() : "rewind failed";
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = $"rewind: {errMsg}" }));
+                Console.Out.Flush();
+                return;
+            }
+
+            // success → forward the inner response payload verbatim
+            var inner = resp.TryGetProperty("response", out var rr) ? rr.GetRawText() : "{}";
+            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "rewind-result", Text = inner }));
+            Console.Out.Flush();
+            return;
+        }
+
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = "rewind: claude exited before responding" }));
         Console.Out.Flush();
     }
 

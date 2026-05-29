@@ -969,6 +969,10 @@ function autoScroll() {
 let attachments = new Map();
 let attachmentIdCounter = 0;
 let msgCounter = 0;
+// Counts only user messages (rewind targets the Nth user message, which maps
+// 1:1 to user JSONL entries — unlike msgCounter, which mixes in assistant
+// bubbles and drifts vs the transcript).
+let userMsgCounter = 0;
 let currentSessionId = null;
 
 function decorateMessage(msgEl) {
@@ -980,11 +984,58 @@ function decorateMessage(msgEl) {
     btn.textContent = "⎇";
     btn.addEventListener("click", () => branchFromMessage(idx));
     msgEl.appendChild(btn);
+
+    // Rewind affordance only on user messages — it reverts files to the state
+    // before that message (native checkpointing). Conversation is kept.
+    if (msgEl.classList.contains("user")) {
+        const uidx = userMsgCounter++;
+        msgEl.dataset.userIndex = uidx;
+        const rb = document.createElement("button");
+        rb.className = "msg-rewind";
+        rb.title = "Rewind files to before this message";
+        rb.textContent = "⟲";
+        rb.addEventListener("click", () => rewindFromMessage(uidx));
+        msgEl.appendChild(rb);
+    }
 }
 
 function branchFromMessage(idx) {
     if (!currentSessionId) return;
     window.chrome.webview.postMessage({ type: "branch", msgIndex: idx });
+}
+
+function rewindFromMessage(idx) {
+    if (!currentSessionId) return;
+    // dry run first → preview stats → confirm → apply
+    window.chrome.webview.postMessage({ type: "rewind", msgIndex: idx, dryRun: true });
+}
+
+function showRewindConfirm(idx, result) {
+    const files = (result && result.filesChanged) || [];
+    if (!result || !result.canRewind || files.length === 0) {
+        showToast("Nothing to rewind for this message");
+        return;
+    }
+    const ins = result.insertions || 0;
+    const del = result.deletions || 0;
+    const card = document.createElement("div");
+    card.className = "question-card rewind-confirm-card";
+    card.innerHTML = `
+<div class="question-text">⟲ <strong>Rewind files to before this message?</strong> ${del} line${del === 1 ? "" : "s"} removed and ${ins} added across ${files.length} file${files.length === 1 ? "" : "s"}. The conversation is kept — only files revert.</div>
+<ul class="rewind-file-list">${files.map(f => `<li>${escapeHtml(f)}</li>`).join("")}</ul>
+<div class="question-buttons">
+<button class="q-btn q-yes">Rewind files</button>
+<button class="q-btn">Cancel</button>
+</div>`;
+    const btns = card.querySelectorAll("button");
+    btns[0].addEventListener("click", () => {
+        card.classList.add("question-answered");
+        btns[0].disabled = true; btns[1].disabled = true;
+        window.chrome.webview.postMessage({ type: "rewind", msgIndex: idx, dryRun: false });
+    });
+    btns[1].addEventListener("click", () => card.remove());
+    messages.appendChild(card);
+    autoScroll();
 }
 let imageCounter = 0;
 let currentStreamBubble = null;
@@ -1498,6 +1549,21 @@ window.chrome.webview.addEventListener("message", event => {
         return;
     }
 
+    if (event.data.type === "rewind-preview") {
+        showRewindConfirm(event.data.msgIndex, event.data.result || {});
+        return;
+    }
+
+    if (event.data.type === "rewind-done") {
+        showToast("Files reverted ✓");
+        return;
+    }
+
+    if (event.data.type === "rewind-error") {
+        showToast(event.data.message || "Rewind failed");
+        return;
+    }
+
     if (event.data.type === "attach-file") {
         addAttachment(event.data.filename, event.data.content, event.data.isBinary, event.data.filePath);
         return;
@@ -1583,6 +1649,7 @@ window.chrome.webview.addEventListener("message", event => {
         sessionIn = 0;
         sessionOut = 0;
         msgCounter = 0;
+        userMsgCounter = 0;
         currentSessionId = null;
         updateUsageSessionValues();
         _suppressNextAutoResume = true;
@@ -2928,6 +2995,7 @@ function clearChat() {
     sessionIn = 0;
     sessionOut = 0;
     msgCounter = 0;
+    userMsgCounter = 0;
     currentSessionId = null;
     updateUsageSessionValues();
     // User explicitly asked for a fresh chat — suppress --continue on the next
@@ -2941,6 +3009,7 @@ function renderBranchedMessages(newSessionId, msgs) {
     if (welcome) { welcome.remove(); welcome = null; }
     messages.innerHTML = "";
     msgCounter = 0;
+    userMsgCounter = 0;
     currentSessionId = newSessionId;
 
     for (const m of msgs) {

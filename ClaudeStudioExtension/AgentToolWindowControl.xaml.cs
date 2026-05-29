@@ -1115,6 +1115,12 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "rewind")
+            {
+                await HandleRewindAsync(request.MsgIndex, request.DryRun);
+                return;
+            }
+
             if (request.Type == "add-file")
             {
                 await HandleAddFileAsync();
@@ -2184,6 +2190,102 @@ public partial class AgentToolWindowControl : UserControl
         dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
     }
 
+    // Native file rewind. msgIndex here is the UI's *user-message ordinal* (the
+    // Nth user message), which maps 1:1 to the user entries in the JSONL — unlike
+    // the mixed user+assistant index used by branching, which drifts when an
+    // assistant turn produces multiple text entries. We collect the uuids of user
+    // entries that carry text (real messages, not tool_result entries) and index
+    // into them. dryRun previews the diff stats; otherwise files are reverted.
+    private async Task HandleRewindAsync(int msgIndex, bool dryRun)
+    {
+        void PostRewindError(string m)
+        {
+            var d = System.Windows.Application.Current.Dispatcher;
+            d.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(
+                JsonSerializer.Serialize(new { type = "rewind-error", message = m })));
+        }
+
+        var currentSessionId = _agentClient.CurrentSessionId;
+        if (string.IsNullOrEmpty(currentSessionId)) { PostRewindError("No active session."); return; }
+
+        var claudeDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "projects");
+        var sourceFile = Directory.Exists(claudeDir)
+            ? Directory.GetFiles(claudeDir, $"{currentSessionId}.jsonl", SearchOption.AllDirectories).FirstOrDefault()
+            : null;
+        if (sourceFile == null) { PostRewindError("Session transcript not found."); return; }
+
+        var userUuids = new System.Collections.Generic.List<string>();
+        try
+        {
+            using var fs = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var sr = new StreamReader(fs);
+            string? line;
+            while ((line = await sr.ReadLineAsync()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    var root = doc.RootElement;
+                    if (!root.TryGetProperty("type", out var tEl) || tEl.GetString() != "user") continue;
+                    if (!root.TryGetProperty("message", out var msg)) continue;
+                    if (!msg.TryGetProperty("content", out var content)) continue;
+
+                    // Real user messages carry text; tool_result entries (also
+                    // type:"user") carry a tool_result block with no text → skip.
+                    string? text = null;
+                    if (content.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in content.EnumerateArray())
+                            if (item.TryGetProperty("type", out var itEl) && itEl.GetString() == "text" &&
+                                item.TryGetProperty("text", out var txEl))
+                                text = (text ?? "") + (txEl.GetString() ?? "");
+                    }
+                    else if (content.ValueKind == JsonValueKind.String)
+                    {
+                        text = content.GetString();
+                    }
+                    if (string.IsNullOrEmpty(text)) continue;
+
+                    if (root.TryGetProperty("uuid", out var uEl) && uEl.GetString() is { } u)
+                        userUuids.Add(u);
+                }
+                catch { continue; }
+            }
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Error($"rewind walk failed: {ex.Message}");
+            PostRewindError("Could not read transcript.");
+            return;
+        }
+
+        if (msgIndex < 0 || msgIndex >= userUuids.Count)
+        {
+            OutputLog.Warn($"rewind: user ordinal {msgIndex} out of range (found {userUuids.Count} user messages)");
+            PostRewindError("Could not locate that message in the transcript.");
+            return;
+        }
+        var uuid = userUuids[msgIndex];
+
+        var (resultJson, error) = await _agentClient.RewindAsync(uuid!, dryRun);
+        if (error != null || resultJson == null)
+        {
+            PostRewindError(error ?? "Rewind failed.");
+            return;
+        }
+
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(
+            JsonSerializer.Serialize(new
+            {
+                type = dryRun ? "rewind-preview" : "rewind-done",
+                msgIndex,
+                result = JsonSerializer.Deserialize<JsonElement>(resultJson)
+            })));
+    }
+
     private static string StripLocalCommandCaveat(string text)
     {
         if (string.IsNullOrEmpty(text)) return text;
@@ -2574,6 +2676,9 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("msgIndex")]
         public int MsgIndex { get; set; }
+
+        [JsonPropertyName("dryRun")]
+        public bool DryRun { get; set; }
 
         [JsonPropertyName("code")]
         public string? Code { get; set; }

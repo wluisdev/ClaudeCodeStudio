@@ -28,6 +28,22 @@ public class ChatRequest
     // loop stays pending on ReadLineAsync forever (claude keeps streaming),
     // and the next AskStreamingAsync call hits "stream in use" exception.
     public bool CancelTurn { get; set; }
+
+    // Native file rewind: ask the running claude (with checkpointing enabled) to
+    // restore files to the state before a given user message. The agent sends a
+    // control_request{subtype:"rewind_files"} on claude.stdin and forwards the
+    // control_response back as a "rewind-result" chunk.
+    public RewindRequest? RewindRequest { get; set; }
+}
+
+public class RewindRequest
+{
+    // The uuid of the target user message's JSONL entry (= user_message_id the
+    // rewind_files control_request expects).
+    public string UserMessageId { get; set; } = "";
+    // Dry run only computes the diff stats (canRewind/filesChanged/insertions/
+    // deletions) without touching the files; false actually reverts them.
+    public bool DryRun { get; set; }
 }
 
 public class ChatChunk

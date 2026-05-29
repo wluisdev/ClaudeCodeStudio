@@ -1944,6 +1944,41 @@ html.light-theme .model-divider::after { background: #d8d8d8; }
     background: #3a3a3a;
 }
 
+/* Rewind button — sits to the left of the branch button on user messages. */
+.msg-rewind {
+    position: absolute;
+    top: -8px;
+    right: 30px;
+    background: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    color: #aaa;
+    font-size: 12px;
+    width: 22px;
+    height: 22px;
+    border-radius: 11px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, color 0.15s, border-color 0.15s, background 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    line-height: 1;
+}
+.message:hover .msg-rewind { opacity: 1; }
+.msg-rewind:hover { color: #fff; border-color: var(--accent); background: #3a3a3a; }
+
+.rewind-file-list {
+    margin: 0 0 10px;
+    padding-left: 18px;
+    font-family: Consolas, Menlo, monospace;
+    font-size: 11px;
+    color: #bbb;
+    max-height: 140px;
+    overflow-y: auto;
+}
+.rewind-file-list li { word-break: break-all; margin: 2px 0; }
+
 .message.user {
     justify-content: flex-end;
 }
@@ -2483,6 +2518,16 @@ html.light-theme .resume-overlay-inner .dots span { color: var(--accent); }
     padding: 10px 14px;
     max-width: 75%;
     align-self: flex-start;
+}
+
+/* Pending action cards (AskUserQuestion, rewind confirm, etc.) stick to the
+   bottom of the chat viewport so they stay visible even when the user has
+   scrolled up reviewing earlier messages — until they're answered. */
+.question-card:not(.question-answered) {
+    position: sticky;
+    bottom: 8px;
+    z-index: 5;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
 }
 
 .question-card.question-answered {

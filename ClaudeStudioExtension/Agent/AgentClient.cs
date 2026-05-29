@@ -186,6 +186,44 @@ public class AgentClient
         await _writer.FlushAsync();
     }
 
+    // One-shot file rewind. Sends a rewind request and reads until the agent's
+    // "rewind-result" chunk. Returns (resultJson, error): resultJson is the inner
+    // control_response payload ({canRewind, filesChanged, insertions, deletions}),
+    // or error is set when the agent reported a failure. Shares the streaming
+    // semaphore so it never races an active turn's read loop.
+    public async Task<(string? resultJson, string? error)> RewindAsync(string userMessageId, bool dryRun)
+    {
+        await _streamingSemaphore.WaitAsync();
+        try
+        {
+            if (_writer == null || _reader == null)
+                return (null, "agent not running");
+
+            var request = new ChatRequest
+            {
+                Message = "",
+                RewindRequest = new RewindRequest { UserMessageId = userMessageId, DryRun = dryRun }
+            };
+            OutputLog.Info($"rewind → userMessageId={userMessageId} dryRun={dryRun}");
+            await _writer.WriteLineAsync(JsonSerializer.Serialize(request));
+            await _writer.FlushAsync();
+
+            string? resultJson = null;
+            string? error = null;
+            string? line;
+            while ((line = await _reader.ReadLineAsync()) != null)
+            {
+                var chunk = JsonSerializer.Deserialize<ChatChunk>(line);
+                if (chunk == null) continue;
+                if (chunk.Type == "rewind-result") resultJson = chunk.Text;
+                else if (chunk.Type == "error") { error = chunk.Text; OutputLog.Error($"rewind error: {chunk.Text}"); }
+                else if (chunk.Type == "done") break;
+            }
+            return (resultJson, error);
+        }
+        finally { _streamingSemaphore.Release(); }
+    }
+
     public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null)
     {
         await _streamingSemaphore.WaitAsync();
