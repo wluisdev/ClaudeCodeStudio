@@ -1406,6 +1406,11 @@ window.chrome.webview.addEventListener("message", event => {
         return;
     }
 
+    if (event.data.type === "claude-not-found") {
+        showClaudeNotFoundCard(event.data.detail || "");
+        return;
+    }
+
     if (event.data.type === "claude-login-started") {
         openSigninOverlay();
         return;
@@ -3011,6 +3016,28 @@ function showAuthRequiredCard() {
 
 function startClaudeLogin(card) {
     try { window.chrome.webview.postMessage({ type: "start-claude-login" }); } catch (e) {}
+    if (card && card.classList) card.classList.add("question-answered");
+}
+
+function showClaudeNotFoundCard(detail) {
+    if (welcome) { welcome.remove(); welcome = null; }
+    // Avoid stacking duplicate cards when several sends fail in a row.
+    const last = messages.lastElementChild;
+    if (last && last.classList && last.classList.contains("claude-not-found-card")) return;
+    const card = document.createElement("div");
+    card.className = "question-card claude-not-found-card";
+    card.innerHTML = `
+<div class="question-text">🧩 <strong>Claude Code not found.</strong> The agent couldn't find <code>claude.exe</code> on your PATH or any standard install location. Install it, then send your message again.</div>
+<div class="claude-install-hint">Documented method: <code>npm install -g @anthropic-ai/claude-code</code> (or choco / the native installer). You may need to restart VS so an updated PATH is picked up.</div>
+<div class="question-buttons">
+<button class="q-btn q-yes" onclick="startClaudeInstall(this.closest('.question-card'))">Install via npm</button>
+</div>`;
+    messages.appendChild(card);
+    autoScroll();
+}
+
+function startClaudeInstall(card) {
+    try { window.chrome.webview.postMessage({ type: "start-claude-install" }); } catch (e) {}
     if (card && card.classList) card.classList.add("question-answered");
 }
 

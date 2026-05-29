@@ -2499,6 +2499,16 @@ html.light-theme .resume-overlay-inner .dots span { color: var(--accent); }
     margin-bottom: 0;
 }
 
+.claude-install-hint {
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 10px;
+    line-height: 1.5;
+}
+.claude-install-hint code {
+    font-size: 11px;
+}
+
 .question-buttons {
     display: flex;
     gap: 8px;

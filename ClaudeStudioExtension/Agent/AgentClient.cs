@@ -289,6 +289,15 @@ public class AgentClient
                 break;
             }
 
+            // claude.exe missing — route through onChunk with a sentinel so the
+            // control can show a dedicated install card instead of a chat error.
+            if (chunk.Type == "claude-not-found")
+            {
+                OutputLog.Error($"claude not found: {chunk.Text}");
+                onChunk("CLAUDE_NOT_FOUND::" + (chunk.Text ?? ""));
+                break;
+            }
+
             if (chunk.Type == "chunk" && !string.IsNullOrEmpty(chunk.Text))
                 onChunk(chunk.Text);
 

@@ -198,6 +198,15 @@ try
             {
                 await session.StartAsync();
             }
+            catch (ClaudeNotFoundException ex)
+            {
+                // Dedicated signal → UI renders an install card, not a raw error.
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "claude-not-found", Text = ex.Message }));
+                Console.Out.Flush();
+                session = null;
+                EmitDone();
+                continue;
+            }
             catch (Exception ex)
             {
                 EmitError($"failed to start claude session: {ex.Message}");
@@ -246,6 +255,11 @@ static void EmitDone()
     Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "done" }));
     Console.Out.Flush();
 }
+
+// Thrown by FindClaudeExe when claude.exe is on neither PATH nor any known
+// install location. The main loop turns it into a dedicated "claude-not-found"
+// chunk so the UI can show an install card instead of a generic error.
+sealed class ClaudeNotFoundException(string message) : Exception(message);
 
 /// <summary>
 /// Holds a single persistent claude.exe instance running with --input-format stream-json
@@ -914,8 +928,8 @@ sealed class ClaudeSession : IAsyncDisposable
             if (File.Exists(path))
                 return path;
 
-        throw new FileNotFoundException(
-            "claude.exe not found. Verify that Claude Code is installed and on PATH.");
+        throw new ClaudeNotFoundException(
+            "claude.exe was not found on your PATH or any standard install location.");
     }
 
     public async ValueTask DisposeAsync()

@@ -768,6 +768,30 @@ public partial class AgentToolWindowControl : UserControl
         }
     }
 
+    // Opens a visible cmd window running the documented npm install for Claude
+    // Code. cmd /K keeps the window open so the user can read the result (and any
+    // error if npm isn't present). After it finishes they re-send their message;
+    // the agent re-runs FindClaudeExe on the next request. A VS restart may be
+    // needed for a freshly-updated PATH to be visible to the agent.
+    private void StartClaudeInstall()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = "/K \"npm install -g @anthropic-ai/claude-code\"",
+                UseShellExecute = true,
+                WindowStyle = ProcessWindowStyle.Normal,
+            };
+            Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"claude install spawn failed: {ex.Message}");
+        }
+    }
+
     private async void CoreWebView2_WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
         try
@@ -808,6 +832,12 @@ public partial class AgentToolWindowControl : UserControl
             if (request.Type == "start-claude-login")
             {
                 StartClaudeLogin();
+                return;
+            }
+
+            if (request.Type == "start-claude-install")
+            {
+                StartClaudeInstall();
                 return;
             }
 
@@ -1234,8 +1264,15 @@ public partial class AgentToolWindowControl : UserControl
 
             await _agentClient.AskStreamingAsync(request.Text, request.Model, request.Effort, request.PermissionMode,
                 chunk => dispatcher.Invoke(() =>
-                    Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = "chunk", text = chunk }))),
+                {
+                    const string notFound = "CLAUDE_NOT_FOUND::";
+                    if (chunk != null && chunk.StartsWith(notFound, StringComparison.Ordinal))
+                        Browser.CoreWebView2.PostWebMessageAsJson(
+                            JsonSerializer.Serialize(new { type = "claude-not-found", detail = chunk.Substring(notFound.Length) }));
+                    else
+                        Browser.CoreWebView2.PostWebMessageAsJson(
+                            JsonSerializer.Serialize(new { type = "chunk", text = chunk }));
+                }),
                 timing => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "timing", text = timing }))),
