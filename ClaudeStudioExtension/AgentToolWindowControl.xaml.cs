@@ -1160,6 +1160,12 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "get-context-usage")
+            {
+                await HandleContextUsageAsync();
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(request.Text))
                 return;
 
@@ -1676,6 +1682,24 @@ public partial class AgentToolWindowControl : UserControl
         {
             OutputLog.Error($"apply-to-editor failed: {ex.Message}");
         }
+    }
+
+    // Forwards a context-usage probe to the agent (control_request
+    // get_context_usage on the live claude) and posts the result back to the
+    // webview, which fills the pending card.
+    private async Task HandleContextUsageAsync()
+    {
+        string? usageJson = null, error = null;
+        try
+        {
+            (usageJson, error) = await _agentClient.GetContextUsageAsync();
+        }
+        catch (Exception ex) { error = ex.Message; }
+
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        dispatcher.Invoke(() =>
+            Browser.CoreWebView2.PostWebMessageAsJson(
+                JsonSerializer.Serialize(new { type = "context-usage", usage = usageJson, error })));
     }
 
     // Opens a file in the VS editor, optionally navigating to a 1-based line

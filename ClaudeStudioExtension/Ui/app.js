@@ -231,6 +231,86 @@ function toggleCmdMenu() {
     menu.classList.toggle("open");
 }
 
+// ── Context usage (V12) ───────────────────────────────────────
+// Asks the live claude for its context breakdown via the agent's
+// get_context_usage control_request and renders it as a card in the chat.
+let _pendingCtxUsageCard = null;
+
+function requestContextUsage() {
+    document.getElementById("cmd-menu").classList.remove("open");
+    if (welcome) { welcome.remove(); welcome = null; }
+
+    const card = document.createElement("div");
+    card.className = "question-card ctx-usage-card";
+    card.innerHTML = `<div class="question-text">◔ Context usage</div><div class="ctx-usage-body">Loading…</div>`;
+    messages.appendChild(card);
+    autoScroll();
+    _pendingCtxUsageCard = card;
+
+    try { window.chrome.webview.postMessage({ type: "get-context-usage" }); }
+    catch (e) { card.querySelector(".ctx-usage-body").textContent = "Failed to reach the extension."; }
+}
+
+const _ctxPalette = ["#d97757", "#6a9bcc", "#8a7fd0", "#5faa8a", "#c9a75a", "#c47ba6", "#7fb6c9", "#a0a68a"];
+
+function fmtTokens(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+    if (n >= 1000) return (n / 1000).toFixed(1) + "k";
+    return String(n || 0);
+}
+
+function renderContextUsageCard(usageJson, error) {
+    const card = _pendingCtxUsageCard;
+    _pendingCtxUsageCard = null;
+    if (!card) return;
+    const body = card.querySelector(".ctx-usage-body");
+
+    if (error || !usageJson) {
+        const friendly = (error || "").includes("no active session") || (error || "").includes("agent not running")
+            ? "No active session yet — send a message first, then check again."
+            : `Failed to load context usage: ${error || "empty response"}`;
+        body.textContent = friendly;
+        return;
+    }
+
+    let u;
+    try { u = JSON.parse(usageJson); }
+    catch (e) { body.textContent = "Failed to parse context usage."; return; }
+
+    const cats = (u.categories || []).filter(c => (c.tokens || 0) > 0 && !c.isDeferred);
+    const segs = cats.filter(c => c.name !== "Free space");
+    const max = u.rawMaxTokens || 1;
+
+    let html = `<div class="ctx-usage-header"><span>${escapeHtml(u.model || "")}</span>` +
+        `<span>${fmtTokens(u.totalTokens)} / ${fmtTokens(u.rawMaxTokens)} tokens (${u.percentage ?? "?"}%)</span></div>`;
+
+    html += `<div class="ctx-usage-track">` + segs.map(c =>
+        `<div class="ctx-usage-seg" style="background:${_ctxPalette[cats.indexOf(c) % _ctxPalette.length]};width:${(c.tokens / max * 100).toFixed(2)}%" title="${escapeHtml(c.name)}: ${fmtTokens(c.tokens)}"></div>`
+    ).join("") + `</div>`;
+
+    html += `<div class="ctx-cat-list">` + cats.map((c, i) => {
+        const swatch = c.name === "Free space" ? "" : `background:${_ctxPalette[i % _ctxPalette.length]}`;
+        const pct = ((c.tokens / max) * 100).toFixed(1);
+        return `<div class="ctx-cat-row"><span class="ctx-cat-swatch" style="${swatch}"></span>` +
+            `<span class="ctx-cat-name">${escapeHtml(c.name)}</span>` +
+            `<span class="ctx-cat-tokens">${fmtTokens(c.tokens)}</span>` +
+            `<span class="ctx-cat-pct">${pct}%</span></div>`;
+    }).join("") + `</div>`;
+
+    const top = (arr, nameOf) => (arr || []).slice().sort((a, b) => (b.tokens || 0) - (a.tokens || 0)).slice(0, 5)
+        .map(x => `<div class="ctx-cat-row"><span class="ctx-cat-swatch"></span>` +
+            `<span class="ctx-cat-name">${escapeHtml(nameOf(x))}</span>` +
+            `<span class="ctx-cat-tokens">${fmtTokens(x.tokens)}</span><span class="ctx-cat-pct"></span></div>`).join("");
+
+    if ((u.memoryFiles || []).length > 0)
+        html += `<div class="ctx-usage-subheader">Memory files</div><div class="ctx-cat-list">${top(u.memoryFiles, x => x.path || "")}</div>`;
+    if ((u.agents || []).length > 0)
+        html += `<div class="ctx-usage-subheader">Custom agents</div><div class="ctx-cat-list">${top(u.agents, x => x.agentType || "")}</div>`;
+
+    body.innerHTML = html;
+    autoScroll();
+}
+
 function exportChatToMarkdown() {
     document.getElementById("cmd-menu").classList.remove("open");
     const messagesEl = document.getElementById("messages");
@@ -1664,6 +1744,11 @@ window.chrome.webview.addEventListener("message", event => {
     if (event.data.type === "visibility-changed") {
         _toolWindowVisible = !!event.data.visible;
         if (_toolWindowVisible && _captionAttention === "done") setCaptionAttention(null);
+        return;
+    }
+
+    if (event.data.type === "context-usage") {
+        renderContextUsageCard(event.data.usage || null, event.data.error || null);
         return;
     }
 

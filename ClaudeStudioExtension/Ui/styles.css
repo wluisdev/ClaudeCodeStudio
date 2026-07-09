@@ -2106,6 +2106,20 @@ html.light-theme .toast { background: #fff; color: #1e1e1e; border-color: #ccc; 
 .assistant .bubble a { color: var(--accent); text-decoration: underline; }
 .assistant .bubble a.file-link { text-decoration-style: dotted; cursor: pointer; }
 
+/* Context usage card (V12) */
+.ctx-usage-body { font-size: 12px; margin-top: 8px; }
+.ctx-usage-header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; color: #bbb; }
+html.light-theme .ctx-usage-header { color: #555; }
+.ctx-usage-track { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: rgba(128,128,128,0.18); margin-bottom: 8px; }
+.ctx-usage-seg { height: 100%; min-width: 1px; }
+.ctx-usage-subheader { margin: 10px 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #777; }
+.ctx-cat-list { display: flex; flex-direction: column; gap: 2px; }
+.ctx-cat-row { display: flex; align-items: center; gap: 8px; line-height: 1.6; }
+.ctx-cat-swatch { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
+.ctx-cat-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-cat-tokens { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: #999; }
+.ctx-cat-pct { flex: 0 0 48px; text-align: right; font-variant-numeric: tabular-nums; color: #999; }
+
 .assistant .bubble .md-table {
     border-collapse: collapse;
     margin: 6px 0;

@@ -29,6 +29,11 @@ public class ChatRequest
     // and the next AskStreamingAsync call hits "stream in use" exception.
     public bool CancelTurn { get; set; }
 
+    // Context usage probe: sends a control_request{subtype:"get_context_usage"}
+    // to the running claude and forwards the response back as a
+    // "context-usage-result" chunk (Text = the inner usage JSON).
+    public bool ContextUsage { get; set; }
+
     // Native file rewind: ask the running claude (with checkpointing enabled) to
     // restore files to the state before a given user message. The agent sends a
     // control_request{subtype:"rewind_files"} on claude.stdin and forwards the

@@ -198,6 +198,19 @@ try
             continue;
         }
 
+        if (request.ContextUsage)
+        {
+            if (session == null || !session.IsAlive)
+                EmitError("context-usage: no active session");
+            else
+            {
+                try { await session.GetContextUsageAsync(); }
+                catch (Exception ex) { EmitError($"context-usage failed: {ex.Message}"); }
+            }
+            EmitDone();
+            continue;
+        }
+
         var wantKey = ClaudeSession.MakeKey(request);
         // !IsAlive covers the post-cancel case: the session object lingers
         // (disposed) because SendMessageAsync returned via stdout EOF instead of
@@ -934,6 +947,62 @@ The user's IDE selection (if any) is included in the conversation context and ma
         }
 
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = "rewind: claude exited before responding" }));
+        Console.Out.Flush();
+    }
+
+    // Sends a get_context_usage control_request and forwards the inner response
+    // ({model, totalTokens, rawMaxTokens, percentage, categories, memoryFiles,
+    // agents}) back as a "context-usage-result" chunk. Same idle-stdout contract
+    // as RewindAsync: called between turns, so this owns stdout while waiting.
+    public async Task GetContextUsageAsync()
+    {
+        if (_stdin == null || _stdout == null || _proc == null || _proc.HasExited)
+            throw new InvalidOperationException("session not started or already exited");
+
+        var requestId = "ctxusage-" + Guid.NewGuid().ToString("N");
+        var msg = new
+        {
+            type = "control_request",
+            request_id = requestId,
+            request = new { subtype = "get_context_usage" }
+        };
+        var ndjson = JsonSerializer.Serialize(msg);
+
+        await _stdinLock.WaitAsync();
+        try
+        {
+            await _stdin.WriteLineAsync(ndjson);
+            await _stdin.FlushAsync();
+        }
+        finally { _stdinLock.Release(); }
+
+        string? line;
+        while ((line = await _stdout.ReadLineAsync()) != null)
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            JsonElement evt;
+            try { evt = JsonSerializer.Deserialize<JsonElement>(line); }
+            catch { continue; }
+            if (!evt.TryGetProperty("type", out var tp) || tp.GetString() != "control_response") continue;
+            if (!evt.TryGetProperty("response", out var resp)) continue;
+            if (!resp.TryGetProperty("request_id", out var rid) || rid.GetString() != requestId) continue;
+
+            var subtype = resp.TryGetProperty("subtype", out var st) ? st.GetString() : null;
+            if (subtype == "error")
+            {
+                var errMsg = resp.TryGetProperty("error", out var er) ? er.GetString() : "context usage failed";
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = $"context-usage: {errMsg}" }));
+                Console.Out.Flush();
+                return;
+            }
+
+            var inner = resp.TryGetProperty("response", out var rr) ? rr.GetRawText() : "{}";
+            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "context-usage-result", Text = inner }));
+            Console.Out.Flush();
+            return;
+        }
+
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = "context-usage: claude exited before responding" }));
         Console.Out.Flush();
     }
 
