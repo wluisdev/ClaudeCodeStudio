@@ -317,7 +317,7 @@ sealed class ClaudeSession : IAsyncDisposable
 
     public ClaudeSession(ChatRequest request, string? pipeName)
     {
-        _model = request.Model ?? "claude-sonnet-4-6";
+        _model = request.Model ?? "claude-sonnet-5";
         _effort = request.Effort;
         _permissionMode = request.PermissionMode ?? "ask";
         _workingDirectory = request.WorkingDirectory;

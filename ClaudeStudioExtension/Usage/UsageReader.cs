@@ -26,8 +26,11 @@ public static class Pricing
     // USD per 1M tokens. Cache write = input * 1.25; cache read = input * 0.10.
     private static readonly Dictionary<string, (decimal input, decimal output)> _base = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["claude-sonnet-5"]   = (3m, 15m), // sticker price; intro $2/$10 runs through 2026-08-31
         ["claude-sonnet-4-6"] = (3m, 15m),
         ["claude-opus-4-8"]   = (5m, 25m),
+        ["claude-fable-5"]    = (10m, 50m),
+        ["claude-mythos-5"]   = (10m, 50m),
         ["claude-haiku-4-5"]  = (1m, 5m),
     };
 
@@ -36,6 +39,8 @@ public static class Pricing
         foreach (var kv in _base)
             if (model.StartsWith(kv.Key, StringComparison.OrdinalIgnoreCase))
                 return kv.Value;
+        if (model.Contains("fable", StringComparison.OrdinalIgnoreCase)
+            || model.Contains("mythos", StringComparison.OrdinalIgnoreCase)) return (10m, 50m);
         if (model.Contains("opus", StringComparison.OrdinalIgnoreCase))   return (5m, 25m);
         if (model.Contains("haiku", StringComparison.OrdinalIgnoreCase))  return (1m, 5m);
         return (3m, 15m); // sonnet default
@@ -82,7 +87,7 @@ public static class UsageReader
     {
         string? sessionId = null;
         string? cwd = null;
-        string model = "claude-sonnet-4-6";
+        string model = "claude-sonnet-5";
         DateTime first = DateTime.MaxValue, last = DateTime.MinValue;
         long inp = 0, outp = 0, cr = 0, cc = 0;
         int turns = 0;

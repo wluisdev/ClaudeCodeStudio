@@ -2642,7 +2642,7 @@ public partial class AgentToolWindowControl : UserControl
         public string Text { get; set; } = "";
 
         [JsonPropertyName("model")]
-        public string Model { get; set; } = "claude-sonnet-4-6";
+        public string Model { get; set; } = "claude-sonnet-5";
 
         [JsonPropertyName("effort")]
         public string? Effort { get; set; }

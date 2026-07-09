@@ -3,7 +3,7 @@ namespace ClaudeStudioShared;
 public class ChatRequest
 {
     public string Message { get; set; } = "";
-    public string Model { get; set; } = "claude-sonnet-4-6";
+    public string Model { get; set; } = "claude-sonnet-5";
     public string? Effort { get; set; }
     public string PermissionMode { get; set; } = "ask";
     public bool ResetSession { get; set; }
