@@ -80,9 +80,12 @@
                 <div class="cmd-wrap" id="settings-wrap">
                     <button class="cmd-trigger" title="Settings" onclick="toggleSettings()">⚙</button>
                     <div class="cmd-menu settings-menu" id="settings-menu">
-                        <div class="cmd-section">Settings</div>
+                        <div class="cmd-section">Appearance</div>
                         <div class="settings-row">
-                            <span class="settings-label">Theme</span>
+                            <span class="settings-label">
+                                Theme
+                                <span class="info-icon" title="Chat theme. Auto follows the Visual Studio theme; Dark/Light force one regardless of VS.">ⓘ</span>
+                            </span>
                             <select id="theme-override" class="settings-select" onchange="setThemeOverride(this.value)">
                                 <option value="auto">Auto (follow VS)</option>
                                 <option value="dark">Dark</option>
@@ -90,22 +93,57 @@
                             </select>
                         </div>
                         <div class="settings-row">
-                            <span class="settings-label">Accent color</span>
+                            <span class="settings-label">
+                                Accent color
+                                <span class="info-icon" title="Accent used for buttons, links and highlights across the chat. ↶ restores the default.">ⓘ</span>
+                            </span>
                             <div class="settings-color-group">
                                 <input type="color" id="accent-custom" class="settings-color" oninput="setAccentCustom(this.value)" />
                                 <button type="button" class="settings-color-reset" title="Reset to default" onclick="resetAccent()">↶</button>
                             </div>
                         </div>
+                        <div class="cmd-divider"></div>
+                        <div class="cmd-section">Chat</div>
                         <div class="settings-row">
-                            <span class="settings-label">Auto-resume last session</span>
+                            <span class="settings-label">
+                                Auto-resume last session
+                                <span class="info-icon" title="When the chat reloads (tab switch, VS restart), automatically resume the most recent session for this workspace.">ⓘ</span>
+                            </span>
                             <label class="toggle">
                                 <input type="checkbox" id="auto-resume-toggle" onchange="setAutoResume(this.checked)" />
                                 <span class="toggle-track"></span>
                             </label>
                         </div>
-                        <div class="cmd-divider"></div>
                         <div class="settings-row">
-                            <span class="settings-label">Show tokens</span>
+                            <span class="settings-label">
+                                Send with Enter
+                                <span class="info-icon" title="On: Enter sends, Shift+Enter inserts a newline. Off: Enter inserts a newline, Shift+Enter sends.">ⓘ</span>
+                            </span>
+                            <label class="toggle">
+                                <input type="checkbox" id="send-enter-toggle" checked onchange="setSendWithEnter(this.checked)" />
+                                <span class="toggle-track"></span>
+                            </label>
+                        </div>
+                        <div class="settings-row effort-row">
+                            <span class="settings-label">
+                                Auto-save before send
+                                <span class="info-icon" title="Save documents before each send: none = never, active = the active document only, all = all open documents.">ⓘ</span>
+                            </span>
+                            <span class="effort-value-label" id="autosave-label">active</span>
+                        </div>
+                        <div class="effort-slider-wrap">
+                            <input type="range" class="effort-slider" id="autosave-slider" min="0" max="2" step="1" value="1" />
+                            <div class="effort-ticks">
+                                <span>none</span><span>active</span><span>all</span>
+                            </div>
+                        </div>
+                        <div class="cmd-divider"></div>
+                        <div class="cmd-section">Display</div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                Show tokens
+                                <span class="info-icon" title="Show token usage (input/output) under each response.">ⓘ</span>
+                            </span>
                             <label class="toggle">
                                 <input type="checkbox" id="tokens-toggle" checked onchange="setShowTokens(this.checked)" />
                                 <span class="toggle-track"></span>
@@ -122,13 +160,35 @@
                             </label>
                         </div>
                         <div class="settings-row">
-                            <span class="settings-label">Send with Enter</span>
-                            <label class="toggle">
-                                <input type="checkbox" id="send-enter-toggle" checked onchange="setSendWithEnter(this.checked)" />
-                                <span class="toggle-track"></span>
-                            </label>
+                            <span class="settings-label">
+                                Response log
+                                <span class="info-icon" title="Detail of the ⏱ line appended after each response: full = duration + tools + tokens, simple = total duration, none = off.">ⓘ</span>
+                            </span>
+                        </div>
+                        <input type="hidden" id="timing-select" value="simple" />
+                        <div class="timing-options">
+                            <div class="timing-opt" data-value="full" onclick="setTimingMode(this)">
+                                <span class="timing-opt-name">full</span>
+                                <span class="timing-opt-ex">⏱ 1.2s · 3 tools · 2k tok</span>
+                            </div>
+                            <div class="timing-opt" data-value="simple" onclick="setTimingMode(this)">
+                                <span class="timing-opt-name">simple</span>
+                                <span class="timing-opt-ex">⏱ total: 1.2s</span>
+                            </div>
+                            <div class="timing-opt" data-value="none" onclick="setTimingMode(this)">
+                                <span class="timing-opt-name">none</span>
+                                <span class="timing-opt-ex">no log</span>
+                            </div>
+                        </div>
+                        <div class="settings-row" style="padding-top:6px">
+                            <span class="settings-label">Time unit</span>
+                            <div class="unit-toggle">
+                                <button class="unit-btn" id="unit-ms" onclick="setTimeUnit('ms')">ms</button>
+                                <button class="unit-btn" id="unit-s" onclick="setTimeUnit('s')">s</button>
+                            </div>
                         </div>
                         <div class="cmd-divider"></div>
+                        <div class="cmd-section">Claude Code</div>
                         <div class="settings-row">
                             <span class="settings-label">
                                 Co-author commits
@@ -157,45 +217,12 @@
                             <input type="number" id="cleanup-days-input" class="settings-number" min="1" placeholder="30" oninput="setCleanupDays(this.value)" />
                         </div>
                         <div class="cmd-divider"></div>
-                        <div class="settings-row effort-row">
-                            <span class="settings-label">Auto-save before send</span>
-                            <span class="effort-value-label" id="autosave-label">active</span>
-                        </div>
-                        <div class="effort-slider-wrap">
-                            <input type="range" class="effort-slider" id="autosave-slider" min="0" max="2" step="1" value="1" />
-                            <div class="effort-ticks">
-                                <span>none</span><span>active</span><span>all</span>
-                            </div>
-                        </div>
-                        <div class="cmd-divider"></div>
+                        <div class="cmd-section">Workspace</div>
                         <div class="settings-row">
-                            <span class="settings-label">Response log</span>
-                        </div>
-                        <input type="hidden" id="timing-select" value="simple" />
-                        <div class="timing-options">
-                            <div class="timing-opt" data-value="full" onclick="setTimingMode(this)">
-                                <span class="timing-opt-name">full</span>
-                                <span class="timing-opt-ex">⏱ 1.2s · 3 tools · 2k tok</span>
-                            </div>
-                            <div class="timing-opt" data-value="simple" onclick="setTimingMode(this)">
-                                <span class="timing-opt-name">simple</span>
-                                <span class="timing-opt-ex">⏱ total: 1.2s</span>
-                            </div>
-                            <div class="timing-opt" data-value="none" onclick="setTimingMode(this)">
-                                <span class="timing-opt-name">none</span>
-                                <span class="timing-opt-ex">no log</span>
-                            </div>
-                        </div>
-                        <div class="settings-row" style="padding-top:6px">
-                            <span class="settings-label">Time unit</span>
-                            <div class="unit-toggle">
-                                <button class="unit-btn" id="unit-ms" onclick="setTimeUnit('ms')">ms</button>
-                                <button class="unit-btn" id="unit-s" onclick="setTimeUnit('s')">s</button>
-                            </div>
-                        </div>
-                        <div class="cmd-divider"></div>
-                        <div class="settings-row">
-                            <span class="settings-label">Working directory</span>
+                            <span class="settings-label">
+                                Working directory
+                                <span class="info-icon" title="Folder where claude runs. Leave blank to auto-resolve (solution → open folder → active document). Changing it restarts the session.">ⓘ</span>
+                            </span>
                             <div class="inline-toggle-wrap">
                                 <span class="inline-toggle-label">Show</span>
                                 <label class="toggle" title="Show working directory bar">
@@ -209,9 +236,11 @@
                             <button type="button" class="settings-input-clear" title="Clear" onclick="clearWorkingDirectory()">✕</button>
                         </div>
 
-                        <div class="cmd-divider"></div>
                         <div class="settings-row">
-                            <span class="settings-label">Titlebar name</span>
+                            <span class="settings-label">
+                                Titlebar name
+                                <span class="info-icon" title="What the titlebar shows next to the plan. Auto picks the first available: organization → account name → email.">ⓘ</span>
+                            </span>
                             <select id="account-info-source" class="settings-select" onchange="setAccountInfoSource(this.value)">
                                 <option value="auto">Auto (cascade)</option>
                                 <option value="account">Account name</option>
@@ -226,8 +255,12 @@
                         </div>
 
                         <div class="cmd-divider"></div>
+                        <div class="cmd-section">Cost limits</div>
                         <div class="settings-row">
-                            <span class="settings-label">Cost limit warning ($)</span>
+                            <span class="settings-label">
+                                Cost limit warning ($)
+                                <span class="info-icon" title="Show a warning when the estimated cost of the current session or day crosses these USD values. Leave blank to disable.">ⓘ</span>
+                            </span>
                         </div>
                         <div class="cost-limits-row">
                             <label class="cost-limit-field">
@@ -252,7 +285,10 @@
                             </label>
                         </div>
                         <div class="settings-row">
-                            <span class="settings-label">Block sending when reached</span>
+                            <span class="settings-label">
+                                Block sending when reached
+                                <span class="info-icon" title="While a limit is exceeded, also block sending new messages instead of only warning.">ⓘ</span>
+                            </span>
                             <label class="toggle">
                                 <input type="checkbox" id="cost-block-toggle" onchange="setCostBlock(this.checked)" />
                                 <span class="toggle-track"></span>
