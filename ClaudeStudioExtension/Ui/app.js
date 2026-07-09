@@ -736,12 +736,28 @@ function renderAccountInfo() {
     el.title = tooltip;
 }
 
+// Tool-window caption attention markers (V13): "pending" while a permission
+// modal or AskUserQuestion card waits on the user, "done" when a turn finishes
+// while the tool window is hidden. The tab caption is the only surface that
+// stays visible when the window is backgrounded — the in-chat .tool-pending
+// chip isn't. Cleared on resolve / when the window regains visibility.
+let _captionAttention = null;
+let _toolWindowVisible = true;
+
+function setCaptionAttention(state) {
+    if (_captionAttention === state) return;
+    _captionAttention = state;
+    updateCaption();
+}
+
 function updateCaption() {
     const opt = modelSelect.options[modelSelect.selectedIndex];
     const label = opt?.text || modelSelect.value;
     modelSelect.title = opt?.title || modelSelect.value;
+    const prefix = _captionAttention === "pending" ? "🔔 "
+        : _captionAttention === "done" ? "✓ " : "";
     try {
-        window.chrome.webview.postMessage({ type: "set-caption", text: `Claude Code Studio — ${label}` });
+        window.chrome.webview.postMessage({ type: "set-caption", text: `${prefix}Claude Code Studio — ${label}` });
     } catch (e) { /* webview not ready yet */ }
 }
 modelSelect.addEventListener("change", updateCaption);
@@ -1616,6 +1632,9 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "stream-done") {
+        // Turn over: clear any stale pending marker (cancel/dismiss paths skip
+        // the modal close hooks); flag "done" only when the window is hidden.
+        setCaptionAttention(_toolWindowVisible ? null : "done");
         if (isUsageCapture) isUsageCapture = false;
         removeLoading();
         removeLiveTimer();
@@ -1639,6 +1658,12 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "permission_request") {
         openPermissionModal(event.data.tool || "", event.data.input || "", event.data.id || "", event.data.cwd || "");
+        return;
+    }
+
+    if (event.data.type === "visibility-changed") {
+        _toolWindowVisible = !!event.data.visible;
+        if (_toolWindowVisible && _captionAttention === "done") setCaptionAttention(null);
         return;
     }
 
@@ -1678,6 +1703,7 @@ let pendingPermissionToolName = null;
 function openPermissionModal(tool, input, id, cwd) {
     pendingPermissionToolId = id;
     pendingPermissionToolName = tool;
+    setCaptionAttention("pending");
     document.getElementById("perm-modal-tool").textContent = tool;
 
     if (id) {
@@ -1707,6 +1733,7 @@ function openPermissionModal(tool, input, id, cwd) {
 }
 
 function closePermissionModal() {
+    if (_captionAttention === "pending") setCaptionAttention(null);
     document.getElementById("perm-modal-overlay").classList.remove("open");
     if (pendingPermissionToolId) {
         const chip = messages.querySelector(`.tool-chip[data-tool-id="${CSS.escape(pendingPermissionToolId)}"]`);
@@ -2700,6 +2727,7 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
     const card = document.createElement("div");
     card.className = "question-card ask-question-card";
     card.dataset.toolId = toolId;
+    setCaptionAttention("pending");
 
     const answers = {};
     // Multi-select answers are tracked as arrays internally so we can join
@@ -2870,6 +2898,7 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
         } catch (e) {
             console.warn("AskUserQuestion answer send failed:", e);
         }
+        if (_captionAttention === "pending") setCaptionAttention(null);
     }
 }
 

@@ -77,6 +77,18 @@ public partial class AgentToolWindowControl : UserControl
         object sender,
         System.Windows.DependencyPropertyChangedEventArgs e)
     {
+        // The webview tracks visibility for the caption attention markers
+        // (V13): "done" only makes sense while hidden, and clears on return.
+        if (Browser?.CoreWebView2 != null)
+        {
+            try
+            {
+                Browser.CoreWebView2.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new { type = "visibility-changed", visible = (bool)e.NewValue }));
+            }
+            catch { /* webview tearing down */ }
+        }
+
         if ((bool)e.NewValue && Browser?.CoreWebView2 != null)
         {
             Dispatcher.BeginInvoke(
