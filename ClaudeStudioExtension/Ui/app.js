@@ -2191,8 +2191,19 @@ function renderMarkdown(raw) {
         return `<table class="md-table">${thead}${tbody}</table>\n`;
     });
 
-    // Links
-    text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+    // Links. External URLs keep target=_blank; anything else is treated as a
+    // workspace file reference (the appended system prompt instructs claude to
+    // emit [file.cs:42](path/file.cs#L42)) and becomes a file-link that opens
+    // in the VS editor at the referenced line.
+    text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, href) => {
+        if (/^(https?:|mailto:)/i.test(href))
+            return `<a href="${href}" target="_blank">${label}</a>`;
+        const fm = href.match(/^(.*?)(?:#L(\d+)(?:-L?(\d+))?)?$/);
+        const path = (fm[1] || href).replace(/"/g, "&quot;");
+        const start = fm[2] || "0";
+        const end = fm[3] || fm[2] || "0";
+        return `<a href="#" class="file-link" data-path="${path}" data-start="${start}" data-end="${end}" onclick="openFileLink(this);return false;">${label}</a>`;
+    });
 
     // Paragraphs
     text = text.split(/\n{2,}/).map(block => {
@@ -3051,6 +3062,18 @@ function renderBranchedMessages(newSessionId, msgs) {
         }
     }
     autoScroll();
+}
+
+// Click handler for file-links rendered by renderMarkdown. Path may be
+// relative (resolved against the working directory on the C# side) or
+// absolute; startLine/endLine are 1-based, 0 = plain open.
+function openFileLink(el) {
+    window.chrome.webview.postMessage({
+        type: "open-file",
+        path: el.dataset.path || "",
+        startLine: parseInt(el.dataset.start || "0", 10) || 0,
+        endLine: parseInt(el.dataset.end || "0", 10) || 0
+    });
 }
 
 function addAttachment(filename, content, isBinary, filePath) {

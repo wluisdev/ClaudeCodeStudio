@@ -2104,6 +2104,7 @@ html.light-theme .toast { background: #fff; color: #1e1e1e; border-color: #ccc; 
     color: #e0a07a;
 }
 .assistant .bubble a { color: var(--accent); text-decoration: underline; }
+.assistant .bubble a.file-link { text-decoration-style: dotted; cursor: pointer; }
 
 .assistant .bubble .md-table {
     border-collapse: collapse;

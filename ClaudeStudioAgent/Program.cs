@@ -331,6 +331,29 @@ sealed class ClaudeSession : IAsyncDisposable
     public static string MakeKey(ChatRequest r) =>
         $"{r.Model}|{r.Effort}|{r.PermissionMode}|{r.WorkingDirectory}|{r.ResumeSessionId}|{r.AutoResume}";
 
+    // Appended to claude's system prompt (--append-system-prompt). Mirrors the
+    // official VS Code extension's append (v2.1.145): markdown-link file
+    // references make them clickable in the webview (the UI turns non-http
+    // links into open-file requests), and the ide_selection paragraph tells the
+    // model what the selection block attached to user messages means.
+    private const string VsContextPrompt = """
+# Visual Studio Extension Context
+
+You are running inside a Visual Studio 2022 extension environment.
+
+## Code References in Text
+IMPORTANT: When referencing files or code locations, use markdown link syntax to make them clickable:
+- For files: [Program.cs](src/Program.cs)
+- For specific lines: [Program.cs:42](src/Program.cs#L42)
+- For a range of lines: [Program.cs:42-51](src/Program.cs#L42-L51)
+- For folders: [src/utils/](src/utils/)
+Unless explicitly asked for by the user, DO NOT USE backticks ` or HTML tags like code for file references - always use markdown [text](link) format.
+The URL links should be relative paths from the working directory.
+
+## User Selection Context
+The user's IDE selection (if any) is included in the conversation context and marked with ide_selection tags. This represents code or text the user has highlighted in their editor and may or may not be relevant to their request.
+""";
+
     public async Task StartAsync()
     {
         var sw = Stopwatch.StartNew();
@@ -361,6 +384,8 @@ sealed class ClaudeSession : IAsyncDisposable
         psi.ArgumentList.Add("stream-json");
         psi.ArgumentList.Add("--verbose");
         psi.ArgumentList.Add("--include-partial-messages");
+        psi.ArgumentList.Add("--append-system-prompt");
+        psi.ArgumentList.Add(VsContextPrompt);
         psi.ArgumentList.Add("--model");
         psi.ArgumentList.Add(_model);
 

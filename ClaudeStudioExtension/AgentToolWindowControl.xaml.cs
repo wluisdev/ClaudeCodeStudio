@@ -1034,12 +1034,8 @@ public partial class AgentToolWindowControl : UserControl
 
             if (request.Type == "open-file")
             {
-                if (!string.IsNullOrEmpty(request.Path) && File.Exists(request.Path))
-                {
-                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                    var dteOpen = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
-                    try { dteOpen?.ItemOperations.OpenFile(request.Path); } catch { }
-                }
+                await OpenFileInEditorAsync(request.Path, request.StartLine ?? 0, request.EndLine ?? 0,
+                    _lastWorkingDir ?? currentSolutionDir);
                 return;
             }
 
@@ -1275,9 +1271,15 @@ public partial class AgentToolWindowControl : UserControl
                 AutoCompact = request.AutoCompact ?? true
             };
 
+            // IDE selection context (V11): when the user has text highlighted in
+            // the active editor, attach it to the outgoing message in
+            // <ide_selection> tags. Only what claude receives changes — the user
+            // bubble was already rendered from the typed text.
+            var ideSelection = await CaptureIdeSelectionAsync(workingDir);
+
             var dispatcher = System.Windows.Application.Current.Dispatcher;
 
-            await _agentClient.AskStreamingAsync(request.Text, request.Model, request.Effort, request.PermissionMode,
+            await _agentClient.AskStreamingAsync(request.Text + ideSelection, request.Model, request.Effort, request.PermissionMode,
                 chunk => dispatcher.Invoke(() =>
                 {
                     const string notFound = "CLAUDE_NOT_FOUND::";
@@ -1662,6 +1664,78 @@ public partial class AgentToolWindowControl : UserControl
         {
             OutputLog.Error($"apply-to-editor failed: {ex.Message}");
         }
+    }
+
+    // Opens a file in the VS editor, optionally navigating to a 1-based line
+    // range (V11 file-links). Relative paths — claude's markdown links are
+    // relative to its working directory per the appended system prompt —
+    // resolve against the agent cwd, falling back to the solution directory.
+    private async Task OpenFileInEditorAsync(string? path, int startLine, int endLine, string? baseDir)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        var candidate = path!.Replace('/', '\\');
+        if (!System.IO.Path.IsPathRooted(candidate))
+        {
+            if (string.IsNullOrEmpty(baseDir)) return;
+            candidate = System.IO.Path.Combine(baseDir, candidate);
+        }
+        if (!File.Exists(candidate))
+        {
+            OutputLog.Warn($"open-file: not found: {candidate}");
+            return;
+        }
+
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+        if (dte == null) return;
+        try
+        {
+            dte.ItemOperations.OpenFile(candidate);
+            if (startLine > 0 && dte.ActiveDocument?.Selection is EnvDTE.TextSelection sel)
+            {
+                sel.MoveToLineAndOffset(startLine, 1);
+                if (endLine > startLine)
+                    sel.MoveToLineAndOffset(endLine, 1, true);
+                sel.EndOfLine(true);
+            }
+        }
+        catch (Exception ex) { OutputLog.Warn($"open-file: navigate failed: {ex.Message}"); }
+    }
+
+    // Captures the active editor selection (if any) wrapped in <ide_selection>
+    // tags for appending to the outgoing user message (V11). The appended
+    // system prompt tells the model what the tag means; the webview already
+    // rendered the user bubble from the typed text, so the UI stays clean.
+    private async Task<string> CaptureIdeSelectionAsync(string? baseDir)
+    {
+        const int maxChars = 8000;
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        try
+        {
+            var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+            var doc = dte?.ActiveDocument;
+            var selection = doc?.Selection as EnvDTE.TextSelection;
+            var code = selection?.Text;
+            if (string.IsNullOrWhiteSpace(code))
+                return "";
+
+            var filePath = doc?.FullName ?? "";
+            var startLine = selection?.TopLine ?? 0;
+            var endLine = selection?.BottomLine ?? 0;
+
+            var displayPath = (!string.IsNullOrEmpty(baseDir) && filePath.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase))
+                ? filePath.Substring(baseDir!.Length).TrimStart('\\', '/')
+                : filePath;
+
+            if (code!.Length > maxChars)
+                code = code.Substring(0, maxChars) + "\n… [selection truncated]";
+
+            var lineInfo = startLine == endLine ? $"line {startLine}" : $"lines {startLine}-{endLine}";
+            return $"\n\n<ide_selection>The user selected the following from {displayPath} ({lineInfo}):\n{code.TrimEnd('\r', '\n')}\n</ide_selection>";
+        }
+        catch { return ""; }
     }
 
     private async Task HandleGetSelectionAsync()
@@ -2670,6 +2744,13 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("path")]
         public string? Path { get; set; }
+
+        // 1-based line range for open-file navigation (V11 file-links).
+        [JsonPropertyName("startLine")]
+        public int? StartLine { get; set; }
+
+        [JsonPropertyName("endLine")]
+        public int? EndLine { get; set; }
 
         [JsonPropertyName("sessionLimit")]
         public decimal? SessionLimit { get; set; }
