@@ -568,6 +568,14 @@ const textarea = document.querySelector("textarea");
 const sendButton = null; // replaced by btnSend with streaming toggle
 const newChatButton = document.querySelector(".new-chat");
 const modelSelect = document.querySelector(".model-select");
+// Restore the last chosen model (survives VS restarts). A stored id that no
+// longer exists in the list (renamed/removed model) is ignored — setting an
+// unknown value would leave the select on the default anyway.
+(function restoreModelSelection() {
+    const stored = localStorage.getItem("chatModel");
+    if (stored && [...modelSelect.options].some(o => o.value === stored))
+        modelSelect.value = stored;
+})();
 // Tracks which model is currently in effect, so noteModelSwitch() can tell a
 // real change from a no-op and drop a divider in the transcript at the point
 // the model changed. Seeded with the initial selection (no divider at startup).
@@ -1055,6 +1063,7 @@ function noteModelSwitch() {
     const newId = modelSelect.value;
     if (newId === activeModelId) return;
     activeModelId = newId;
+    localStorage.setItem("chatModel", newId);
 
     // Nothing above the line to attribute to the old model yet — skip.
     if (!messages.querySelector(".message")) return;
@@ -2507,7 +2516,7 @@ const SETTINGS_KEYS = [
     // Cost limits (localStorage cache; disk copy cleared via set-cost-limits)
     "costSessionLimit", "costDailyLimit", "costBlock",
     // Composer selectors (incl. legacy effort key)
-    "effortLevel", "effortValue"
+    "effortLevel", "effortValue", "chatModel"
 ];
 
 function resetSettingsToDefaults() {
