@@ -269,6 +269,31 @@ try
         pipeServer?.SetRules(request.ClaudeSettings);
 
         var wantKey = ClaudeSession.MakeKey(request);
+
+        // ask↔plan share a spawn profile (same key), so a mode flip reuses the
+        // warm session and switches live via set_permission_mode (PoC-confirmed
+        // over stdio on 2.1.144). If the switch fails, drop the session and let
+        // the respawn block below rebuild it under the requested mode — the
+        // user's message still goes through either way.
+        if (session != null && session.Key == wantKey && session.IsAlive &&
+            !string.Equals(session.UiPermissionMode, request.PermissionMode ?? "ask", StringComparison.Ordinal))
+        {
+            var switched = false;
+            try { switched = await session.SwitchPermissionModeAsync(request.PermissionMode ?? "ask"); }
+            catch (Exception ex)
+            {
+                // Not user-facing (the respawn fallback recovers) — the timing
+                // channel lands in the extension's OutputLog.
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"set-permission-mode failed, respawning: {ex.Message}" }));
+                Console.Out.Flush();
+            }
+            if (!switched)
+            {
+                await session.DisposeAsync();
+                session = null;
+            }
+        }
+
         // !IsAlive covers the post-cancel case: the session object lingers
         // (disposed) because SendMessageAsync returned via stdout EOF instead of
         // throwing, so the catch below never nulled it. Respawn instead of
@@ -401,11 +426,37 @@ sealed class ClaudeSession : IAsyncDisposable
         // Spawn-time hint only — deliberately NOT in MakeKey (a title change
         // alone must not force a respawn; it re-persists at the next natural one).
         _sessionName = request.SessionName;
+        UiPermissionMode = _permissionMode;
         Key = MakeKey(request);
     }
 
+    // The UI-level mode currently in effect ("ask"/"plan"/"yolo") — updated by
+    // SwitchPermissionModeAsync when the main loop flips a reused session.
+    public string UiPermissionMode { get; private set; }
+
+    // Live permission-mode switch without a respawn (set_permission_mode over
+    // stdio, PoC-confirmed on 2.1.144). Maps UI modes to CLI modes the same way
+    // the spawn does: plan → plan; ask → bypassPermissions when the hook pipe
+    // is the gatekeeper, else claude's default mode.
+    public async Task<bool> SwitchPermissionModeAsync(string uiMode)
+    {
+        var cliMode = uiMode == "plan" ? "plan" : (_pipeName != null ? "bypassPermissions" : "default");
+        var resp = await SendControlRequestAsync(new { subtype = "set_permission_mode", mode = cliMode }, "set-permission-mode");
+        if (resp == null) return false;
+        UiPermissionMode = uiMode;
+        return true;
+    }
+
     public static string MakeKey(ChatRequest r) =>
-        $"{r.Model}|{r.Effort}|{r.PermissionMode}|{r.WorkingDirectory}|{r.ResumeSessionId}|{r.AutoResume}|{r.CliPath}";
+        $"{r.Model}|{r.Effort}|{PermissionProfile(r.PermissionMode)}|{r.WorkingDirectory}|{r.ResumeSessionId}|{r.AutoResume}|{r.CliPath}";
+
+    // ask and plan share a spawn profile (hooks + prompt tool + settings) and
+    // flip between each other live via set_permission_mode — so the key must
+    // not change between them. yolo spawns with --dangerously-skip-permissions
+    // (a flag, not a mode) and keeps its own profile (mode changes to/from
+    // yolo still respawn).
+    private static string PermissionProfile(string? mode) =>
+        mode == "yolo" ? "yolo" : "hooked";
 
     // Appended to claude's system prompt (--append-system-prompt). Mirrors the
     // official VS Code extension's append (v2.1.145): markdown-link file
@@ -494,16 +545,19 @@ The user's IDE selection (if any) is included in the conversation context and ma
         // user configured any claude settings.
         bool settingsWritten = false;
 
-        if (_permissionMode == "plan")
+        if (_permissionMode == "yolo")
         {
-            psi.ArgumentList.Add("--permission-mode");
-            psi.ArgumentList.Add("plan");
+            psi.ArgumentList.Add("--dangerously-skip-permissions");
         }
-        else if (_permissionMode == "ask")
+        else // "ask" / "plan" — one spawn profile, live-switchable via set_permission_mode
         {
             // When a pipe is available (CLAUDESTUDIO_HOOK_ENABLE=1), wire a PreToolUse
             // hook pointing back to ourselves so prompts route to the UI. Without a
             // pipe, claude auto-approves everything in stdio mode (PoC-confirmed).
+            // plan gets the same hooks since 2026-07-10: ask↔plan flips reuse the
+            // session (same key), so the spawn must carry everything either mode
+            // needs. Side effect (deliberate, more conservative than before): plan
+            // mode now shows permission modals for matched tools too.
             if (_pipeName != null)
             {
                 var settingsPath = WriteSettings(includeHooks: true)!;
@@ -528,7 +582,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
                 // via --settings + --include-hook-events) remains the sole
                 // gatekeeper — modal still appears for matched tools.
                 psi.ArgumentList.Add("--permission-mode");
-                psi.ArgumentList.Add("bypassPermissions");
+                psi.ArgumentList.Add(_permissionMode == "plan" ? "plan" : "bypassPermissions");
 
                 // Allow Read of transient files the extension drops here —
                 // pasted screenshots (Ctrl+V) land in %TEMP%/ClaudeStudio/.
@@ -542,10 +596,13 @@ The user's IDE selection (if any) is included in the conversation context and ma
                 psi.ArgumentList.Add("--add-dir");
                 psi.ArgumentList.Add(sharedTempDir);
             }
-        }
-        else // "yolo" (default)
-        {
-            psi.ArgumentList.Add("--dangerously-skip-permissions");
+            else if (_permissionMode == "plan")
+            {
+                psi.ArgumentList.Add("--permission-mode");
+                psi.ArgumentList.Add("plan");
+            }
+            // ask without a pipe: no mode arg (claude's default; auto-approves
+            // in stdio) — SwitchPermissionModeAsync uses "default" to come back.
         }
 
         // Apply user-configured claude settings in modes that didn't already write
@@ -605,6 +662,12 @@ The user's IDE selection (if any) is included in the conversation context and ma
         });
 
         EmitTiming("claude spawned", sw.ElapsedMilliseconds);
+
+        // U4: hand the claude PID to the extension so it can watch the CLI's
+        // live presence file (~/.claude/sessions/<pid>.json) for status /
+        // waitingFor updates. Emitted mid-turn, so the read loop picks it up.
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "claude-pid", Text = _proc!.Id.ToString() }));
+        Console.Out.Flush();
 
         // NOTE: we do NOT wait for `system/init` here. With `--input-format stream-json`
         // (no `-p`), claude does not emit any stdout until it receives the first stdin
@@ -969,190 +1032,53 @@ The user's IDE selection (if any) is included in the conversation context and ma
 
     // Sends a rewind_files control_request to the running claude and forwards the
     // control_response back as a "rewind-result" chunk (Text = the inner response
-    // JSON: {canRewind, filesChanged, insertions, deletions}). Called between
-    // turns (claude is idle), so this owns stdout while waiting for the reply.
+    // JSON: {canRewind, filesChanged, insertions, deletions}).
     public async Task RewindAsync(string userMessageId, bool dryRun)
     {
-        if (_stdin == null || _stdout == null || _proc == null || _proc.HasExited)
-            throw new InvalidOperationException("session not started or already exited");
-
-        var requestId = "rewind-" + Guid.NewGuid().ToString("N");
-        var msg = new
-        {
-            type = "control_request",
-            request_id = requestId,
-            request = new { subtype = "rewind_files", user_message_id = userMessageId, dry_run = dryRun }
-        };
-        var ndjson = JsonSerializer.Serialize(msg);
-
-        await _stdinLock.WaitAsync();
-        try
-        {
-            await _stdin.WriteLineAsync(ndjson);
-            await _stdin.FlushAsync();
-        }
-        finally { _stdinLock.Release(); }
-
-        // claude is idle; read until our matching control_response. Skip anything
-        // else it might emit (rate_limit_event, keep-alive, etc.).
-        string? line;
-        while ((line = await _stdout.ReadLineAsync()) != null)
-        {
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            JsonElement evt;
-            try { evt = JsonSerializer.Deserialize<JsonElement>(line); }
-            catch { continue; }
-            if (!evt.TryGetProperty("type", out var tp) || tp.GetString() != "control_response") continue;
-            if (!evt.TryGetProperty("response", out var resp)) continue;
-            if (!resp.TryGetProperty("request_id", out var rid) || rid.GetString() != requestId) continue;
-
-            var subtype = resp.TryGetProperty("subtype", out var st) ? st.GetString() : null;
-            if (subtype == "error")
-            {
-                var errMsg = resp.TryGetProperty("error", out var er) ? er.GetString() : "rewind failed";
-                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = $"rewind: {errMsg}" }));
-                Console.Out.Flush();
-                return;
-            }
-
-            // success → forward the inner response payload verbatim
-            var inner = resp.TryGetProperty("response", out var rr) ? rr.GetRawText() : "{}";
-            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "rewind-result", Text = inner }));
-            Console.Out.Flush();
-            return;
-        }
-
-        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = "rewind: claude exited before responding" }));
+        var resp = await SendControlRequestAsync(
+            new { subtype = "rewind_files", user_message_id = userMessageId, dry_run = dryRun }, "rewind");
+        if (resp == null) return;
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "rewind-result", Text = resp.Value.GetRawText() }));
         Console.Out.Flush();
     }
 
     // Sends a get_context_usage control_request and forwards the inner response
     // ({model, totalTokens, rawMaxTokens, percentage, categories, memoryFiles,
-    // agents}) back as a "context-usage-result" chunk. Same idle-stdout contract
-    // as RewindAsync: called between turns, so this owns stdout while waiting.
+    // agents}) back as a "context-usage-result" chunk.
     public async Task GetContextUsageAsync()
     {
-        if (_stdin == null || _stdout == null || _proc == null || _proc.HasExited)
-            throw new InvalidOperationException("session not started or already exited");
-
-        var requestId = "ctxusage-" + Guid.NewGuid().ToString("N");
-        var msg = new
-        {
-            type = "control_request",
-            request_id = requestId,
-            request = new { subtype = "get_context_usage" }
-        };
-        var ndjson = JsonSerializer.Serialize(msg);
-
-        await _stdinLock.WaitAsync();
-        try
-        {
-            await _stdin.WriteLineAsync(ndjson);
-            await _stdin.FlushAsync();
-        }
-        finally { _stdinLock.Release(); }
-
-        string? line;
-        while ((line = await _stdout.ReadLineAsync()) != null)
-        {
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            JsonElement evt;
-            try { evt = JsonSerializer.Deserialize<JsonElement>(line); }
-            catch { continue; }
-            if (!evt.TryGetProperty("type", out var tp) || tp.GetString() != "control_response") continue;
-            if (!evt.TryGetProperty("response", out var resp)) continue;
-            if (!resp.TryGetProperty("request_id", out var rid) || rid.GetString() != requestId) continue;
-
-            var subtype = resp.TryGetProperty("subtype", out var st) ? st.GetString() : null;
-            if (subtype == "error")
-            {
-                var errMsg = resp.TryGetProperty("error", out var er) ? er.GetString() : "context usage failed";
-                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = $"context-usage: {errMsg}" }));
-                Console.Out.Flush();
-                return;
-            }
-
-            var inner = resp.TryGetProperty("response", out var rr) ? rr.GetRawText() : "{}";
-            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "context-usage-result", Text = inner }));
-            Console.Out.Flush();
-            return;
-        }
-
-        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = "context-usage: claude exited before responding" }));
+        var resp = await SendControlRequestAsync(new { subtype = "get_context_usage" }, "context-usage");
+        if (resp == null) return;
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "context-usage-result", Text = resp.Value.GetRawText() }));
         Console.Out.Flush();
     }
 
-    // Asks the live claude for a short generated session title (V18). Same
-    // idle-stdout contract as RewindAsync. persist:false — the extension keeps
-    // titles in its own sidecar store, mirroring the official extension.
+    // Asks the live claude for a short generated session title (V18).
+    // persist:true → claude appends {"type":"ai-title"} to the session JSONL
+    // (PoC-confirmed on 2.1.144), so the terminal /resume picker shows our
+    // generated titles too. The sidecar store stays as cache.
     public async Task GenerateSessionTitleAsync(string description)
     {
-        if (_stdin == null || _stdout == null || _proc == null || _proc.HasExited)
-            throw new InvalidOperationException("session not started or already exited");
+        var resp = await SendControlRequestAsync(
+            new { subtype = "generate_session_title", description, persist = true }, "session-title");
+        if (resp == null) return;
 
-        var requestId = "title-" + Guid.NewGuid().ToString("N");
-        var msg = new
-        {
-            type = "control_request",
-            request_id = requestId,
-            // persist:true → claude appends {"type":"ai-title"} to the session
-            // JSONL (PoC-confirmed on 2.1.144), so the terminal /resume picker
-            // shows our generated titles too. The sidecar store stays as cache.
-            request = new { subtype = "generate_session_title", description, persist = true }
-        };
-        var ndjson = JsonSerializer.Serialize(msg);
+        string? title = null;
+        if (resp.Value.ValueKind == JsonValueKind.Object &&
+            resp.Value.TryGetProperty("title", out var t) &&
+            t.ValueKind == JsonValueKind.String)
+            title = t.GetString();
 
-        await _stdinLock.WaitAsync();
-        try
-        {
-            await _stdin.WriteLineAsync(ndjson);
-            await _stdin.FlushAsync();
-        }
-        finally { _stdinLock.Release(); }
-
-        string? line;
-        while ((line = await _stdout.ReadLineAsync()) != null)
-        {
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            JsonElement evt;
-            try { evt = JsonSerializer.Deserialize<JsonElement>(line); }
-            catch { continue; }
-            if (!evt.TryGetProperty("type", out var tp) || tp.GetString() != "control_response") continue;
-            if (!evt.TryGetProperty("response", out var resp)) continue;
-            if (!resp.TryGetProperty("request_id", out var rid) || rid.GetString() != requestId) continue;
-
-            var subtype = resp.TryGetProperty("subtype", out var st) ? st.GetString() : null;
-            if (subtype == "error")
-            {
-                var errMsg = resp.TryGetProperty("error", out var er) ? er.GetString() : "title generation failed";
-                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = $"session-title: {errMsg}" }));
-                Console.Out.Flush();
-                return;
-            }
-
-            string? title = null;
-            if (resp.TryGetProperty("response", out var rr) &&
-                rr.ValueKind == JsonValueKind.Object &&
-                rr.TryGetProperty("title", out var t) &&
-                t.ValueKind == JsonValueKind.String)
-                title = t.GetString();
-
-            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "session-title-result", Text = title ?? "" }));
-            Console.Out.Flush();
-            return;
-        }
-
-        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = "session-title: claude exited before responding" }));
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "session-title-result", Text = title ?? "" }));
         Console.Out.Flush();
     }
 
     // Generic one-shot client-initiated control_request (V20): writes the
     // request, drains stdout until the matching control_response, and returns
     // the inner response element — or null after emitting an error chunk.
-    // Same idle-stdout contract as RewindAsync (called between turns only).
-    // NOTE: rewind/context-usage/title predate this helper and keep their own
-    // copies until the current validation round closes; folding them in is a
-    // follow-up cleanup.
+    // Called between turns only (claude idle), so it owns stdout while waiting;
+    // anything else claude emits meanwhile (rate_limit_event, keep-alives) is
+    // skipped.
     private async Task<JsonElement?> SendControlRequestAsync(object request, string label)
     {
         if (_stdin == null || _stdout == null || _proc == null || _proc.HasExited)

@@ -33,6 +33,11 @@ public class AgentClient
     public string? PendingResumeSessionId { get; set; }
     public string? CurrentSessionId { get; private set; }
 
+    // U4: fired with claude.exe's PID right after the agent spawns it, so the
+    // control can point a FileSystemWatcher at the CLI's presence file
+    // (~/.claude/sessions/<pid>.json — carries status/waitingFor).
+    public Action<int>? OnClaudePid { get; set; }
+
     // User-configurable claude settings (V7). Set by the control from the UI;
     // attached to each outbound ChatRequest so the agent writes them into the
     // settings.json it passes to claude.
@@ -471,6 +476,16 @@ public class AgentClient
             {
                 OutputLog.Info($"timing: {chunk.Text}");
                 onTiming?.Invoke(chunk.Text);
+                continue;
+            }
+
+            if (chunk.Type == "claude-pid")
+            {
+                if (int.TryParse(chunk.Text, out var claudePid))
+                {
+                    try { OnClaudePid?.Invoke(claudePid); }
+                    catch (Exception ex) { OutputLog.Warn($"presence watcher start failed: {ex.Message}"); }
+                }
                 continue;
             }
 

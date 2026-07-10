@@ -911,6 +911,22 @@ function renderCwd(vsPath) {
     }
 }
 
+// ── Presence (U4) ──────────────────────────────────────────
+// Live status from the CLI's presence file (~/.claude/sessions/<pid>.json).
+// Only "waiting" states carry information the UI doesn't already show
+// (streaming/pending are covered elsewhere), so that's all we render.
+function renderPresence(status, waitingFor) {
+    const el = document.getElementById("cwdbar-presence");
+    if (!el) return;
+    if (status === "waiting" && waitingFor) {
+        el.textContent = "⏸ " + waitingFor;
+        el.hidden = false;
+    } else {
+        el.textContent = "";
+        el.hidden = true;
+    }
+}
+
 function copyCwd() {
     if (!_cwdFullPath) return;
     // Untrusted workspace: reopen the trust prompt instead of copying — more useful
@@ -2166,6 +2182,11 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "slash-commands") {
         renderSlashCommands(event.data.project || [], event.data.user || []);
+        return;
+    }
+
+    if (event.data.type === "presence-status") {
+        renderPresence(event.data.status || "", event.data.waitingFor || "");
         return;
     }
 

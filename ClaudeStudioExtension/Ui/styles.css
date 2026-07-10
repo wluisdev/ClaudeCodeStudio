@@ -908,6 +908,16 @@ html.light-theme .history-footer {
     transition: background 0.15s ease, color 0.15s ease;
 }
 
+/* Presence segment (U4): pushed to the right edge, amber while waiting. */
+.cwdbar-presence {
+    margin-left: auto;
+    color: #d8a054;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 45%;
+}
+
 .cwdbar:hover {
     background: #262626;
     color: #b8b8b8;

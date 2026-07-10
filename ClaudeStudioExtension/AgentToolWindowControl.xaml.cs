@@ -152,6 +152,10 @@ public partial class AgentToolWindowControl : UserControl
             SendCwdInfo();
         };
 
+        // U4: whenever the agent (re)spawns claude, re-point the presence
+        // watcher at the new PID's ~/.claude/sessions/<pid>.json.
+        _agentClient.OnClaudePid = StartPresenceWatcher;
+
         VSColorTheme.ThemeChanged += OnVsThemeChanged;
     }
 
@@ -550,6 +554,83 @@ public partial class AgentToolWindowControl : UserControl
         // Intentionally NOT calling StopClaudeJsonWatcher() — Unloaded fires on
         // tool window tab switches, but Loaded is guarded by _initialized so the
         // watcher would never restart. Keep it alive for the control's lifetime.
+    }
+
+    // U4: watches the CLI's live presence file (~/.claude/sessions/<pid>.json)
+    // for status/waitingFor changes and forwards them to the webview. The file
+    // is per-PID and deleted when claude exits, so the watcher is re-pointed on
+    // every (re)spawn via AgentClient.OnClaudePid.
+    private FileSystemWatcher? _presenceWatcher;
+    private string _lastPresencePosted = "";
+
+    private void StartPresenceWatcher(int pid)
+    {
+        try
+        {
+            _presenceWatcher?.Dispose();
+            _presenceWatcher = null;
+
+            var dir = Path.Combine(ClaudePaths.ConfigDir, "sessions");
+            if (!Directory.Exists(dir)) return; // pre-presence-file CLI — feature just stays off
+
+            var fileName = pid + ".json";
+            _presenceWatcher = new FileSystemWatcher(dir, fileName)
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+                EnableRaisingEvents = true,
+            };
+            FileSystemEventHandler onChange = (_, __) => PostPresenceUpdate(Path.Combine(dir, fileName));
+            _presenceWatcher.Changed += onChange;
+            _presenceWatcher.Created += onChange;
+            _presenceWatcher.Deleted += (_, __) => PostPresence("", "");
+
+            // Seed from the current contents (the file usually exists already
+            // by the time the pid chunk reaches us).
+            PostPresenceUpdate(Path.Combine(dir, fileName));
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"presence watcher failed: {ex.Message}");
+        }
+    }
+
+    private void PostPresenceUpdate(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) { PostPresence("", ""); return; }
+            // Tolerate the CLI mid-write: share everything, and let a parse
+            // failure just skip this event (the next write fires another).
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var sr = new StreamReader(fs);
+            using var doc = JsonDocument.Parse(sr.ReadToEnd());
+            var root = doc.RootElement;
+            var status = root.TryGetProperty("status", out var s) ? s.GetString() ?? "" : "";
+            var waitingFor = root.TryGetProperty("waitingFor", out var w) ? w.GetString() ?? "" : "";
+            PostPresence(status, waitingFor);
+        }
+        catch { /* mid-write or gone — next event retries */ }
+    }
+
+    private void PostPresence(string status, string waitingFor)
+    {
+        var payload = status + "|" + waitingFor;
+        if (payload == _lastPresencePosted) return; // events fire in bursts — dedupe
+        _lastPresencePosted = payload;
+        try
+        {
+            var dispatcher = System.Windows.Application.Current.Dispatcher;
+            dispatcher.InvokeAsync(() =>
+            {
+                try
+                {
+                    Browser?.CoreWebView2?.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "presence-status", status, waitingFor }));
+                }
+                catch { }
+            });
+        }
+        catch { }
     }
 
     // Watches ~/.claude.json so the titlebar/auth state updates when the user
