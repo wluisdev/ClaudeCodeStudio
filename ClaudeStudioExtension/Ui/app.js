@@ -1524,7 +1524,9 @@ function renderAtList(items) {
     atIndex = 0;
     atAutocompleteEl.innerHTML = items.map((p, i) => {
         const isDir = p.endsWith("/");
-        return `<div class="cmd-autocomplete-item at-item${i === 0 ? " ac-selected" : ""}" data-path="${escapeAttr(p)}">${isDir ? "📁" : "📄"} ${escapeHtml(p)}</div>`;
+        // title = full path — long entries ellipsize, the tooltip shows the rest
+        // (dliedke v58, issue #103).
+        return `<div class="cmd-autocomplete-item at-item${i === 0 ? " ac-selected" : ""}" data-path="${escapeAttr(p)}" title="${escapeAttr(p)}">${isDir ? "📁" : "📄"} ${escapeHtml(p)}</div>`;
     }).join("");
     atAutocompleteEl.querySelectorAll(".at-item").forEach(el =>
         el.addEventListener("mousedown", e => { e.preventDefault(); commitAtSelection(el.dataset.path); })
