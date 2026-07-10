@@ -275,6 +275,65 @@ function requestContextUsage() {
     catch (e) { card.querySelector(".ctx-usage-body").textContent = "Failed to reach the extension."; }
 }
 
+// ── Side question (V19) ───────────────────────────────────────
+// Answered with the session's context but kept out of the transcript — the
+// card is UI-only; the session JSONL records nothing.
+let _pendingSideQuestionCard = null;
+
+function openSideQuestionCard() {
+    document.getElementById("cmd-menu").classList.remove("open");
+    if (welcome) { welcome.remove(); welcome = null; }
+
+    const card = document.createElement("div");
+    card.className = "question-card side-question-card";
+    card.innerHTML = `<div class="question-text">💬 Side question <span class="side-question-note">answered with the session's context — not added to the transcript</span></div>
+        <div class="side-question-ask">
+            <input type="text" placeholder="e.g. what did that error mean?"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();sendSideQuestion(this.closest('.side-question-card'));}" />
+            <button type="button" onclick="sendSideQuestion(this.closest('.side-question-card'))">Ask</button>
+        </div>
+        <div class="side-question-answer" style="display:none"></div>`;
+    messages.appendChild(card);
+    autoScroll();
+    card.querySelector("input").focus();
+}
+
+function sendSideQuestion(card) {
+    const input = card.querySelector("input");
+    const q = (input.value || "").trim();
+    if (!q) return;
+
+    input.disabled = true;
+    card.querySelector(".side-question-ask button").disabled = true;
+    const answerEl = card.querySelector(".side-question-answer");
+    answerEl.style.display = "";
+    answerEl.textContent = "Thinking…";
+    _pendingSideQuestionCard = card;
+
+    try { window.chrome.webview.postMessage({ type: "side-question", text: q }); }
+    catch (e) { answerEl.textContent = "Failed to reach the extension."; }
+    autoScroll();
+}
+
+function renderSideQuestionAnswer(answer, error) {
+    const card = _pendingSideQuestionCard;
+    _pendingSideQuestionCard = null;
+    if (!card || !document.body.contains(card)) return;
+    const answerEl = card.querySelector(".side-question-answer");
+
+    if (error) {
+        const friendly = error.includes("no active session") || error.includes("agent not running")
+            ? "No active session yet — send a message first, then ask again."
+            : `Failed: ${error}`;
+        answerEl.textContent = friendly;
+    } else if (!answer) {
+        answerEl.textContent = "Claude declined to answer this one.";
+    } else {
+        answerEl.innerHTML = renderMarkdown(answer);
+    }
+    autoScroll();
+}
+
 // ── MCP status + reconnect (V20) ──────────────────────────────
 let _pendingMcpCard = null;
 
@@ -1851,6 +1910,11 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "mcp-status") {
         renderMcpStatusCard(event.data.servers || null, event.data.error || null);
+        return;
+    }
+
+    if (event.data.type === "side-question-answer") {
+        renderSideQuestionAnswer(event.data.answer || null, event.data.error || null);
         return;
     }
 

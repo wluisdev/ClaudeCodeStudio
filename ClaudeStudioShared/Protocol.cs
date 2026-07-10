@@ -44,6 +44,10 @@ public class ChatRequest
     public bool McpStatus { get; set; }
     public string? McpReconnectServer { get; set; }
 
+    // Side question (V19): answered with the session's context but kept out of
+    // the main transcript. Forwarded back as a "side-question-result" chunk.
+    public string? SideQuestion { get; set; }
+
     // Native file rewind: ask the running claude (with checkpointing enabled) to
     // restore files to the state before a given user message. The agent sends a
     // control_request{subtype:"rewind_files"} on claude.stdin and forwards the

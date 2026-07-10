@@ -250,6 +250,19 @@ try
             continue;
         }
 
+        if (!string.IsNullOrEmpty(request.SideQuestion))
+        {
+            if (session == null || !session.IsAlive)
+                EmitError("side-question: no active session");
+            else
+            {
+                try { await session.AskSideQuestionAsync(request.SideQuestion!); }
+                catch (Exception ex) { EmitError($"side-question failed: {ex.Message}"); }
+            }
+            EmitDone();
+            continue;
+        }
+
         // Permission rules ride along with every chat request; refreshing them
         // here (not at spawn) means edits in the UI apply on the next send
         // without restarting the session.
@@ -1181,6 +1194,19 @@ The user's IDE selection (if any) is included in the conversation context and ma
         var resp = await SendControlRequestAsync(new { subtype = "mcp_reconnect", serverName }, "mcp-reconnect");
         if (resp == null) return;
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "mcp-reconnect-result", Text = serverName }));
+        Console.Out.Flush();
+    }
+
+    // Side question (V19): answered with the session's context, kept out of the
+    // main transcript. The inner response is {response: string|null, synthetic}.
+    public async Task AskSideQuestionAsync(string question)
+    {
+        var resp = await SendControlRequestAsync(new { subtype = "side_question", question }, "side-question");
+        if (resp == null) return;
+        string answer = "";
+        if (resp.Value.TryGetProperty("response", out var r) && r.ValueKind == JsonValueKind.String)
+            answer = r.GetString() ?? "";
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "side-question-result", Text = answer }));
         Console.Out.Flush();
     }
 

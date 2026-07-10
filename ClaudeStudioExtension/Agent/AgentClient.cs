@@ -321,6 +321,36 @@ public class AgentClient
         finally { _streamingSemaphore.Release(); }
     }
 
+    // One-shot side question (V19): returns (answer, error). Answer is empty
+    // when claude declines to answer.
+    public async Task<(string? answer, string? error)> AskSideQuestionAsync(string question)
+    {
+        await _streamingSemaphore.WaitAsync();
+        try
+        {
+            if (_writer == null || _reader == null)
+                return (null, "agent not running");
+
+            var request = new ChatRequest { Message = "", SideQuestion = question };
+            await _writer.WriteLineAsync(JsonSerializer.Serialize(request));
+            await _writer.FlushAsync();
+
+            string? answer = null;
+            string? error = null;
+            string? line;
+            while ((line = await _reader.ReadLineAsync()) != null)
+            {
+                var chunk = JsonSerializer.Deserialize<ChatChunk>(line);
+                if (chunk == null) continue;
+                if (chunk.Type == "side-question-result") answer = chunk.Text;
+                else if (chunk.Type == "error") { error = chunk.Text; OutputLog.Error($"side-question error: {chunk.Text}"); }
+                else if (chunk.Type == "done") break;
+            }
+            return (answer, error);
+        }
+        finally { _streamingSemaphore.Release(); }
+    }
+
     // One-shot MCP reconnect (V20). Returns the error, or null on success.
     public async Task<string?> ReconnectMcpServerAsync(string serverName)
     {

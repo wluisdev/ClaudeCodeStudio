@@ -1188,6 +1188,18 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "side-question")
+            {
+                string? sqAnswer = null, sqError = null;
+                if (string.IsNullOrWhiteSpace(request.Text)) sqError = "empty question";
+                else (sqAnswer, sqError) = await _agentClient.AskSideQuestionAsync(request.Text);
+                var sqDispatcher = System.Windows.Application.Current.Dispatcher;
+                sqDispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "side-question-answer", answer = sqAnswer, error = sqError })));
+                return;
+            }
+
             if (request.Type == "mcp-reconnect")
             {
                 var reconnectErr = string.IsNullOrEmpty(request.Text)

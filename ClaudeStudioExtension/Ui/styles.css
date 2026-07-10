@@ -2106,6 +2106,16 @@ html.light-theme .toast { background: #fff; color: #1e1e1e; border-color: #ccc; 
 .assistant .bubble a { color: var(--accent); text-decoration: underline; }
 .assistant .bubble a.file-link { text-decoration-style: dotted; cursor: pointer; }
 
+/* Side question card (V19) */
+.side-question-note { font-size: 10px; font-weight: 400; color: #888; margin-left: 6px; }
+.side-question-ask { display: flex; gap: 6px; margin-top: 8px; }
+.side-question-ask input { flex: 1 1 auto; font-size: 12px; padding: 5px 8px; background: rgba(128,128,128,0.10); border: 1px solid rgba(128,128,128,0.25); border-radius: 4px; color: inherit; }
+.side-question-ask input:disabled { opacity: 0.6; }
+.side-question-ask button { flex: 0 0 auto; font-size: 12px; padding: 5px 12px; border-radius: 4px; border: 1px solid rgba(128,128,128,0.25); background: rgba(128,128,128,0.12); color: inherit; cursor: pointer; }
+.side-question-ask button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.side-question-ask button:disabled { opacity: 0.5; cursor: default; }
+.side-question-answer { margin-top: 8px; font-size: 12px; line-height: 1.6; border-top: 1px solid rgba(128,128,128,0.2); padding-top: 8px; }
+
 /* MCP status card (V20) */
 .mcp-status-body { font-size: 12px; margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
 .mcp-status-row { display: flex; align-items: center; gap: 8px; }
