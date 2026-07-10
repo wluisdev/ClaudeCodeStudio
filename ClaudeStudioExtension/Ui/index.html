@@ -271,6 +271,16 @@
                             <input type="text" id="display-name-input" class="settings-input" placeholder="Custom name (used when 'Custom' is selected or as cascade fallback)" oninput="setDisplayName(this.value)" />
                             <button type="button" class="settings-input-clear" title="Clear" onclick="clearDisplayName()">✕</button>
                         </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                Status line command
+                                <span class="info-icon" title="Command run in the working directory whose first lines show in a bar under the header — e.g. git status -sb. Refreshes after each turn. Leave blank to disable.">ⓘ</span>
+                            </span>
+                        </div>
+                        <div class="settings-input-wrap">
+                            <input type="text" id="status-line-input" class="settings-input" placeholder="git status -sb" oninput="setStatusLineCommand(this.value)" />
+                            <button type="button" class="settings-input-clear" title="Clear" onclick="clearStatusLineCommand()">✕</button>
+                        </div>
 
                         <div class="cmd-divider"></div>
                         <div class="cmd-section">Cost limits</div>
@@ -340,6 +350,11 @@
         <div class="cwdbar cwdbar-empty" id="cwdbar" onclick="copyCwd()" title="">
             <span class="cwdbar-icon">📁</span>
             <span class="cwdbar-path" id="cwdbar-path">No workspace</span>
+        </div>
+
+        <div class="statusbar" id="statusbar" style="display:none" title="">
+            <span class="statusbar-icon">▸</span>
+            <span class="statusbar-text" id="statusbar-text"></span>
         </div>
 
         <div class="content">

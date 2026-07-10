@@ -1172,6 +1172,12 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "run-status-line")
+            {
+                await HandleRunStatusLineAsync(request.Text, _lastWorkingDir ?? currentSolutionDir);
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(request.Text))
                 return;
 
@@ -1714,6 +1720,56 @@ public partial class AgentToolWindowControl : UserControl
         {
             OutputLog.Error($"apply-to-editor failed: {ex.Message}");
         }
+    }
+
+    // Runs the user-configured status line command (V17) in the working
+    // directory and posts the trimmed output back to the webview. The command
+    // is the user's own setting — same trust model as claude running in that
+    // (already trust-gated) folder.
+    private async Task HandleRunStatusLineAsync(string? command, string? workingDir)
+    {
+        if (string.IsNullOrWhiteSpace(command)) return;
+
+        var text = await Task.Run(() =>
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = $"/c {command}",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    StandardOutputEncoding = System.Text.Encoding.UTF8,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                if (!string.IsNullOrEmpty(workingDir) && Directory.Exists(workingDir))
+                    psi.WorkingDirectory = workingDir;
+
+                using var proc = System.Diagnostics.Process.Start(psi);
+                if (proc == null) return "";
+                var output = proc.StandardOutput.ReadToEnd();
+                if (!proc.WaitForExit(5000)) { try { proc.Kill(); } catch { } return ""; }
+                if (proc.ExitCode != 0 && string.IsNullOrWhiteSpace(output)) return "";
+                output = output.Trim();
+                // Keep the payload small — the bar shows the first line, the
+                // tooltip up to three.
+                var lines = output.Split('\n');
+                if (lines.Length > 3) output = string.Join("\n", lines, 0, 3) + "\n…";
+                return output.Length > 300 ? output.Substring(0, 300) + "…" : output;
+            }
+            catch (Exception ex)
+            {
+                OutputLog.Warn($"status-line failed: {ex.Message}");
+                return "";
+            }
+        });
+
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        dispatcher.Invoke(() =>
+            Browser.CoreWebView2.PostWebMessageAsJson(
+                JsonSerializer.Serialize(new { type = "status-line", text })));
     }
 
     // Discovers custom slash commands (V9): .claude/commands/**/*.md in the

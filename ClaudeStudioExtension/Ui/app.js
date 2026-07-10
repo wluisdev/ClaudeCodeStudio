@@ -1744,6 +1744,7 @@ window.chrome.webview.addEventListener("message", event => {
         // Turn over: clear any stale pending marker (cancel/dismiss paths skip
         // the modal close hooks); flag "done" only when the window is hidden.
         setCaptionAttention(_toolWindowVisible ? null : "done");
+        refreshStatusLine();
         if (isUsageCapture) isUsageCapture = false;
         removeLoading();
         removeLiveTimer();
@@ -1783,6 +1784,19 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "slash-commands") {
         renderSlashCommands(event.data.project || [], event.data.user || []);
+        return;
+    }
+
+    if (event.data.type === "status-line") {
+        const bar = document.getElementById("statusbar");
+        const full = (event.data.text || "").trim();
+        if (!full || !(localStorage.getItem("statusLineCommand") || "").trim()) {
+            bar.style.display = "none";
+            return;
+        }
+        document.getElementById("statusbar-text").textContent = full.split("\n")[0];
+        bar.title = full;
+        bar.style.display = "";
         return;
     }
 
@@ -1971,6 +1985,36 @@ autoResumeToggle.checked = localStorage.getItem("autoResume") === "true";
 function setAutoResume(checked) {
     localStorage.setItem("autoResume", checked);
 }
+
+// ── V17 status line ────────────────────────────────────────────
+// User-configured command whose output shows in a slim bar under the header.
+// Runs in the working directory; refreshed on boot, setting change, and after
+// each turn (the turn may have changed git state).
+const statusLineInput = document.getElementById("status-line-input");
+if (statusLineInput) statusLineInput.value = localStorage.getItem("statusLineCommand") || "";
+
+let _statusLineDebounce = null;
+function setStatusLineCommand(value) {
+    localStorage.setItem("statusLineCommand", value || "");
+    clearTimeout(_statusLineDebounce);
+    _statusLineDebounce = setTimeout(refreshStatusLine, 600);
+}
+
+function clearStatusLineCommand() {
+    statusLineInput.value = "";
+    setStatusLineCommand("");
+}
+
+function refreshStatusLine() {
+    const command = (localStorage.getItem("statusLineCommand") || "").trim();
+    if (!command) {
+        document.getElementById("statusbar").style.display = "none";
+        return;
+    }
+    try { window.chrome.webview.postMessage({ type: "run-status-line", text: command }); } catch (e) {}
+}
+
+window.addEventListener("DOMContentLoaded", refreshStatusLine);
 
 // ── V6 permission rules ────────────────────────────────────────
 // {allow:[], ask:[], deny:[]} of claude-style rule strings, persisted in
