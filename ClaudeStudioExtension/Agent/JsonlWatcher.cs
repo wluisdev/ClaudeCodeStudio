@@ -109,17 +109,35 @@ public sealed class JsonlWatcher : IDisposable
         Stop();
     }
 
+    // Set when an event arrives while another thread holds _gate, so the
+    // holder loops once more instead of the notification being lost (audit
+    // 2026-07-10 #9). A sub-microsecond race window remains between the final
+    // check and the lock release — acceptable for a reinforcement channel
+    // (the next write fires a fresh event anyway).
+    private int _rerun;
+
     private void OnFileEvent(object sender, FileSystemEventArgs e)
     {
         // Coalesce bursts — FileSystemWatcher fires multiple events per write
-        if (!Monitor.TryEnter(_gate)) return;
+        if (!Monitor.TryEnter(_gate))
+        {
+            Interlocked.Exchange(ref _rerun, 1);
+            return;
+        }
         try
         {
-            ReadNewLines();
-        }
-        catch (Exception ex)
-        {
-            OutputLog.Warn($"jsonl watcher read failed: {ex.Message}");
+            do
+            {
+                Interlocked.Exchange(ref _rerun, 0);
+                try
+                {
+                    ReadNewLines();
+                }
+                catch (Exception ex)
+                {
+                    OutputLog.Warn($"jsonl watcher read failed: {ex.Message}");
+                }
+            } while (Interlocked.CompareExchange(ref _rerun, 0, 1) == 1);
         }
         finally
         {
@@ -154,20 +172,27 @@ public sealed class JsonlWatcher : IDisposable
 
     private void ExtractAndDispatchLines()
     {
+        // One snapshot + one Remove per batch (audit 2026-07-10 #10) — the old
+        // ToString-per-line was quadratic on large bursts.
+        if (_pending.Length == 0) return;
+        var s = _pending.ToString();
+        int start = 0;
+
         while (true)
         {
-            var s = _pending.ToString();
-            var nl = s.IndexOf('\n');
-            if (nl < 0) return;
+            var nl = s.IndexOf('\n', start);
+            if (nl < 0) break;
 
-            var line = s.Substring(0, nl).TrimEnd('\r');
-            _pending.Remove(0, nl + 1);
+            var line = s.Substring(start, nl - start).TrimEnd('\r');
+            start = nl + 1;
 
             if (string.IsNullOrWhiteSpace(line)) continue;
 
             try { DispatchLine(line); }
             catch (Exception ex) { OutputLog.Warn($"jsonl parse failed: {ex.Message}"); }
         }
+
+        if (start > 0) _pending.Remove(0, start);
     }
 
     private void DispatchLine(string line)
