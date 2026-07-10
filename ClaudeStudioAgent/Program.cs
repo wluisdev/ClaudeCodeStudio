@@ -396,6 +396,10 @@ The user's IDE selection (if any) is included in the conversation context and ma
         // PoC-confirmed lever; harmless when the feature isn't used.
         psi.EnvironmentVariables["CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING"] = "true";
 
+        // Telemetry entrypoint marker (V14) — distinguishes this extension from
+        // plain CLI / official VS Code usage in claude's logs and telemetry.
+        psi.EnvironmentVariables["CLAUDE_CODE_ENTRYPOINT"] = "claude-vs2022";
+
         psi.ArgumentList.Add("--input-format");
         psi.ArgumentList.Add("stream-json");
         psi.ArgumentList.Add("--output-format");

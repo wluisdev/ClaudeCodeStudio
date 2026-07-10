@@ -2491,6 +2491,7 @@ function summarizeToolInput(name, inputJson) {
 const DIFF_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
 const toolInputData = new Map();      // toolId → parsed input object
 const askUserQuestionIds = new Set(); // toolIds rendered as a question card — suppress their tool_result chip (the card shows the answer)
+const todoWriteIds = new Set();       // toolIds rendered in the todo card — suppress their "Todos modified" tool_result chip
 const gitBaselineCache = new Map();   // filePath → { content|null, error|null }
 const pendingGitBaselineRequests = new Map(); // requestId → resolve()
 const PREVIEW_MAX_LINES = 30;
@@ -2765,6 +2766,26 @@ function appendToolEvent(kind, name, inputJson, text, id) {
         return;
     }
 
+    // TodoWrite (V21): render the task list as a live card that updates in
+    // place as claude progresses through the plan, instead of a generic chip.
+    if (kind === "tool_use" && name === "TodoWrite" && inputJson) {
+        try {
+            renderTodoCard(bubble, inputJson);
+            if (id) todoWriteIds.add(id);
+            autoScroll();
+            return;
+        } catch (err) {
+            console.warn("TodoWrite render failed, falling back to chip:", err);
+            // fall through to the generic chip path below
+        }
+    }
+
+    // The TodoWrite tool_result is boilerplate ("Todos have been modified
+    // successfully") — the card already shows the state, skip the chip.
+    if ((kind === "tool_error" || kind === "tool_result") && id && todoWriteIds.has(id)) {
+        return;
+    }
+
     if (kind === "tool_use") {
         // Dedupe by id — JSONL watcher may emit the same tool_use after stream-json already did
         if (id) {
@@ -2888,6 +2909,35 @@ function appendToolEvent(kind, name, inputJson, text, id) {
     }
     if (isStreaming) ensureLiveTimer();
     autoScroll();
+}
+
+// Renders (or updates in place) the TodoWrite task list. One card per bubble:
+// each TodoWrite call carries the FULL current list, so the latest call simply
+// replaces the card's contents — the reader sees a live checklist.
+function renderTodoCard(bubble, inputJson) {
+    const input = JSON.parse(inputJson || "{}");
+    const todos = Array.isArray(input.todos) ? input.todos : [];
+    if (todos.length === 0) throw new Error("no todos in payload");
+
+    let card = bubble.querySelector(".todo-card");
+    if (!card) {
+        finalizeActiveSeg(bubble);
+        card = document.createElement("div");
+        card.className = "todo-card";
+        bubble.appendChild(card);
+    }
+
+    const done = todos.filter(t => t.status === "completed").length;
+    const rows = todos.map(t => {
+        if (t.status === "completed")
+            return `<div class="todo-item todo-completed">✓ ${escapeHtml(t.content || "")}</div>`;
+        if (t.status === "in_progress")
+            return `<div class="todo-item todo-inprogress">◔ ${escapeHtml(t.activeForm || t.content || "")}</div>`;
+        return `<div class="todo-item todo-pending">○ ${escapeHtml(t.content || "")}</div>`;
+    }).join("");
+
+    card.innerHTML = `<div class="todo-card-title">📝 Tasks <span class="todo-progress">${done}/${todos.length}</span></div>` +
+        `<div class="todo-list">${rows}</div>`;
 }
 
 function renderAskUserQuestionCard(bubble, toolId, inputJson) {
