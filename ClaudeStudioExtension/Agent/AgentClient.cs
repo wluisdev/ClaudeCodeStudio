@@ -385,15 +385,22 @@ public class AgentClient
         finally { _streamingSemaphore.Release(); }
     }
 
+    // True while a turn is in flight. The rename-session handler consults this
+    // before appending a native custom-title line to the live session's JSONL
+    // (claude is appending to the same file mid-turn).
+    public bool IsStreaming { get; private set; }
+
     public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null)
     {
         await _streamingSemaphore.WaitAsync();
+        IsStreaming = true;
         try
         {
             await AskStreamingCoreAsync(message, model, effort, permissionMode, onChunk, onTiming, onTokens, workingDirectory, autoResume, onSession, onTool, onPermissionRequest, onDiagnosticsRequest);
         }
         finally
         {
+            IsStreaming = false;
             _streamingSemaphore.Release();
         }
     }
@@ -418,7 +425,14 @@ public class AgentClient
             WorkingDirectory = workingDirectory,
             AutoResume = autoResume,
             ClaudeSettings = ClaudeSettings,
-            CliPath = CliPath
+            CliPath = CliPath,
+            // U2: when resuming a session whose custom title we know, pass it
+            // along so the agent spawns claude with --name — the CLI re-appends
+            // its native custom-title line and the terminal picker stays in
+            // sync even for renames done while the session was live. Custom
+            // only: generated titles already persist natively as ai-title.
+            SessionName = string.IsNullOrEmpty(preKnownSessionId)
+                ? null : SessionTitlesStore.GetCustom(preKnownSessionId!)
         };
         var json = JsonSerializer.Serialize(request);
 

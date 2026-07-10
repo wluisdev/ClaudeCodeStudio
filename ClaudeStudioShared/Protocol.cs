@@ -61,6 +61,12 @@ public class ChatRequest
     // Explicit claude.exe location (D7), for installs not on PATH. Null →
     // FindClaudeExe searches PATH and the standard install locations.
     public string? CliPath { get; set; }
+
+    // Known custom title of the session being resumed (U2) → spawn claude with
+    // --name so the native custom-title line is re-persisted. Spawn-time hint
+    // only: deliberately NOT part of the session key (a rename alone must not
+    // force a respawn).
+    public string? SessionName { get; set; }
 }
 
 public class ClaudeSettings

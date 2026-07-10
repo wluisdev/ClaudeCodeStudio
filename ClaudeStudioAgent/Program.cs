@@ -363,6 +363,7 @@ sealed class ClaudeSession : IAsyncDisposable
     private readonly string? _pipeName;
     private readonly ClaudeSettings? _claudeSettings;
     private readonly string? _cliPath;
+    private readonly string? _sessionName;
 
     private Process? _proc;
     private StreamWriter? _stdin;
@@ -397,6 +398,9 @@ sealed class ClaudeSession : IAsyncDisposable
         _pipeName = pipeName;
         _claudeSettings = request.ClaudeSettings;
         _cliPath = request.CliPath;
+        // Spawn-time hint only — deliberately NOT in MakeKey (a title change
+        // alone must not force a respawn; it re-persists at the next natural one).
+        _sessionName = request.SessionName;
         Key = MakeKey(request);
     }
 
@@ -464,6 +468,15 @@ The user's IDE selection (if any) is included in the conversation context and ma
         psi.ArgumentList.Add(VsContextPrompt);
         psi.ArgumentList.Add("--model");
         psi.ArgumentList.Add(_model);
+
+        // U2: display name for the session — claude appends its native
+        // custom-title line to the JSONL, keeping the terminal /resume picker
+        // in sync with titles set in the VS UI.
+        if (!string.IsNullOrWhiteSpace(_sessionName))
+        {
+            psi.ArgumentList.Add("--name");
+            psi.ArgumentList.Add(_sessionName);
+        }
 
         // Bidirectional control channel. Without this, AskUserQuestion auto-errors
         // in stream-json mode (no TTY to prompt through) and the model falls back
@@ -1082,7 +1095,10 @@ The user's IDE selection (if any) is included in the conversation context and ma
         {
             type = "control_request",
             request_id = requestId,
-            request = new { subtype = "generate_session_title", description, persist = false }
+            // persist:true → claude appends {"type":"ai-title"} to the session
+            // JSONL (PoC-confirmed on 2.1.144), so the terminal /resume picker
+            // shows our generated titles too. The sidecar store stays as cache.
+            request = new { subtype = "generate_session_title", description, persist = true }
         };
         var ndjson = JsonSerializer.Serialize(msg);
 

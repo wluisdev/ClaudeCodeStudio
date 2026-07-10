@@ -66,6 +66,26 @@ public static class SessionTitlesStore
         lock (_lock) return store.ContainsKey(sessionId);
     }
 
+    // Split accessors (U2): history interleaves sidecar titles with the native
+    // custom-title/ai-title lines read from the session JSONL, so it needs the
+    // two halves separately (precedence: sidecar Custom > native custom >
+    // sidecar Generated > native ai).
+    public static string? GetCustom(string sessionId)
+    {
+        var store = Load();
+        lock (_lock)
+            return store.TryGetValue(sessionId, out var e) && !string.IsNullOrWhiteSpace(e.Custom)
+                ? e.Custom : null;
+    }
+
+    public static string? GetGenerated(string sessionId)
+    {
+        var store = Load();
+        lock (_lock)
+            return store.TryGetValue(sessionId, out var e) && !string.IsNullOrWhiteSpace(e.Generated)
+                ? e.Generated : null;
+    }
+
     public static void SetGenerated(string sessionId, string title)
     {
         if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(title)) return;
@@ -79,7 +99,9 @@ public static class SessionTitlesStore
     }
 
     // D4-ready: manual rename. Empty/null clears the custom title (falls back
-    // to Generated).
+    // to Generated). A clear is stored as "" rather than null so History can
+    // tell "explicitly cleared" (also suppress the native custom-title line
+    // left in the JSONL) from "never renamed" (native line may apply).
     public static void SetCustom(string sessionId, string? title)
     {
         if (string.IsNullOrWhiteSpace(sessionId)) return;
@@ -87,8 +109,15 @@ public static class SessionTitlesStore
         lock (_lock)
         {
             if (!store.TryGetValue(sessionId, out var e)) store[sessionId] = e = new Entry();
-            e.Custom = string.IsNullOrWhiteSpace(title) ? null : title!.Trim();
+            e.Custom = string.IsNullOrWhiteSpace(title) ? "" : title!.Trim();
             Save();
         }
+    }
+
+    public static bool WasCustomCleared(string sessionId)
+    {
+        var store = Load();
+        lock (_lock)
+            return store.TryGetValue(sessionId, out var e) && e.Custom != null && e.Custom.Length == 0;
     }
 }

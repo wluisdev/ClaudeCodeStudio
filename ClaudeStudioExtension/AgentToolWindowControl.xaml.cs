@@ -1018,7 +1018,24 @@ public partial class AgentToolWindowControl : UserControl
             if (request.Type == "rename-session")
             {
                 if (!string.IsNullOrEmpty(request.SessionId))
+                {
                     SessionTitlesStore.SetCustom(request.SessionId!, request.Title);
+                    // Native persistence (U2): mirror the rename into the session
+                    // JSONL as the same custom-title line claude writes for --name /
+                    // TUI renames, so the terminal /resume picker shows it too.
+                    // rename_session over stdio is unsupported (2.1.144), hence the
+                    // direct append — but never while that session is streaming
+                    // (claude is appending to the same file). Clearing a title only
+                    // touches the sidecar; the stale native line loses to it anyway.
+                    if (!string.IsNullOrWhiteSpace(request.Title) &&
+                        !(_agentClient.IsStreaming &&
+                          string.Equals(_agentClient.CurrentSessionId, request.SessionId, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        var renameSid = request.SessionId!;
+                        var renameTitle = request.Title!.Trim();
+                        _ = Task.Run(() => AppendNativeCustomTitle(renameSid, renameTitle));
+                    }
+                }
                 return;
             }
 
@@ -2343,6 +2360,27 @@ public partial class AgentToolWindowControl : UserControl
         return sb.ToString();
     }
 
+    // Appends a {"type":"custom-title"} line to the session's JSONL — the exact
+    // format claude itself writes for --name / TUI renames (probe-confirmed on
+    // 2.1.144) — so renames made in our History reach the terminal's /resume
+    // picker. UTF-8 without BOM; a BOM mid-file would corrupt the NDJSON.
+    private static void AppendNativeCustomTitle(string sessionId, string title)
+    {
+        try
+        {
+            var jsonl = Directory.EnumerateDirectories(ClaudePaths.ProjectsDir)
+                .Select(d => Path.Combine(d, sessionId + ".jsonl"))
+                .FirstOrDefault(File.Exists);
+            if (jsonl == null) return;
+
+            var line = JsonSerializer.Serialize(new { type = "custom-title", customTitle = title, sessionId });
+            using var fs = new FileStream(jsonl, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            using var sw = new StreamWriter(fs);
+            sw.WriteLine(line);
+        }
+        catch (Exception ex) { OutputLog.Warn($"native custom-title append failed: {ex.Message}"); }
+    }
+
     private async Task HandleGetHistoryAsync(string? workspaceDir, bool showAll)
     {
         var rootDir = ClaudePaths.ProjectsDir;
@@ -2390,6 +2428,11 @@ public partial class AgentToolWindowControl : UserControl
                 var tokenCount = 0;
                 var messageCount = 0;
                 var assistantTurns = 0; // gates the session (matches UsageReader logic)
+                // Native title lines claude appends to the JSONL (U2): custom-title
+                // comes from --name / TUI rename, ai-title from generate_session_title
+                // persist:true. Last occurrence wins.
+                var nativeCustom = "";
+                var nativeAi = "";
 
                 try
                 {
@@ -2461,11 +2504,21 @@ public partial class AgentToolWindowControl : UserControl
                             if (usage.TryGetProperty("output_tokens", out var outputTok))
                                 tokenCount += outputTok.GetInt32();
                         }
+                        else if (entryType == "custom-title")
+                        {
+                            if (root.TryGetProperty("customTitle", out var ct))
+                                nativeCustom = ct.GetString() ?? "";
+                        }
+                        else if (entryType == "ai-title")
+                        {
+                            if (root.TryGetProperty("aiTitle", out var at))
+                                nativeAi = at.GetString() ?? "";
+                        }
                     }
                 }
                 catch { }
 
-                return (file, sessionId, preview, date, lastWrite, tokenCount, messageCount, assistantTurns);
+                return (file, sessionId, preview, date, lastWrite, tokenCount, messageCount, assistantTurns, nativeCustom, nativeAi);
             })));
 
             foreach (var entry in parsed.OrderByDescending(e => e.lastWrite))
@@ -2476,7 +2529,15 @@ public partial class AgentToolWindowControl : UserControl
                 var sidecar = Path.Combine(Path.GetDirectoryName(entry.file)!, $"{entry.sessionId}.branch");
                 var isBranch = File.Exists(sidecar);
                 var preview = isBranch ? "↳ " + entry.preview : entry.preview;
-                var title = SessionTitlesStore.GetTitle(entry.sessionId);
+                // Sidecar Custom > native custom-title > sidecar Generated > native
+                // ai-title (> preview in the UI). Sessions named in the terminal show
+                // up here without any sidecar entry. An explicitly cleared custom
+                // title also mutes the stale native line our own rename appended.
+                var title = SessionTitlesStore.GetCustom(entry.sessionId)
+                    ?? (entry.nativeCustom.Length > 0 && !SessionTitlesStore.WasCustomCleared(entry.sessionId)
+                        ? entry.nativeCustom : null)
+                    ?? SessionTitlesStore.GetGenerated(entry.sessionId)
+                    ?? (entry.nativeAi.Length > 0 ? entry.nativeAi : null);
                 sessions.Add(new { id = entry.sessionId, preview, title, date = entry.date, tokens = entry.tokenCount, messages = entry.messageCount, isBranch });
             }
         }
