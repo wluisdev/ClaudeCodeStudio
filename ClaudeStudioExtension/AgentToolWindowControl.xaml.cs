@@ -423,9 +423,7 @@ public partial class AgentToolWindowControl : UserControl
         }
     }
 
-    private static string ClaudeJsonPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".claude.json");
+    private static string ClaudeJsonPath => ClaudePaths.ClaudeJsonPath;
 
     // Lightweight check used by the pre-flight gate. Mirrors ReadAccountInfo's
     // signed-in determination (presence of oauthAccount with any identity field)
@@ -1807,24 +1805,22 @@ public partial class AgentToolWindowControl : UserControl
     }
 
     // Discovers custom slash commands (V9): .claude/commands/**/*.md in the
-    // project (working dir) and user (~/.claude) scopes. The CLI expands these
-    // when the message text is "/name", so the ⌘ menu only needs the names;
-    // subfolders namespace with ':' matching the CLI (/frontend:component).
+    // project (working dir) and user (CLAUDE_CONFIG_DIR-aware) scopes. The CLI
+    // expands these when the message text is "/name", so the ⌘ menu only needs
+    // the names; subfolders namespace with ':' matching the CLI.
     private async Task HandleGetSlashCommandsAsync(string? projectDir)
     {
         var result = await Task.Run(() =>
         {
-            List<object> Scan(string? root)
+            List<object> Scan(string? dir)
             {
                 var items = new List<(string name, string description)>();
                 try
                 {
-                    if (string.IsNullOrEmpty(root)) return new List<object>();
-                    var dir = System.IO.Path.Combine(root, ".claude", "commands");
-                    if (!Directory.Exists(dir)) return new List<object>();
+                    if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return new List<object>();
                     foreach (var file in Directory.EnumerateFiles(dir, "*.md", SearchOption.AllDirectories))
                     {
-                        var rel = file.Substring(dir.Length).TrimStart('\\', '/');
+                        var rel = file.Substring(dir!.Length).TrimStart('\\', '/');
                         var name = rel.Substring(0, rel.Length - 3).Replace('\\', ':').Replace('/', ':');
                         items.Add((name, ReadFrontmatterDescription(file)));
                     }
@@ -1835,8 +1831,10 @@ public partial class AgentToolWindowControl : UserControl
                             .ToList();
             }
 
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            return new { project = Scan(projectDir), user = Scan(home) };
+            var projectCmds = string.IsNullOrEmpty(projectDir)
+                ? new List<object>()
+                : Scan(System.IO.Path.Combine(projectDir, ".claude", "commands"));
+            return new { project = projectCmds, user = Scan(ClaudePaths.UserCommandsDir) };
         });
 
         var dispatcher = System.Windows.Application.Current.Dispatcher;
@@ -2144,9 +2142,7 @@ public partial class AgentToolWindowControl : UserControl
 
     private async Task HandleGetHistoryAsync(string? workspaceDir, bool showAll)
     {
-        var rootDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".claude", "projects");
+        var rootDir = ClaudePaths.ProjectsDir;
 
         var sessions = new System.Collections.Generic.List<object>();
         var scope = "all";
@@ -2298,9 +2294,7 @@ public partial class AgentToolWindowControl : UserControl
     {
         if (string.IsNullOrEmpty(sessionId)) return;
 
-        var claudeDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".claude", "projects");
+        var claudeDir = ClaudePaths.ProjectsDir;
 
         if (!Directory.Exists(claudeDir))
         {
@@ -2389,9 +2383,7 @@ public partial class AgentToolWindowControl : UserControl
             return;
         }
 
-        var claudeDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".claude", "projects");
+        var claudeDir = ClaudePaths.ProjectsDir;
 
         if (!Directory.Exists(claudeDir))
         {
@@ -2510,8 +2502,7 @@ public partial class AgentToolWindowControl : UserControl
         var currentSessionId = _agentClient.CurrentSessionId;
         if (string.IsNullOrEmpty(currentSessionId)) { PostRewindError("No active session."); return; }
 
-        var claudeDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "projects");
+        var claudeDir = ClaudePaths.ProjectsDir;
         var sourceFile = Directory.Exists(claudeDir)
             ? Directory.GetFiles(claudeDir, $"{currentSessionId}.jsonl", SearchOption.AllDirectories).FirstOrDefault()
             : null;
@@ -2636,9 +2627,7 @@ public partial class AgentToolWindowControl : UserControl
     {
         if (string.IsNullOrEmpty(sessionId)) return;
 
-        var claudeDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".claude", "projects");
+        var claudeDir = ClaudePaths.ProjectsDir;
 
         if (Directory.Exists(claudeDir))
         {

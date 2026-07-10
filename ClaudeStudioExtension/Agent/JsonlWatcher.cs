@@ -32,9 +32,7 @@ public sealed class JsonlWatcher : IDisposable
             : workingDirectory;
 
         var encoded = EncodePath(cwd);
-        var projDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".claude", "projects", encoded);
+        var projDir = Path.Combine(ClaudePaths.ProjectsDir, encoded);
 
         var filePath = Path.Combine(projDir, $"{sessionId}.jsonl");
 

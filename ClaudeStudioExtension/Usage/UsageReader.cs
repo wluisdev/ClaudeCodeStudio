@@ -55,12 +55,7 @@ public static class Pricing
 
 public static class UsageReader
 {
-    public static string GetProjectsRoot()
-    {
-        var home = Environment.GetEnvironmentVariable("USERPROFILE")
-                   ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(home, ".claude", "projects");
-    }
+    public static string GetProjectsRoot() => ClaudePaths.ProjectsDir;
 
     public static List<SessionUsage> ReadAll()
     {

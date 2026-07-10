@@ -47,7 +47,7 @@ public static class McpConfigStore
     public static string GetPath(McpScope scope, string? projectDir)
     {
         if (scope == McpScope.User)
-            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude.json");
+            return ClaudePaths.ClaudeJsonPath;
         if (string.IsNullOrEmpty(projectDir))
             throw new InvalidOperationException("Project scope requires a project directory");
         return Path.Combine(projectDir, ".mcp.json");
