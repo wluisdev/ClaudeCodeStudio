@@ -54,6 +54,14 @@ public class ClaudeSettings
     public int? CleanupPeriodDays { get; set; }
     // false → write autoCompactEnabled:false. true (default) → leave default on.
     public bool AutoCompact { get; set; } = true;
+
+    // V6 permission rules — claude-style rule strings ("Bash(git *)", "Read").
+    // Written to the generated settings.json (permissions{allow,ask,deny}) for
+    // new sessions AND evaluated per-turn by the agent's permission pipe to
+    // auto-decide hook prompts (deny > ask > allow).
+    public List<string>? PermissionAllow { get; set; }
+    public List<string>? PermissionAsk { get; set; }
+    public List<string>? PermissionDeny { get; set; }
 }
 
 public class RewindRequest

@@ -1486,7 +1486,12 @@ function sendMessage() {
             // V7 claude settings (default ON; only deviations affect the spawn).
             coAuthoredBy: localStorage.getItem("coAuthoredBy") !== "false",
             autoCompact: localStorage.getItem("autoCompact") !== "false",
-            cleanupPeriodDays: (() => { const v = parseInt(localStorage.getItem("cleanupPeriodDays") || "", 10); return Number.isNaN(v) || v < 1 ? null : v; })()
+            cleanupPeriodDays: (() => { const v = parseInt(localStorage.getItem("cleanupPeriodDays") || "", 10); return Number.isNaN(v) || v < 1 ? null : v; })(),
+            // V6 permission rules — evaluated per-turn by the agent's pipe and
+            // written to the generated settings.json for new sessions.
+            permissionAllow: getPermRules().allow,
+            permissionAsk: getPermRules().ask,
+            permissionDeny: getPermRules().deny
         });
         _suppressNextAutoResume = false;
     }
@@ -1963,6 +1968,62 @@ autoResumeToggle.checked = localStorage.getItem("autoResume") === "true";
 
 function setAutoResume(checked) {
     localStorage.setItem("autoResume", checked);
+}
+
+// ── V6 permission rules ────────────────────────────────────────
+// {allow:[], ask:[], deny:[]} of claude-style rule strings, persisted in
+// localStorage and sent with every chat payload.
+function getPermRules() {
+    try {
+        const r = JSON.parse(localStorage.getItem("permissionRules") || "{}");
+        return { allow: r.allow || [], ask: r.ask || [], deny: r.deny || [] };
+    } catch (e) { return { allow: [], ask: [], deny: [] }; }
+}
+
+function savePermRules(rules) {
+    localStorage.setItem("permissionRules", JSON.stringify(rules));
+}
+
+function openPermRulesModal() {
+    document.getElementById("settings-menu")?.classList.remove("open");
+    renderPermRules();
+    document.getElementById("perm-rules-overlay").classList.add("open");
+}
+
+function closePermRulesModal() {
+    document.getElementById("perm-rules-overlay").classList.remove("open");
+}
+
+function renderPermRules() {
+    const rules = getPermRules();
+    for (const bucket of ["allow", "ask", "deny"]) {
+        const list = document.getElementById(`perm-rules-${bucket}`);
+        const items = rules[bucket];
+        list.innerHTML = items.length === 0
+            ? `<div class="perm-rules-empty">No rules.</div>`
+            : items.map((r, i) =>
+                `<div class="perm-rule-row"><span class="perm-rule-text">${escapeHtml(r)}</span>` +
+                `<button type="button" class="perm-rule-remove" title="Remove" onclick="removePermRule('${bucket}',${i})">✕</button></div>`
+            ).join("");
+    }
+}
+
+function addPermRule(bucket) {
+    const input = document.getElementById(`perm-rules-input-${bucket}`);
+    const rule = (input.value || "").trim();
+    if (!rule) return;
+    const rules = getPermRules();
+    if (!rules[bucket].includes(rule)) rules[bucket].push(rule);
+    savePermRules(rules);
+    input.value = "";
+    renderPermRules();
+}
+
+function removePermRule(bucket, idx) {
+    const rules = getPermRules();
+    rules[bucket].splice(idx, 1);
+    savePermRules(rules);
+    renderPermRules();
 }
 
 // ── V7 claude settings (apply to new/restarted sessions) ──────

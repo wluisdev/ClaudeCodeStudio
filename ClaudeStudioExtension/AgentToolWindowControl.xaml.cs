@@ -1292,7 +1292,10 @@ public partial class AgentToolWindowControl : UserControl
             {
                 CoAuthoredBy = request.CoAuthoredBy ?? true,
                 CleanupPeriodDays = request.CleanupPeriodDays,
-                AutoCompact = request.AutoCompact ?? true
+                AutoCompact = request.AutoCompact ?? true,
+                PermissionAllow = request.PermissionAllow,
+                PermissionAsk = request.PermissionAsk,
+                PermissionDeny = request.PermissionDeny
             };
 
             // IDE selection context (V11): when the user has text highlighted in
@@ -2871,6 +2874,16 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("dryRun")]
         public bool DryRun { get; set; }
+
+        // V6 permission rules (claude-style rule strings per bucket).
+        [JsonPropertyName("permissionAllow")]
+        public List<string>? PermissionAllow { get; set; }
+
+        [JsonPropertyName("permissionAsk")]
+        public List<string>? PermissionAsk { get; set; }
+
+        [JsonPropertyName("permissionDeny")]
+        public List<string>? PermissionDeny { get; set; }
 
         // V7 claude settings (nullable so an absent field means "use default").
         [JsonPropertyName("coAuthoredBy")]

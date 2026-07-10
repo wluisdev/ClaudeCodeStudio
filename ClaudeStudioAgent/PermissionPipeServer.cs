@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ClaudeStudioShared;
 
 namespace ClaudeStudioAgent;
@@ -56,6 +57,97 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
     private bool IsSessionAllowed(string toolName)
     {
         lock (_sessionAllowedLock) return _sessionAllowed.Contains(toolName);
+    }
+
+    // ── V6 permission rules ────────────────────────────────────────────────
+    // Claude-style rule strings ("Bash(git *)", "Read") evaluated before the
+    // modal round-trip. Snapshot is swapped whole on every chat request, so
+    // reads need no lock.
+    private sealed record PermRule(string Tool, string? Spec, string Raw);
+    private sealed record RuleSet(List<PermRule> Allow, List<PermRule> Ask, List<PermRule> Deny);
+    private volatile RuleSet? _rules;
+
+    private enum RuleVerdict { None, Allow, Ask, Deny }
+
+    public void SetRules(ClaudeSettings? settings)
+    {
+        if (settings == null ||
+            ((settings.PermissionAllow?.Count ?? 0) == 0 &&
+             (settings.PermissionAsk?.Count ?? 0) == 0 &&
+             (settings.PermissionDeny?.Count ?? 0) == 0))
+        {
+            _rules = null;
+            return;
+        }
+
+        static List<PermRule> Parse(List<string>? raw)
+        {
+            var list = new List<PermRule>();
+            foreach (var r in raw ?? [])
+            {
+                var m = Regex.Match(r.Trim(), @"^([A-Za-z_][A-Za-z0-9_]*)\s*(?:\((.*)\))?$", RegexOptions.Singleline);
+                if (m.Success)
+                    list.Add(new PermRule(m.Groups[1].Value, m.Groups[2].Success ? m.Groups[2].Value.Trim() : null, r.Trim()));
+            }
+            return list;
+        }
+
+        _rules = new RuleSet(Parse(settings.PermissionAllow), Parse(settings.PermissionAsk), Parse(settings.PermissionDeny));
+    }
+
+    private (RuleVerdict verdict, string? rule) EvaluateRules(string toolName, string? toolInputJson)
+    {
+        var rules = _rules;
+        if (rules == null) return (RuleVerdict.None, null);
+
+        var input = ExtractPrimaryInput(toolInputJson);
+        string? Match(List<PermRule> bucket)
+        {
+            foreach (var r in bucket)
+            {
+                if (!string.Equals(r.Tool, toolName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (r.Spec is null || r.Spec.Length == 0 || SpecMatches(r.Spec, input)) return r.Raw;
+            }
+            return null;
+        }
+
+        if (Match(rules.Deny) is { } d) return (RuleVerdict.Deny, d);
+        if (Match(rules.Ask) is { } a) return (RuleVerdict.Ask, a);
+        if (Match(rules.Allow) is { } al) return (RuleVerdict.Allow, al);
+        return (RuleVerdict.None, null);
+    }
+
+    // The value a rule specifier is matched against, per tool shape: the first
+    // present of command (Bash) / file_path (Edit|Write|Read) / path / url
+    // (WebFetch) / pattern (Glob|Grep).
+    private static string? ExtractPrimaryInput(string? toolInputJson)
+    {
+        if (string.IsNullOrEmpty(toolInputJson)) return null;
+        try
+        {
+            var el = JsonSerializer.Deserialize<JsonElement>(toolInputJson!);
+            if (el.ValueKind != JsonValueKind.Object) return null;
+            foreach (var key in new[] { "command", "file_path", "path", "url", "pattern" })
+                if (el.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String)
+                    return v.GetString();
+        }
+        catch { }
+        return null;
+    }
+
+    private static bool SpecMatches(string spec, string? value)
+    {
+        if (value == null) return false;
+        // Claude's Bash prefix idiom: "npm run test:*" matches "npm run test" + anything.
+        if (spec.EndsWith(":*", StringComparison.Ordinal))
+        {
+            var prefix = spec.Substring(0, spec.Length - 2);
+            if (value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        if (!spec.Contains('*'))
+            return string.Equals(spec, value, StringComparison.OrdinalIgnoreCase);
+        var pattern = "^" + Regex.Escape(spec).Replace("\\*", ".*") + "$";
+        return Regex.IsMatch(value, pattern, RegexOptions.IgnoreCase | RegexOptions.Singleline);
     }
 
     private async Task AcceptLoopAsync(CancellationToken ct)
@@ -124,11 +216,21 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
                 return;
             }
 
-            // Session allowlist short-circuit — auto-approve without bothering the UI.
-            // Set is populated when the user clicks "Allow for session" on a prior
-            // prompt for this tool.
+            // Rule evaluation first (deny > ask > allow), then the session
+            // allowlist short-circuit. An ask-rule match forces the modal even
+            // when the tool was session-allowed or has an allow rule.
+            var (verdict, matchedRule) = EvaluateRules(toolName!, toolInput);
+
             Decision decision;
-            if (IsSessionAllowed(toolName!))
+            if (verdict == RuleVerdict.Deny)
+            {
+                decision = new Decision(false, $"Denied by permission rule: {matchedRule}");
+            }
+            else if (verdict == RuleVerdict.Allow)
+            {
+                decision = new Decision(true, null);
+            }
+            else if (verdict != RuleVerdict.Ask && IsSessionAllowed(toolName!))
             {
                 decision = new Decision(true, null);
             }

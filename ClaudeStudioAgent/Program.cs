@@ -211,6 +211,11 @@ try
             continue;
         }
 
+        // Permission rules ride along with every chat request; refreshing them
+        // here (not at spawn) means edits in the UI apply on the next send
+        // without restarting the session.
+        pipeServer?.SetRules(request.ClaudeSettings);
+
         var wantKey = ClaudeSession.MakeKey(request);
         // !IsAlive covers the post-cancel case: the session object lingers
         // (disposed) because SendMessageAsync returned via stdout EOF instead of
@@ -1089,6 +1094,17 @@ The user's IDE selection (if any) is included in the conversation context and ma
             d["cleanupPeriodDays"] = days;
         if (!_claudeSettings.AutoCompact)
             d["autoCompactEnabled"] = false;
+
+        // V6 permission rules — claude enforces these natively (deny always;
+        // allow/ask in its own permission flow). The per-turn hook auto-decision
+        // lives in PermissionPipeServer, independent of this block.
+        var perms = new Dictionary<string, object>();
+        if (_claudeSettings.PermissionAllow is { Count: > 0 } al) perms["allow"] = al;
+        if (_claudeSettings.PermissionAsk is { Count: > 0 } ak) perms["ask"] = ak;
+        if (_claudeSettings.PermissionDeny is { Count: > 0 } dn) perms["deny"] = dn;
+        if (perms.Count > 0)
+            d["permissions"] = perms;
+
         return d;
     }
 

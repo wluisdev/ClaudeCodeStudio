@@ -227,6 +227,13 @@
                             </span>
                             <input type="number" id="cleanup-days-input" class="settings-number" min="1" placeholder="30" oninput="setCleanupDays(this.value)" />
                         </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                Permission rules
+                                <span class="info-icon" title="Auto-decide tool permissions with claude-style rules like Bash(git *). Allow skips the prompt, deny blocks the tool, ask always prompts. Rules apply from the next message.">ⓘ</span>
+                            </span>
+                            <button type="button" class="settings-manage-btn" onclick="openPermRulesModal()">Manage…</button>
+                        </div>
                         <div class="cmd-divider"></div>
                         <div class="cmd-section">Workspace</div>
                         <div class="settings-row">
@@ -510,6 +517,55 @@
                 <button class="trust-deny" onclick="trustDeny()">Don't trust</button>
                 <button class="trust-parent" id="trust-parent-btn" onclick="trustParent()">Trust parent</button>
                 <button class="trust-allow" onclick="trustAllow()">Trust</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="cmd-modal-overlay" id="perm-rules-overlay">
+        <div class="cmd-modal perm-rules-modal">
+            <div class="trust-modal-header">
+                <span class="trust-modal-icon">🛡️</span>
+                <div>
+                    <div class="trust-modal-eyebrow">Permission rules</div>
+                    <div class="trust-modal-headline">Auto-decide tool permissions</div>
+                </div>
+            </div>
+            <div class="perm-rules-body">
+                <div class="perm-rules-hint">
+                    Rules use claude's format: <code>Tool</code> or <code>Tool(specifier)</code> —
+                    e.g. <code>Bash(git *)</code>, <code>Bash(npm run test:*)</code>, <code>Read</code>.
+                    Deny wins over ask; ask wins over allow. Rules apply from the next message.
+                </div>
+                <div class="perm-rules-group">
+                    <div class="perm-rules-group-title">✅ Allow — run without asking</div>
+                    <div class="perm-rules-list" id="perm-rules-allow"></div>
+                    <div class="perm-rules-add">
+                        <input type="text" id="perm-rules-input-allow" placeholder="Bash(git *)"
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();addPermRule('allow');}" />
+                        <button type="button" onclick="addPermRule('allow')">Add</button>
+                    </div>
+                </div>
+                <div class="perm-rules-group">
+                    <div class="perm-rules-group-title">❓ Ask — always prompt</div>
+                    <div class="perm-rules-list" id="perm-rules-ask"></div>
+                    <div class="perm-rules-add">
+                        <input type="text" id="perm-rules-input-ask" placeholder="Bash(git push*)"
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();addPermRule('ask');}" />
+                        <button type="button" onclick="addPermRule('ask')">Add</button>
+                    </div>
+                </div>
+                <div class="perm-rules-group">
+                    <div class="perm-rules-group-title">⛔ Deny — block the tool</div>
+                    <div class="perm-rules-list" id="perm-rules-deny"></div>
+                    <div class="perm-rules-add">
+                        <input type="text" id="perm-rules-input-deny" placeholder="Bash(rm *)"
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();addPermRule('deny');}" />
+                        <button type="button" onclick="addPermRule('deny')">Add</button>
+                    </div>
+                </div>
+            </div>
+            <div class="cmd-modal-buttons">
+                <button class="trust-deny" onclick="closePermRulesModal()">Close</button>
             </div>
         </div>
     </div>
