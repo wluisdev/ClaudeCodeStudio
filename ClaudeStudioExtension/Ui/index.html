@@ -68,6 +68,16 @@
                         <div class="cmd-item" onclick="runCommand('/compact')">/compact</div>
                         <div class="cmd-item" onclick="runCommand('/review')">/review</div>
                         <div class="cmd-item" onclick="runCommand('/clear')">/clear</div>
+                        <div id="project-cmds" style="display:none">
+                            <div class="cmd-divider"></div>
+                            <div class="cmd-section">Project commands</div>
+                            <div id="project-cmd-list" class="slash-cmd-list"></div>
+                        </div>
+                        <div id="user-cmds" style="display:none">
+                            <div class="cmd-divider"></div>
+                            <div class="cmd-section">User commands</div>
+                            <div id="user-cmd-list" class="slash-cmd-list"></div>
+                        </div>
                         <div class="cmd-divider"></div>
                         <div class="cmd-section">Local</div>
                         <div class="cmd-item" onclick="requestContextUsage()">◔ Context usage</div>

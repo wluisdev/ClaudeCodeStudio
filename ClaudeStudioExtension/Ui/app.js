@@ -229,6 +229,28 @@ function removeCommand(i) {
 function toggleCmdMenu() {
     const menu = document.getElementById("cmd-menu");
     menu.classList.toggle("open");
+    // Refresh discovered slash commands on every open — picks up new
+    // .claude/commands files without a watcher.
+    if (menu.classList.contains("open")) {
+        try { window.chrome.webview.postMessage({ type: "get-slash-commands" }); } catch (e) {}
+    }
+}
+
+// Renders the discovered .claude/commands entries (project + user scope) into
+// the ⌘ menu. Clicking forwards "/name" to claude, which expands the command.
+function renderSlashCommands(project, user) {
+    const fill = (wrapId, listId, cmds) => {
+        const wrap = document.getElementById(wrapId);
+        const list = document.getElementById(listId);
+        if (!cmds || cmds.length === 0) { wrap.style.display = "none"; list.innerHTML = ""; return; }
+        list.innerHTML = cmds.map(c => {
+            const name = "/" + c.name;
+            return `<div class="cmd-item" title="${escapeHtml(c.description || "")}" onclick="runCommand('${escapeAttr(name)}')">${escapeHtml(name)}</div>`;
+        }).join("");
+        wrap.style.display = "";
+    };
+    fill("project-cmds", "project-cmd-list", project);
+    fill("user-cmds", "user-cmd-list", user);
 }
 
 // ── Context usage (V12) ───────────────────────────────────────
@@ -1749,6 +1771,11 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "context-usage") {
         renderContextUsageCard(event.data.usage || null, event.data.error || null);
+        return;
+    }
+
+    if (event.data.type === "slash-commands") {
+        renderSlashCommands(event.data.project || [], event.data.user || []);
         return;
     }
 

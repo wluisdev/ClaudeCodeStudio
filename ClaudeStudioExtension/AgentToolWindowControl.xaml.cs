@@ -1166,6 +1166,12 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "get-slash-commands")
+            {
+                await HandleGetSlashCommandsAsync(_lastWorkingDir ?? currentSolutionDir);
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(request.Text))
                 return;
 
@@ -1682,6 +1688,66 @@ public partial class AgentToolWindowControl : UserControl
         {
             OutputLog.Error($"apply-to-editor failed: {ex.Message}");
         }
+    }
+
+    // Discovers custom slash commands (V9): .claude/commands/**/*.md in the
+    // project (working dir) and user (~/.claude) scopes. The CLI expands these
+    // when the message text is "/name", so the ⌘ menu only needs the names;
+    // subfolders namespace with ':' matching the CLI (/frontend:component).
+    private async Task HandleGetSlashCommandsAsync(string? projectDir)
+    {
+        var result = await Task.Run(() =>
+        {
+            List<object> Scan(string? root)
+            {
+                var items = new List<(string name, string description)>();
+                try
+                {
+                    if (string.IsNullOrEmpty(root)) return new List<object>();
+                    var dir = System.IO.Path.Combine(root, ".claude", "commands");
+                    if (!Directory.Exists(dir)) return new List<object>();
+                    foreach (var file in Directory.EnumerateFiles(dir, "*.md", SearchOption.AllDirectories))
+                    {
+                        var rel = file.Substring(dir.Length).TrimStart('\\', '/');
+                        var name = rel.Substring(0, rel.Length - 3).Replace('\\', ':').Replace('/', ':');
+                        items.Add((name, ReadFrontmatterDescription(file)));
+                    }
+                }
+                catch { /* unreadable dir — treat as empty */ }
+                return items.OrderBy(i => i.name, StringComparer.OrdinalIgnoreCase)
+                            .Select(i => (object)new { i.name, i.description })
+                            .ToList();
+            }
+
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return new { project = Scan(projectDir), user = Scan(home) };
+        });
+
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        dispatcher.Invoke(() =>
+            Browser.CoreWebView2.PostWebMessageAsJson(
+                JsonSerializer.Serialize(new { type = "slash-commands", project = result.project, user = result.user })));
+    }
+
+    // Pulls `description:` out of a command file's YAML frontmatter, if any.
+    private static string ReadFrontmatterDescription(string file)
+    {
+        try
+        {
+            using var sr = new StreamReader(file);
+            var first = sr.ReadLine();
+            if (first == null || first.Trim() != "---") return "";
+            for (int i = 0; i < 30; i++)
+            {
+                var line = sr.ReadLine();
+                if (line == null || line.Trim() == "---") break;
+                var t = line.TrimStart();
+                if (t.StartsWith("description:", StringComparison.OrdinalIgnoreCase))
+                    return t.Substring("description:".Length).Trim().Trim('"', '\'');
+            }
+        }
+        catch { }
+        return "";
     }
 
     // Forwards a context-usage probe to the agent (control_request
