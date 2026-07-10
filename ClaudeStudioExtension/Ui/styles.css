@@ -2106,6 +2106,11 @@ html.light-theme .toast { background: #fff; color: #1e1e1e; border-color: #ccc; 
 .assistant .bubble a { color: var(--accent); text-decoration: underline; }
 .assistant .bubble a.file-link { text-decoration-style: dotted; cursor: pointer; }
 
+/* History rename + view (D4) */
+.history-action { flex: 0 0 auto; background: none; border: none; color: #888; cursor: pointer; font-size: 12px; padding: 0 3px; }
+.history-action:hover { color: var(--accent); }
+.history-rename-input { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 2px 6px; background: rgba(128,128,128,0.12); border: 1px solid var(--accent); border-radius: 4px; color: inherit; }
+
 /* Side question card (V19) */
 .side-question-note { font-size: 10px; font-weight: 400; color: #888; margin-left: 6px; }
 .side-question-ask { display: flex; gap: 6px; margin-top: 8px; }

@@ -1011,6 +1011,19 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "rename-session")
+            {
+                if (!string.IsNullOrEmpty(request.SessionId))
+                    SessionTitlesStore.SetCustom(request.SessionId!, request.Title);
+                return;
+            }
+
+            if (request.Type == "view-session")
+            {
+                await HandleViewSessionAsync(request.SessionId);
+                return;
+            }
+
             if (request.Type == "delete-session")
             {
                 await HandleDeleteSessionAsync(request.SessionId);
@@ -1815,6 +1828,91 @@ public partial class AgentToolWindowControl : UserControl
         dispatcher.Invoke(() =>
             Browser.CoreWebView2.PostWebMessageAsJson(
                 JsonSerializer.Serialize(new { type = "status-line", text })));
+    }
+
+    // Renders a past session's transcript as readable markdown and opens it in
+    // the VS editor (D4 "View"). Tool noise is reduced to one-line bullets;
+    // tool_result payloads and meta lines are skipped.
+    private async Task HandleViewSessionAsync(string? sessionId)
+    {
+        if (string.IsNullOrEmpty(sessionId)) return;
+
+        var path = await Task.Run(() =>
+        {
+            try
+            {
+                var claudeDir = ClaudePaths.ProjectsDir;
+                if (!Directory.Exists(claudeDir)) return null;
+                var sourceFile = Directory.GetFiles(claudeDir, $"{sessionId}.jsonl", SearchOption.AllDirectories).FirstOrDefault();
+                if (sourceFile == null) return null;
+
+                var sb = new System.Text.StringBuilder();
+                var title = SessionTitlesStore.GetTitle(sessionId!);
+                sb.AppendLine($"# {title ?? "Session transcript"}");
+                sb.AppendLine();
+                sb.AppendLine($"_Session {sessionId}_");
+
+                foreach (var line in File.ReadLines(sourceFile))
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    JsonElement root;
+                    try { root = JsonSerializer.Deserialize<JsonElement>(line); }
+                    catch { continue; }
+                    var type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
+                    if (type != "user" && type != "assistant") continue;
+                    if (!root.TryGetProperty("message", out var msg)) continue;
+                    if (!msg.TryGetProperty("content", out var content)) continue;
+
+                    var text = new System.Text.StringBuilder();
+                    if (content.ValueKind == JsonValueKind.String)
+                    {
+                        text.Append(content.GetString());
+                    }
+                    else if (content.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var block in content.EnumerateArray())
+                        {
+                            var bt = block.TryGetProperty("type", out var b) ? b.GetString() : null;
+                            if (bt == "text" && block.TryGetProperty("text", out var tx))
+                            {
+                                if (text.Length > 0) text.AppendLine().AppendLine();
+                                text.Append(tx.GetString());
+                            }
+                            else if (bt == "tool_use" && block.TryGetProperty("name", out var tn))
+                            {
+                                if (text.Length > 0) text.AppendLine().AppendLine();
+                                text.Append($"- 🔧 {tn.GetString()}");
+                            }
+                            // tool_result payloads are noise in a readable transcript
+                        }
+                    }
+
+                    var body = text.ToString().Trim();
+                    if (body.Length == 0) continue;
+                    sb.AppendLine();
+                    sb.AppendLine("---");
+                    sb.AppendLine();
+                    sb.AppendLine(type == "user" ? "## You" : "## Claude");
+                    sb.AppendLine();
+                    sb.AppendLine(body);
+                }
+
+                Directory.CreateDirectory(_tempDir);
+                var outPath = Path.Combine(_tempDir, $"transcript-{sessionId}.md");
+                File.WriteAllText(outPath, sb.ToString());
+                return outPath;
+            }
+            catch (Exception ex)
+            {
+                OutputLog.Warn($"view-session failed: {ex.Message}");
+                return null;
+            }
+        });
+
+        if (path == null) return;
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+        try { dte?.ItemOperations.OpenFile(path); } catch (Exception ex) { OutputLog.Warn($"view-session open failed: {ex.Message}"); }
     }
 
     // Discovers custom slash commands (V9): .claude/commands/**/*.md in the
@@ -2947,6 +3045,10 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("sessionId")]
         public string? SessionId { get; set; }
+
+        // Custom session title for rename-session (D4).
+        [JsonPropertyName("title")]
+        public string? Title { get; set; }
 
         [JsonPropertyName("filename")]
         public string? Filename { get; set; }

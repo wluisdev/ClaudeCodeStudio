@@ -3719,11 +3719,56 @@ function renderHistoryList(sessions, query) {
         return `<div class="cmd-item history-item" data-session-id="${escapeAttr(s.id)}">
   <div class="history-header">
     <div class="history-preview"${tooltip} onclick="resumeSession('${escapeAttr(s.id)}')">${escapeHtml(label)}</div>
+    <button class="history-action" onclick="startRenameSession('${escapeAttr(s.id)}')" title="Rename">✎</button>
+    <button class="history-action" onclick="viewSession('${escapeAttr(s.id)}')" title="Open transcript in editor">⤢</button>
     <button class="history-delete" onclick="deleteSession('${escapeAttr(s.id)}')" title="Delete session">×</button>
   </div>
   <div class="history-date">${escapeHtml(s.date)} · ${msgs}${tok}</div>
 </div>`;
     }).join("");
+}
+
+// D4: opens the past session's transcript as readable markdown in the editor.
+function viewSession(sessionId) {
+    try { window.chrome.webview.postMessage({ type: "view-session", sessionId }); } catch (e) {}
+}
+
+// D4: swaps the row's title for an inline input. Enter saves (empty clears the
+// custom title, falling back to the generated one), Esc cancels.
+function startRenameSession(sessionId) {
+    const item = document.querySelector(`.history-item[data-session-id="${CSS.escape(sessionId)}"]`);
+    if (!item) return;
+    const previewEl = item.querySelector(".history-preview");
+    const entry = historySessions.find(s => s.id === sessionId);
+    if (!previewEl || !entry) return;
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "history-rename-input";
+    input.value = entry.title || "";
+    input.placeholder = entry.preview || "";
+    previewEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let done = false;
+    const finish = save => {
+        if (done) return;
+        done = true;
+        if (save) {
+            const title = input.value.trim();
+            entry.title = title || null;
+            try { window.chrome.webview.postMessage({ type: "rename-session", sessionId, title }); } catch (e) {}
+        }
+        filterHistory(); // re-render with current search applied
+    };
+    input.addEventListener("keydown", e => {
+        e.stopPropagation();
+        if (e.key === "Enter") { e.preventDefault(); finish(true); }
+        else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener("blur", () => finish(false));
+    input.addEventListener("click", e => e.stopPropagation());
 }
 
 function resumeSession(sessionId) {
