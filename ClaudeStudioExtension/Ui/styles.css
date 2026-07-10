@@ -1643,6 +1643,29 @@ body.splitter-dragging * {
     color: #fff;
 }
 
+/* "@" file picker (D2): long file lists scroll; paths ellipsize from the end. */
+.at-autocomplete {
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.at-item {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.at-loading {
+    color: #888;
+    cursor: default;
+    font-style: italic;
+}
+
+.at-loading:hover {
+    background: transparent;
+    color: #888;
+}
+
 .input:focus-within {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px rgba(216, 135, 99, 0.25), 0 0 18px rgba(216, 135, 99, 0.12);

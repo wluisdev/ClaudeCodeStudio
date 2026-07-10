@@ -1187,6 +1187,12 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "get-workspace-files")
+            {
+                await HandleGetWorkspaceFilesAsync(_lastWorkingDir ?? currentSolutionDir);
+                return;
+            }
+
             if (request.Type == "run-status-line")
             {
                 await HandleRunStatusLineAsync(request.Text, _lastWorkingDir ?? currentSolutionDir);
@@ -1960,6 +1966,84 @@ public partial class AgentToolWindowControl : UserControl
         dispatcher.Invoke(() =>
             Browser.CoreWebView2.PostWebMessageAsJson(
                 JsonSerializer.Serialize(new { type = "slash-commands", project = result.project, user = result.user })));
+    }
+
+    // Folders never worth offering in the @ file picker (build output, VCS
+    // metadata, package caches). Same list the dliedke extension settled on.
+    private static readonly HashSet<string> WorkspaceIgnoredDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "bin", "obj", ".git", ".vs", ".svn", ".hg", "node_modules", "packages", ".idea", "dist", "out", ".vscode"
+    };
+
+    // Enumerates the workspace for the @ file picker (D2): workspace-relative
+    // paths with '/' separators, folders carrying a trailing '/'. Iterative
+    // (stack) walk that skips ignored/build dirs and symlink reparse points,
+    // capped so a huge tree can't stall the picker. The webview caches the
+    // result with a short TTL and re-requests as needed.
+    private async Task HandleGetWorkspaceFilesAsync(string? root)
+    {
+        const int MaxEntries = 8000;
+
+        var files = await Task.Run(() =>
+        {
+            var results = new List<string>();
+            try
+            {
+                if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return results;
+                var rootFull = System.IO.Path.GetFullPath(root).TrimEnd('\\', '/');
+
+                string ToRelative(string full) =>
+                    full.Substring(rootFull.Length).TrimStart('\\', '/').Replace('\\', '/');
+
+                var stack = new Stack<string>();
+                stack.Push(rootFull);
+
+                while (stack.Count > 0 && results.Count < MaxEntries)
+                {
+                    var dir = stack.Pop();
+
+                    string[] subdirs;
+                    try { subdirs = Directory.GetDirectories(dir); }
+                    catch { subdirs = Array.Empty<string>(); }
+
+                    foreach (var d in subdirs)
+                    {
+                        if (results.Count >= MaxEntries) break;
+                        if (WorkspaceIgnoredDirs.Contains(System.IO.Path.GetFileName(d))) continue;
+                        try
+                        {
+                            if ((File.GetAttributes(d) & FileAttributes.ReparsePoint) != 0) continue;
+                        }
+                        catch { continue; }
+
+                        results.Add(ToRelative(d) + "/");
+                        stack.Push(d);
+                    }
+
+                    if (results.Count >= MaxEntries) break;
+
+                    string[] entries;
+                    try { entries = Directory.GetFiles(dir); }
+                    catch { entries = Array.Empty<string>(); }
+
+                    foreach (var f in entries)
+                    {
+                        if (results.Count >= MaxEntries) break;
+                        results.Add(ToRelative(f));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                OutputLog.Warn($"workspace file enumeration failed: {ex.Message}");
+            }
+            return results;
+        });
+
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        dispatcher.Invoke(() =>
+            Browser.CoreWebView2.PostWebMessageAsJson(
+                JsonSerializer.Serialize(new { type = "workspace-files", files, root })));
     }
 
     // Pulls `description:` out of a command file's YAML frontmatter, if any.

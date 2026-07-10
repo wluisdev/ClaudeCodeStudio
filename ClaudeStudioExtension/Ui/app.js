@@ -1433,6 +1433,149 @@ function fillAutocomplete(cmd) {
     textarea.focus();
 }
 
+// ── "@" file picker (D2) ──────────────────────────────────────
+// Typing "@" at the start of a word opens a popup listing workspace files and
+// folders; typing filters, ↑/↓ + Enter/Tab (or click) inserts the
+// workspace-relative path. Picking a folder keeps the popup open (drill-down).
+// The inserted @path is plain text — in stream-json the CLI doesn't expand
+// mentions, the model resolves the relative path with its Read tool.
+const atAutocompleteEl = document.getElementById("at-autocomplete");
+let atIndex = -1;
+let atMentionStart = -1;   // index of the triggering '@' in the textarea
+let atEntries = null;      // workspace-relative paths ('/'-separated, folders end with '/')
+let atEntriesBuiltAt = 0;
+let atEntriesLoading = false;
+const AT_TTL_MS = 30000;
+const AT_MAX_RESULTS = 60;
+
+// An '@' token is an '@' at the start of the text or after whitespace,
+// followed by non-whitespace up to the caret.
+function findAtToken() {
+    const text = textarea.value;
+    const caret = textarea.selectionStart;
+    for (let i = caret - 1; i >= 0; i--) {
+        const c = text[i];
+        if (c === "@") {
+            if (i === 0 || /\s/.test(text[i - 1])) return { start: i, query: text.slice(i + 1, caret) };
+            return null;
+        }
+        if (/\s/.test(c)) return null;
+    }
+    return null;
+}
+
+function updateAtMention() {
+    const tok = findAtToken();
+    if (!tok) { hideAtAutocomplete(); return; }
+    atMentionStart = tok.start;
+
+    if (!atEntries) {
+        showAtIndexing();
+        requestWorkspaceFiles();
+        return;
+    }
+    // Stale index: show current results immediately, refresh in background.
+    if (Date.now() - atEntriesBuiltAt > AT_TTL_MS && !atEntriesLoading) requestWorkspaceFiles();
+    renderAtList(rankAtEntries(tok.query));
+}
+
+function requestWorkspaceFiles() {
+    if (atEntriesLoading) return;
+    atEntriesLoading = true;
+    try { window.chrome.webview.postMessage({ type: "get-workspace-files" }); }
+    catch (e) { atEntriesLoading = false; }
+}
+
+// Query may contain "/" (folder drill-down): the part after the last slash
+// matches the entry name, the prefix constrains to that subtree. Name
+// prefix-matches rank above name/path substring matches.
+function rankAtEntries(query) {
+    const q = (query || "").replace(/\\/g, "/").toLowerCase();
+    const ls = q.lastIndexOf("/");
+    const prefix = ls >= 0 ? q.slice(0, ls + 1) : "";
+    const namePart = ls >= 0 ? q.slice(ls + 1) : q;
+
+    const startsWith = [], contains = [];
+    for (const p of atEntries) {
+        const pl = p.toLowerCase();
+        if (prefix && !pl.startsWith(prefix)) continue;
+
+        if (!namePart) {
+            startsWith.push(p);
+        } else {
+            const nm = atNameOf(pl);
+            if (nm.startsWith(namePart)) startsWith.push(p);
+            else if (nm.includes(namePart)) contains.push(p);
+            else if (pl.includes(namePart)) contains.push(p);
+        }
+        if (startsWith.length >= AT_MAX_RESULTS) break;
+    }
+    return startsWith.concat(contains).slice(0, AT_MAX_RESULTS);
+}
+
+function atNameOf(relPath) {
+    const t = relPath.replace(/\/+$/, "");
+    const s = t.lastIndexOf("/");
+    return s >= 0 ? t.slice(s + 1) : t;
+}
+
+function renderAtList(items) {
+    if (items.length === 0) { hideAtAutocomplete(); return; }
+    atIndex = 0;
+    atAutocompleteEl.innerHTML = items.map((p, i) => {
+        const isDir = p.endsWith("/");
+        return `<div class="cmd-autocomplete-item at-item${i === 0 ? " ac-selected" : ""}" data-path="${escapeAttr(p)}">${isDir ? "📁" : "📄"} ${escapeHtml(p)}</div>`;
+    }).join("");
+    atAutocompleteEl.querySelectorAll(".at-item").forEach(el =>
+        el.addEventListener("mousedown", e => { e.preventDefault(); commitAtSelection(el.dataset.path); })
+    );
+    atAutocompleteEl.classList.add("open");
+}
+
+function showAtIndexing() {
+    atIndex = -1;
+    atAutocompleteEl.innerHTML = `<div class="cmd-autocomplete-item at-loading">Indexing workspace…</div>`;
+    atAutocompleteEl.classList.add("open");
+}
+
+function hideAtAutocomplete() {
+    atAutocompleteEl.classList.remove("open");
+    atMentionStart = -1;
+    atIndex = -1;
+}
+
+function moveAtSelection(delta) {
+    const items = atAutocompleteEl.querySelectorAll(".at-item");
+    if (items.length === 0) return;
+    atIndex = Math.max(0, Math.min(items.length - 1, atIndex + delta));
+    items.forEach((el, i) => el.classList.toggle("ac-selected", i === atIndex));
+    items[atIndex].scrollIntoView({ block: "nearest" });
+}
+
+// Replaces the typed "@query" with "@<relative-path>". A file gets a trailing
+// space and closes the popup; a folder stays open so the user keeps drilling.
+function commitAtSelection(path) {
+    if (!path) { hideAtAutocomplete(); return; }
+    const caret = textarea.selectionStart;
+    if (atMentionStart < 0 || caret < atMentionStart) { hideAtAutocomplete(); return; }
+
+    const isDir = path.endsWith("/");
+    const insert = "@" + path + (isDir ? "" : " ");
+    const val = textarea.value;
+    textarea.value = val.slice(0, atMentionStart) + insert + val.slice(caret);
+    const pos = atMentionStart + insert.length;
+    textarea.setSelectionRange(pos, pos);
+    textarea.focus();
+    updateTokenEstimate();
+
+    if (isDir) updateAtMention();
+    else hideAtAutocomplete();
+}
+
+// Clicking away from the composer closes the picker (item mousedown prevents
+// default, so commits still land before this fires).
+textarea.addEventListener("blur", () => setTimeout(hideAtAutocomplete, 150));
+
 textarea.addEventListener("input", () => {
     const val = textarea.value;
     if (val.startsWith("/") && !val.includes(" ")) {
@@ -1440,10 +1583,27 @@ textarea.addEventListener("input", () => {
     } else {
         hideAutocomplete();
     }
+    updateAtMention();
     updateTokenEstimate();
 });
 
 textarea.addEventListener("keydown", (e) => {
+    // "@" file picker steals navigation/commit keys while open — before the
+    // slash autocomplete and before Enter-sends.
+    if (atAutocompleteEl.classList.contains("open")) {
+        if (e.key === "ArrowDown") { e.preventDefault(); moveAtSelection(1); return; }
+        if (e.key === "ArrowUp") { e.preventDefault(); moveAtSelection(-1); return; }
+        if (e.key === "Enter" || e.key === "Tab") {
+            // Swallow the key regardless; only insert when entries are ready
+            // (while "Indexing…" shows there is nothing to commit yet).
+            e.preventDefault();
+            const sel = atAutocompleteEl.querySelectorAll(".at-item")[atIndex >= 0 ? atIndex : 0];
+            if (sel) commitAtSelection(sel.dataset.path);
+            return;
+        }
+        if (e.key === "Escape") { hideAtAutocomplete(); return; }
+    }
+
     const isOpen = autocompleteEl.classList.contains("open");
     const items = autocompleteEl.querySelectorAll(".cmd-autocomplete-item");
 
@@ -1518,6 +1678,7 @@ textarea.addEventListener("keydown", (e) => {
         if (!sendEnterToggle.checked) return; // Enter = newline when send-on-enter is off
         e.preventDefault();
         hideAutocomplete();
+        hideAtAutocomplete();
         sendMessage();
     }
 
@@ -1755,11 +1916,14 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "cwd-info") {
+        const prevVsPath = _cwdVsPath;
         renderCwd(event.data.path || "");
         // Workspace identity is now known: migrate the legacy global override
         // (one-shot) and point the settings input at this workspace's entry.
         migrateLegacyWorkingDir();
         syncWorkingDirInput();
+        // Workspace changed → the @ picker's file index belongs to the old one.
+        if (_cwdVsPath !== prevVsPath) atEntries = null;
         return;
     }
 
@@ -2000,6 +2164,16 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "slash-commands") {
         renderSlashCommands(event.data.project || [], event.data.user || []);
+        return;
+    }
+
+    if (event.data.type === "workspace-files") {
+        atEntries = event.data.files || [];
+        atEntriesBuiltAt = Date.now();
+        atEntriesLoading = false;
+        // If the picker is waiting ("Indexing workspace…") or open on a stale
+        // list, re-render for the token currently under the caret.
+        if (atMentionStart >= 0) updateAtMention();
         return;
     }
 
