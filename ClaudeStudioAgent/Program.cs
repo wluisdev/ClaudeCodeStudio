@@ -224,6 +224,32 @@ try
             continue;
         }
 
+        if (request.McpStatus)
+        {
+            if (session == null || !session.IsAlive)
+                EmitError("mcp-status: no active session");
+            else
+            {
+                try { await session.GetMcpStatusAsync(); }
+                catch (Exception ex) { EmitError($"mcp-status failed: {ex.Message}"); }
+            }
+            EmitDone();
+            continue;
+        }
+
+        if (!string.IsNullOrEmpty(request.McpReconnectServer))
+        {
+            if (session == null || !session.IsAlive)
+                EmitError("mcp-reconnect: no active session");
+            else
+            {
+                try { await session.ReconnectMcpServerAsync(request.McpReconnectServer!); }
+                catch (Exception ex) { EmitError($"mcp-reconnect failed: {ex.Message}"); }
+            }
+            EmitDone();
+            continue;
+        }
+
         // Permission rules ride along with every chat request; refreshing them
         // here (not at spawn) means edits in the UI apply on the next send
         // without restarting the session.
@@ -1086,6 +1112,75 @@ The user's IDE selection (if any) is included in the conversation context and ma
         }
 
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = "session-title: claude exited before responding" }));
+        Console.Out.Flush();
+    }
+
+    // Generic one-shot client-initiated control_request (V20): writes the
+    // request, drains stdout until the matching control_response, and returns
+    // the inner response element — or null after emitting an error chunk.
+    // Same idle-stdout contract as RewindAsync (called between turns only).
+    // NOTE: rewind/context-usage/title predate this helper and keep their own
+    // copies until the current validation round closes; folding them in is a
+    // follow-up cleanup.
+    private async Task<JsonElement?> SendControlRequestAsync(object request, string label)
+    {
+        if (_stdin == null || _stdout == null || _proc == null || _proc.HasExited)
+            throw new InvalidOperationException("session not started or already exited");
+
+        var requestId = label + "-" + Guid.NewGuid().ToString("N");
+        var ndjson = JsonSerializer.Serialize(new { type = "control_request", request_id = requestId, request });
+
+        await _stdinLock.WaitAsync();
+        try
+        {
+            await _stdin.WriteLineAsync(ndjson);
+            await _stdin.FlushAsync();
+        }
+        finally { _stdinLock.Release(); }
+
+        string? line;
+        while ((line = await _stdout.ReadLineAsync()) != null)
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            JsonElement evt;
+            try { evt = JsonSerializer.Deserialize<JsonElement>(line); }
+            catch { continue; }
+            if (!evt.TryGetProperty("type", out var tp) || tp.GetString() != "control_response") continue;
+            if (!evt.TryGetProperty("response", out var resp)) continue;
+            if (!resp.TryGetProperty("request_id", out var rid) || rid.GetString() != requestId) continue;
+
+            var subtype = resp.TryGetProperty("subtype", out var st) ? st.GetString() : null;
+            if (subtype == "error")
+            {
+                var errMsg = resp.TryGetProperty("error", out var er) ? er.GetString() : $"{label} failed";
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = $"{label}: {errMsg}" }));
+                Console.Out.Flush();
+                return null;
+            }
+            if (resp.TryGetProperty("response", out var rr))
+                return rr.Clone();
+            return JsonSerializer.Deserialize<JsonElement>("{}");
+        }
+
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = $"{label}: claude exited before responding" }));
+        Console.Out.Flush();
+        return null;
+    }
+
+    public async Task GetMcpStatusAsync()
+    {
+        var resp = await SendControlRequestAsync(new { subtype = "mcp_status" }, "mcp-status");
+        if (resp == null) return;
+        var servers = resp.Value.TryGetProperty("mcpServers", out var s) ? s.GetRawText() : "[]";
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "mcp-status-result", Text = servers }));
+        Console.Out.Flush();
+    }
+
+    public async Task ReconnectMcpServerAsync(string serverName)
+    {
+        var resp = await SendControlRequestAsync(new { subtype = "mcp_reconnect", serverName }, "mcp-reconnect");
+        if (resp == null) return;
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "mcp-reconnect-result", Text = serverName }));
         Console.Out.Flush();
     }
 

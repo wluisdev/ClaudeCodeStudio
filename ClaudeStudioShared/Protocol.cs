@@ -39,6 +39,11 @@ public class ChatRequest
     // forwards the generated title back as a "session-title-result" chunk.
     public string? SessionTitleDescription { get; set; }
 
+    // MCP live-session probes (V20): status list and per-server reconnect,
+    // forwarded back as "mcp-status-result" / "mcp-reconnect-result" chunks.
+    public bool McpStatus { get; set; }
+    public string? McpReconnectServer { get; set; }
+
     // Native file rewind: ask the running claude (with checkpointing enabled) to
     // restore files to the state before a given user message. The agent sends a
     // control_request{subtype:"rewind_files"} on claude.stdin and forwards the

@@ -275,6 +275,73 @@ function requestContextUsage() {
     catch (e) { card.querySelector(".ctx-usage-body").textContent = "Failed to reach the extension."; }
 }
 
+// ── MCP status + reconnect (V20) ──────────────────────────────
+let _pendingMcpCard = null;
+
+function requestMcpStatus() {
+    document.getElementById("cmd-menu").classList.remove("open");
+    if (welcome) { welcome.remove(); welcome = null; }
+
+    // Reuse the open card when refreshing after a reconnect.
+    let card = _pendingMcpCard && document.body.contains(_pendingMcpCard)
+        ? _pendingMcpCard
+        : null;
+    if (!card) {
+        card = document.createElement("div");
+        card.className = "question-card mcp-status-card";
+        card.innerHTML = `<div class="question-text">🔌 MCP status</div><div class="mcp-status-body">Loading…</div>`;
+        messages.appendChild(card);
+        autoScroll();
+    }
+    _pendingMcpCard = card;
+
+    try { window.chrome.webview.postMessage({ type: "get-mcp-status" }); }
+    catch (e) { card.querySelector(".mcp-status-body").textContent = "Failed to reach the extension."; }
+}
+
+function reconnectMcpServer(name) {
+    if (_pendingMcpCard) {
+        const row = _pendingMcpCard.querySelector(`.mcp-status-row[data-server="${CSS.escape(name)}"] .mcp-reconnect-btn`);
+        if (row) { row.disabled = true; row.textContent = "Reconnecting…"; }
+    }
+    try { window.chrome.webview.postMessage({ type: "mcp-reconnect", text: name }); } catch (e) {}
+}
+
+function renderMcpStatusCard(serversJson, error) {
+    const card = _pendingMcpCard;
+    if (!card || !document.body.contains(card)) { _pendingMcpCard = null; return; }
+    const body = card.querySelector(".mcp-status-body");
+
+    if (error || !serversJson) {
+        const friendly = (error || "").includes("no active session") || (error || "").includes("agent not running")
+            ? "No active session yet — send a message first, then check again."
+            : `Failed to load MCP status: ${error || "empty response"}`;
+        body.textContent = friendly;
+        return;
+    }
+
+    let servers;
+    try { servers = JSON.parse(serversJson); }
+    catch (e) { body.textContent = "Failed to parse MCP status."; return; }
+    if (!Array.isArray(servers) || servers.length === 0) {
+        body.textContent = "No MCP servers in this session.";
+        return;
+    }
+
+    body.innerHTML = servers.map(s => {
+        const name = s.name || "?";
+        const status = String(s.status || s.state || "unknown");
+        const ok = /connected|ready|ok/i.test(status);
+        return `<div class="mcp-status-row" data-server="${escapeAttr(name)}">
+  <span class="mcp-status-dot ${ok ? "mcp-ok" : "mcp-bad"}"></span>
+  <span class="mcp-status-name">${escapeHtml(name)}</span>
+  <span class="mcp-status-state">${escapeHtml(status)}</span>
+  <button type="button" class="mcp-reconnect-btn" onclick="reconnectMcpServer('${escapeAttr(name)}')">Reconnect</button>
+</div>`;
+    }).join("");
+    autoScroll();
+}
+
 const _ctxPalette = ["#d97757", "#6a9bcc", "#8a7fd0", "#5faa8a", "#c9a75a", "#c47ba6", "#7fb6c9", "#a0a68a"];
 
 function fmtTokens(n) {
@@ -1779,6 +1846,21 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "context-usage") {
         renderContextUsageCard(event.data.usage || null, event.data.error || null);
+        return;
+    }
+
+    if (event.data.type === "mcp-status") {
+        renderMcpStatusCard(event.data.servers || null, event.data.error || null);
+        return;
+    }
+
+    if (event.data.type === "mcp-reconnect-done") {
+        // Refresh the open card so the row reflects the post-reconnect state.
+        if (event.data.error && _pendingMcpCard) {
+            const btn = _pendingMcpCard.querySelector(`.mcp-status-row[data-server="${CSS.escape(event.data.server || "")}"] .mcp-reconnect-btn`);
+            if (btn) { btn.disabled = false; btn.textContent = "Reconnect"; }
+        }
+        try { window.chrome.webview.postMessage({ type: "get-mcp-status" }); } catch (e) {}
         return;
     }
 

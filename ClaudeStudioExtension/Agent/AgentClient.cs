@@ -291,6 +291,65 @@ public class AgentClient
         finally { _streamingSemaphore.Release(); }
     }
 
+    // One-shot MCP status probe (V20): returns (serversJson, error) where
+    // serversJson is the live session's mcpServers array.
+    public async Task<(string? serversJson, string? error)> GetMcpStatusAsync()
+    {
+        await _streamingSemaphore.WaitAsync();
+        try
+        {
+            if (_writer == null || _reader == null)
+                return (null, "agent not running");
+
+            var request = new ChatRequest { Message = "", McpStatus = true };
+            await _writer.WriteLineAsync(JsonSerializer.Serialize(request));
+            await _writer.FlushAsync();
+
+            string? serversJson = null;
+            string? error = null;
+            string? line;
+            while ((line = await _reader.ReadLineAsync()) != null)
+            {
+                var chunk = JsonSerializer.Deserialize<ChatChunk>(line);
+                if (chunk == null) continue;
+                if (chunk.Type == "mcp-status-result") serversJson = chunk.Text;
+                else if (chunk.Type == "error") { error = chunk.Text; OutputLog.Error($"mcp-status error: {chunk.Text}"); }
+                else if (chunk.Type == "done") break;
+            }
+            return (serversJson, error);
+        }
+        finally { _streamingSemaphore.Release(); }
+    }
+
+    // One-shot MCP reconnect (V20). Returns the error, or null on success.
+    public async Task<string?> ReconnectMcpServerAsync(string serverName)
+    {
+        await _streamingSemaphore.WaitAsync();
+        try
+        {
+            if (_writer == null || _reader == null)
+                return "agent not running";
+
+            var request = new ChatRequest { Message = "", McpReconnectServer = serverName };
+            await _writer.WriteLineAsync(JsonSerializer.Serialize(request));
+            await _writer.FlushAsync();
+
+            string? error = null;
+            var ok = false;
+            string? line;
+            while ((line = await _reader.ReadLineAsync()) != null)
+            {
+                var chunk = JsonSerializer.Deserialize<ChatChunk>(line);
+                if (chunk == null) continue;
+                if (chunk.Type == "mcp-reconnect-result") ok = true;
+                else if (chunk.Type == "error") { error = chunk.Text; OutputLog.Error($"mcp-reconnect error: {chunk.Text}"); }
+                else if (chunk.Type == "done") break;
+            }
+            return ok ? null : (error ?? "no response");
+        }
+        finally { _streamingSemaphore.Release(); }
+    }
+
     public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null)
     {
         await _streamingSemaphore.WaitAsync();

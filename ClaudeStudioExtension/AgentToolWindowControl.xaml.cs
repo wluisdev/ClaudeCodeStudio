@@ -1178,6 +1178,28 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "get-mcp-status")
+            {
+                var (serversJson, mcpErr) = await _agentClient.GetMcpStatusAsync();
+                var mcpDispatcher = System.Windows.Application.Current.Dispatcher;
+                mcpDispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "mcp-status", servers = serversJson, error = mcpErr })));
+                return;
+            }
+
+            if (request.Type == "mcp-reconnect")
+            {
+                var reconnectErr = string.IsNullOrEmpty(request.Text)
+                    ? "missing server name"
+                    : await _agentClient.ReconnectMcpServerAsync(request.Text);
+                var rcDispatcher = System.Windows.Application.Current.Dispatcher;
+                rcDispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "mcp-reconnect-done", server = request.Text, error = reconnectErr })));
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(request.Text))
                 return;
 
