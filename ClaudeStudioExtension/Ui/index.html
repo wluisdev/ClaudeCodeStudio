@@ -137,6 +137,26 @@
                                 <span class="toggle-track"></span>
                             </label>
                         </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                Sound when input needed
+                                <span class="info-icon" title="Plays a sound whenever claude is blocked waiting on you — a permission prompt or a question.">ⓘ</span>
+                            </span>
+                            <label class="toggle">
+                                <input type="checkbox" id="sound-input-toggle" onchange="setSoundOnInput(this.checked)" />
+                                <span class="toggle-track"></span>
+                            </label>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                Sound when turn ends
+                                <span class="info-icon" title="Plays a soft sound when a turn finishes while the tool window is hidden.">ⓘ</span>
+                            </span>
+                            <label class="toggle">
+                                <input type="checkbox" id="sound-done-toggle" onchange="setSoundOnDone(this.checked)" />
+                                <span class="toggle-track"></span>
+                            </label>
+                        </div>
                         <div class="settings-row effort-row">
                             <span class="settings-label">
                                 Auto-save before send
@@ -342,6 +362,7 @@
                     <option value="claude-sonnet-5"           title="Sonnet 5 · claude-sonnet-5">Sonnet 5</option>
                     <option value="claude-sonnet-4-6"         title="Sonnet 4.6 · claude-sonnet-4-6">Sonnet 4.6</option>
                     <option value="claude-opus-4-8"           title="Opus 4.8 · claude-opus-4-8">Opus 4.8</option>
+                    <option value="opusplan"                  title="Opus Plan · opusplan — Opus while planning, Sonnet for execution">Opus Plan</option>
                     <option value="claude-fable-5"            title="Fable 5 · claude-fable-5">Fable 5</option>
                     <option value="claude-haiku-4-5-20251001" title="Haiku 4.5 · claude-haiku-4-5-20251001">Haiku 4.5</option>
                 </select>

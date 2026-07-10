@@ -978,6 +978,15 @@ function setCaptionAttention(state) {
     if (_captionAttention === state) return;
     _captionAttention = state;
     updateCaption();
+    // Notification sounds (D3) ride the same transitions: "pending" fires
+    // whenever claude blocks on the user; "done" is only ever set while the
+    // window is hidden, matching the "turn ends unseen" semantics.
+    if (state === "pending" && localStorage.getItem("soundOnInput") === "true") playSound("attention");
+    if (state === "done" && localStorage.getItem("soundOnDone") === "true") playSound("done");
+}
+
+function playSound(sound) {
+    try { window.chrome.webview.postMessage({ type: "play-sound", text: sound }); } catch (e) {}
 }
 
 function updateCaption() {
@@ -1468,6 +1477,7 @@ const modelList = [
     { id: "claude-sonnet-5",           label: "Sonnet 5" },
     { id: "claude-sonnet-4-6",         label: "Sonnet 4.6" },
     { id: "claude-opus-4-8",           label: "Opus 4.8" },
+    { id: "opusplan",                  label: "Opus Plan" },
     { id: "claude-fable-5",            label: "Fable 5" },
     { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
 ];
@@ -2217,6 +2227,15 @@ function removePermRule(bucket, idx) {
     savePermRules(rules);
     renderPermRules();
 }
+
+// ── D3 notification sounds ─────────────────────────────────────
+const soundInputToggle = document.getElementById("sound-input-toggle");
+if (soundInputToggle) soundInputToggle.checked = localStorage.getItem("soundOnInput") === "true";
+function setSoundOnInput(checked) { localStorage.setItem("soundOnInput", checked); }
+
+const soundDoneToggle = document.getElementById("sound-done-toggle");
+if (soundDoneToggle) soundDoneToggle.checked = localStorage.getItem("soundOnDone") === "true";
+function setSoundOnDone(checked) { localStorage.setItem("soundOnDone", checked); }
 
 // ── V7 claude settings (apply to new/restarted sessions) ──────
 const coAuthoredToggle = document.getElementById("coauthored-toggle");

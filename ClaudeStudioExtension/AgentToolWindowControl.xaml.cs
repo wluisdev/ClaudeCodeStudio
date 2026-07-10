@@ -1176,6 +1176,19 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "play-sound")
+            {
+                // Notification sounds (D3). SystemSounds avoids the WebView2
+                // autoplay policy entirely and needs no bundled assets.
+                try
+                {
+                    if (request.Text == "attention") System.Media.SystemSounds.Exclamation.Play();
+                    else System.Media.SystemSounds.Asterisk.Play();
+                }
+                catch { /* audio device unavailable — ignore */ }
+                return;
+            }
+
             if (request.Type == "get-mcp-status")
             {
                 var (serversJson, mcpErr) = await _agentClient.GetMcpStatusAsync();
