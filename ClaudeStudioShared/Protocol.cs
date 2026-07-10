@@ -34,6 +34,11 @@ public class ChatRequest
     // "context-usage-result" chunk (Text = the inner usage JSON).
     public bool ContextUsage { get; set; }
 
+    // Session title generation (V18): non-null → sends a control_request
+    // {subtype:"generate_session_title", description:<this>, persist:false} and
+    // forwards the generated title back as a "session-title-result" chunk.
+    public string? SessionTitleDescription { get; set; }
+
     // Native file rewind: ask the running claude (with checkpointing enabled) to
     // restore files to the state before a given user message. The agent sends a
     // control_request{subtype:"rewind_files"} on claude.stdin and forwards the

@@ -191,7 +191,9 @@ function onShowAllToggle() {
 function filterHistory() {
     const q = document.getElementById("history-search").value.trim().toLowerCase();
     const filtered = q
-        ? historySessions.filter(s => (s.preview || "").toLowerCase().includes(q))
+        ? historySessions.filter(s =>
+            (s.preview || "").toLowerCase().includes(q) ||
+            (s.title || "").toLowerCase().includes(q))
         : historySessions;
     renderHistoryList(filtered, q);
 }
@@ -3501,9 +3503,13 @@ function renderHistoryList(sessions, query) {
     list.innerHTML = sessions.map(s => {
         const tok = s.tokens > 1000 ? `${(s.tokens / 1000).toFixed(1)}k tok` : `${s.tokens} tok`;
         const msgs = (s.messages != null) ? `${s.messages} msg${s.messages === 1 ? "" : "s"} · ` : "";
+        // Generated/custom title (V18) leads when present; the raw preview
+        // stays reachable via tooltip.
+        const label = s.title || s.preview;
+        const tooltip = s.title ? ` title="${escapeAttr(s.preview)}"` : "";
         return `<div class="cmd-item history-item" data-session-id="${escapeAttr(s.id)}">
   <div class="history-header">
-    <div class="history-preview" onclick="resumeSession('${escapeAttr(s.id)}')">${escapeHtml(s.preview)}</div>
+    <div class="history-preview"${tooltip} onclick="resumeSession('${escapeAttr(s.id)}')">${escapeHtml(label)}</div>
     <button class="history-delete" onclick="deleteSession('${escapeAttr(s.id)}')" title="Delete session">×</button>
   </div>
   <div class="history-date">${escapeHtml(s.date)} · ${msgs}${tok}</div>

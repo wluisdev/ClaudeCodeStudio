@@ -211,6 +211,19 @@ try
             continue;
         }
 
+        if (!string.IsNullOrEmpty(request.SessionTitleDescription))
+        {
+            if (session == null || !session.IsAlive)
+                EmitError("session-title: no active session");
+            else
+            {
+                try { await session.GenerateSessionTitleAsync(request.SessionTitleDescription!); }
+                catch (Exception ex) { EmitError($"session-title failed: {ex.Message}"); }
+            }
+            EmitDone();
+            continue;
+        }
+
         // Permission rules ride along with every chat request; refreshing them
         // here (not at spawn) means edits in the UI apply on the next send
         // without restarting the session.
@@ -1012,6 +1025,67 @@ The user's IDE selection (if any) is included in the conversation context and ma
         }
 
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = "context-usage: claude exited before responding" }));
+        Console.Out.Flush();
+    }
+
+    // Asks the live claude for a short generated session title (V18). Same
+    // idle-stdout contract as RewindAsync. persist:false — the extension keeps
+    // titles in its own sidecar store, mirroring the official extension.
+    public async Task GenerateSessionTitleAsync(string description)
+    {
+        if (_stdin == null || _stdout == null || _proc == null || _proc.HasExited)
+            throw new InvalidOperationException("session not started or already exited");
+
+        var requestId = "title-" + Guid.NewGuid().ToString("N");
+        var msg = new
+        {
+            type = "control_request",
+            request_id = requestId,
+            request = new { subtype = "generate_session_title", description, persist = false }
+        };
+        var ndjson = JsonSerializer.Serialize(msg);
+
+        await _stdinLock.WaitAsync();
+        try
+        {
+            await _stdin.WriteLineAsync(ndjson);
+            await _stdin.FlushAsync();
+        }
+        finally { _stdinLock.Release(); }
+
+        string? line;
+        while ((line = await _stdout.ReadLineAsync()) != null)
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            JsonElement evt;
+            try { evt = JsonSerializer.Deserialize<JsonElement>(line); }
+            catch { continue; }
+            if (!evt.TryGetProperty("type", out var tp) || tp.GetString() != "control_response") continue;
+            if (!evt.TryGetProperty("response", out var resp)) continue;
+            if (!resp.TryGetProperty("request_id", out var rid) || rid.GetString() != requestId) continue;
+
+            var subtype = resp.TryGetProperty("subtype", out var st) ? st.GetString() : null;
+            if (subtype == "error")
+            {
+                var errMsg = resp.TryGetProperty("error", out var er) ? er.GetString() : "title generation failed";
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = $"session-title: {errMsg}" }));
+                Console.Out.Flush();
+                return;
+            }
+
+            string? title = null;
+            if (resp.TryGetProperty("response", out var rr) &&
+                rr.ValueKind == JsonValueKind.Object &&
+                rr.TryGetProperty("title", out var t) &&
+                t.ValueKind == JsonValueKind.String)
+                title = t.GetString();
+
+            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "session-title-result", Text = title ?? "" }));
+            Console.Out.Flush();
+            return;
+        }
+
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = "session-title: claude exited before responding" }));
         Console.Out.Flush();
     }
 

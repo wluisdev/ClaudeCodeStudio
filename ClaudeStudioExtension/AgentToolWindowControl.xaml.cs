@@ -1349,6 +1349,29 @@ public partial class AgentToolWindowControl : UserControl
                 Usage.UsageToolWindowControl.RefreshIfOpen();
             });
 
+            // Session title (V18): after the first completed turn of a session
+            // with no stored title, ask claude for a short generated one
+            // (fire-and-forget; the History picks it up on its next open).
+            // Resumed pre-feature sessions get a title here too. Uses the typed
+            // text only — the ide_selection block would pollute the summary.
+            var titleSessionId = _agentClient.CurrentSessionId;
+            if (!string.IsNullOrEmpty(titleSessionId) && !SessionTitlesStore.HasEntry(titleSessionId!))
+            {
+                var titleDescription = request.Text.Length > 500 ? request.Text.Substring(0, 500) : request.Text;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var (title, error) = await _agentClient.GenerateSessionTitleAsync(titleDescription);
+                        if (!string.IsNullOrEmpty(title))
+                            SessionTitlesStore.SetGenerated(titleSessionId!, title!);
+                        else if (error != null)
+                            OutputLog.Warn($"session title generation failed: {error}");
+                    }
+                    catch (Exception ex) { OutputLog.Warn($"session title generation failed: {ex.Message}"); }
+                });
+            }
+
             _ = Task.Run(() => CheckCostLimitsAsync(workingDir));
         }
         catch (Exception ex)
@@ -2164,7 +2187,8 @@ public partial class AgentToolWindowControl : UserControl
                 var sidecar = Path.Combine(Path.GetDirectoryName(entry.file)!, $"{entry.sessionId}.branch");
                 var isBranch = File.Exists(sidecar);
                 var preview = isBranch ? "↳ " + entry.preview : entry.preview;
-                sessions.Add(new { id = entry.sessionId, preview, date = entry.date, tokens = entry.tokenCount, messages = entry.messageCount, isBranch });
+                var title = SessionTitlesStore.GetTitle(entry.sessionId);
+                sessions.Add(new { id = entry.sessionId, preview, title, date = entry.date, tokens = entry.tokenCount, messages = entry.messageCount, isBranch });
             }
         }
 

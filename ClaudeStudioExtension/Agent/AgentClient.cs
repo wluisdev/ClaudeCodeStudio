@@ -260,6 +260,37 @@ public class AgentClient
         finally { _streamingSemaphore.Release(); }
     }
 
+    // One-shot session title generation (V18). Same contract as RewindAsync:
+    // shares the streaming semaphore, returns (title, error). Title may be
+    // empty when claude declines to generate one.
+    public async Task<(string? title, string? error)> GenerateSessionTitleAsync(string description)
+    {
+        await _streamingSemaphore.WaitAsync();
+        try
+        {
+            if (_writer == null || _reader == null)
+                return (null, "agent not running");
+
+            var request = new ChatRequest { Message = "", SessionTitleDescription = description };
+            await _writer.WriteLineAsync(JsonSerializer.Serialize(request));
+            await _writer.FlushAsync();
+
+            string? title = null;
+            string? error = null;
+            string? line;
+            while ((line = await _reader.ReadLineAsync()) != null)
+            {
+                var chunk = JsonSerializer.Deserialize<ChatChunk>(line);
+                if (chunk == null) continue;
+                if (chunk.Type == "session-title-result") title = chunk.Text;
+                else if (chunk.Type == "error") { error = chunk.Text; OutputLog.Error($"session-title error: {chunk.Text}"); }
+                else if (chunk.Type == "done") break;
+            }
+            return (title, error);
+        }
+        finally { _streamingSemaphore.Release(); }
+    }
+
     public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null)
     {
         await _streamingSemaphore.WaitAsync();
