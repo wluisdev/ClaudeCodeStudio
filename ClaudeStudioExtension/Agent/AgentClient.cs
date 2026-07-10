@@ -436,8 +436,12 @@ public class AgentClient
             // its native custom-title line and the terminal picker stays in
             // sync even for renames done while the session was live. Custom
             // only: generated titles already persist natively as ai-title.
-            SessionName = string.IsNullOrEmpty(preKnownSessionId)
-                ? null : SessionTitlesStore.GetCustom(preKnownSessionId!)
+            // Gated on an actual resume (--resume/--continue): without it, a
+            // respawn that starts a FRESH session (e.g. model switch with
+            // auto-resume off) would stamp the previous session's title onto
+            // the new one (audit 2026-07-10 #1).
+            SessionName = (resumeId != null || autoResume) && !string.IsNullOrEmpty(preKnownSessionId)
+                ? SessionTitlesStore.GetCustom(preKnownSessionId!) : null
         };
         var json = JsonSerializer.Serialize(request);
 

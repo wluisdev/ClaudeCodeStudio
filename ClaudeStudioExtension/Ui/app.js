@@ -247,7 +247,7 @@ function renderSlashCommands(project, user) {
         if (!cmds || cmds.length === 0) { wrap.style.display = "none"; list.innerHTML = ""; return; }
         list.innerHTML = cmds.map(c => {
             const name = "/" + c.name;
-            return `<div class="cmd-item" title="${escapeHtml(c.description || "")}" onclick="runCommand('${escapeAttr(name)}')">${escapeHtml(name)}</div>`;
+            return `<div class="cmd-item" title="${escapeAttrValue(c.description || "")}" onclick="runCommand('${escapeAttr(name)}')">${escapeHtml(name)}</div>`;
         }).join("");
         wrap.style.display = "";
     };
@@ -435,7 +435,7 @@ function renderContextUsageCard(usageJson, error) {
         `<span>${fmtTokens(u.totalTokens)} / ${fmtTokens(u.rawMaxTokens)} tokens (${u.percentage ?? "?"}%)</span></div>`;
 
     html += `<div class="ctx-usage-track">` + segs.map(c =>
-        `<div class="ctx-usage-seg" style="background:${_ctxPalette[cats.indexOf(c) % _ctxPalette.length]};width:${(c.tokens / max * 100).toFixed(2)}%" title="${escapeHtml(c.name)}: ${fmtTokens(c.tokens)}"></div>`
+        `<div class="ctx-usage-seg" style="background:${_ctxPalette[cats.indexOf(c) % _ctxPalette.length]};width:${(c.tokens / max * 100).toFixed(2)}%" title="${escapeAttrValue(c.name)}: ${fmtTokens(c.tokens)}"></div>`
     ).join("") + `</div>`;
 
     html += `<div class="ctx-cat-list">` + cats.map((c, i) => {
@@ -1133,6 +1133,12 @@ const effortSelect = { get value() { return effortValues[+effortPopupSlider.valu
         const found = effortValues.indexOf(storedVal);
         if (found >= 0) idx = found;
     }
+    // "max" is session-only (D8) — a value persisted by pre-D8 builds would
+    // otherwise keep max burning across restarts forever. Load as xhigh.
+    if (effortValues[idx] === "max") {
+        idx = effortValues.indexOf("xhigh");
+        localStorage.setItem("effortLevel", idx);
+    }
     effortPopupSlider.value = idx;
     updateEffortButton(idx);
 })();
@@ -1430,7 +1436,7 @@ function showAutocomplete(query) {
     if (cmds.length === 0) { hideAutocomplete(); return; }
     acIndex = -1;
     autocompleteEl.innerHTML = cmds.map(c =>
-        `<div class="cmd-autocomplete-item" data-cmd="${escapeAttr(c)}">${escapeHtml(c)}</div>`
+        `<div class="cmd-autocomplete-item" data-cmd="${escapeAttrValue(c)}">${escapeHtml(c)}</div>`
     ).join("");
     autocompleteEl.querySelectorAll(".cmd-autocomplete-item").forEach(el =>
         el.addEventListener("mousedown", e => { e.preventDefault(); fillAutocomplete(el.dataset.cmd); })
@@ -1495,9 +1501,15 @@ function updateAtMention() {
     renderAtList(rankAtEntries(tok.query));
 }
 
+let _atLoadingTimeout = null;
 function requestWorkspaceFiles() {
     if (atEntriesLoading) return;
     atEntriesLoading = true;
+    // Safety valve (audit 2026-07-10 #3): if the workspace-files reply never
+    // arrives, don't leave the picker stuck on "Indexing…" forever — allow a
+    // fresh request on the next keystroke.
+    clearTimeout(_atLoadingTimeout);
+    _atLoadingTimeout = setTimeout(() => { atEntriesLoading = false; }, 10000);
     try { window.chrome.webview.postMessage({ type: "get-workspace-files" }); }
     catch (e) { atEntriesLoading = false; }
 }
@@ -1541,8 +1553,10 @@ function renderAtList(items) {
     atAutocompleteEl.innerHTML = items.map((p, i) => {
         const isDir = p.endsWith("/");
         // title = full path — long entries ellipsize, the tooltip shows the rest
-        // (dliedke v58, issue #103).
-        return `<div class="cmd-autocomplete-item at-item${i === 0 ? " ac-selected" : ""}" data-path="${escapeAttr(p)}" title="${escapeAttr(p)}">${isDir ? "📁" : "📄"} ${escapeHtml(p)}</div>`;
+        // (dliedke v58, issue #103). escapeAttrValue, not escapeAttr: the value
+        // is read back via dataset, and the JS-string escaper would corrupt
+        // paths containing an apostrophe.
+        return `<div class="cmd-autocomplete-item at-item${i === 0 ? " ac-selected" : ""}" data-path="${escapeAttrValue(p)}" title="${escapeAttrValue(p)}">${isDir ? "📁" : "📄"} ${escapeHtml(p)}</div>`;
     }).join("");
     atAutocompleteEl.querySelectorAll(".at-item").forEach(el =>
         el.addEventListener("mousedown", e => { e.preventDefault(); commitAtSelection(el.dataset.path); })
@@ -1590,8 +1604,13 @@ function commitAtSelection(path) {
     else hideAtAutocomplete();
 }
 
-// Clicking away from the composer closes the picker (item mousedown prevents
-// default, so commits still land before this fires).
+// Any mousedown inside the popup (scrollbar, padding — not just the items)
+// must not steal focus from the textarea: the blur handler below would close
+// the picker mid-scroll (audit 2026-07-10 #2; same class as dliedke v58/#103).
+atAutocompleteEl.addEventListener("mousedown", e => e.preventDefault());
+
+// Clicking away from the composer closes the picker (mousedown inside the
+// popup prevents default, so commits still land before this fires).
 textarea.addEventListener("blur", () => setTimeout(hideAtAutocomplete, 150));
 
 textarea.addEventListener("input", () => {
@@ -2194,6 +2213,7 @@ window.chrome.webview.addEventListener("message", event => {
         atEntries = event.data.files || [];
         atEntriesBuiltAt = Date.now();
         atEntriesLoading = false;
+        clearTimeout(_atLoadingTimeout);
         // If the picker is waiting ("Indexing workspace…") or open on a stale
         // list, re-render for the token currently under the caret.
         if (atMentionStart >= 0) updateAtMention();
@@ -3117,8 +3137,13 @@ function renderDiffHtml(diffLines) {
     return html.join("");
 }
 
-function escapeHtml(s) {
-    return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// HTML *attribute* escaper — quotes included, unlike escapeHtml (the DOM-based
+// one below wins by hoisting and does NOT escape quotes) and unlike escapeAttr
+// (which is a JS-string escaper for onclick contexts and would corrupt values
+// read back via dataset). Audit 2026-07-10 #6: this was a dead duplicate
+// declaration of escapeHtml; renamed and repurposed.
+function escapeAttrValue(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 async function buildDiffForTool(toolName, input) {

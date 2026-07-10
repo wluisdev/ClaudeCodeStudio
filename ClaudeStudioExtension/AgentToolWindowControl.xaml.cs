@@ -569,6 +569,9 @@ public partial class AgentToolWindowControl : UserControl
         {
             _presenceWatcher?.Dispose();
             _presenceWatcher = null;
+            // New PID, clean slate — a dedupe carried across respawns could
+            // swallow the first post if the state happens to repeat.
+            _lastPresencePosted = "";
 
             var dir = Path.Combine(ClaudePaths.ConfigDir, "sessions");
             if (!Directory.Exists(dir)) return; // pre-presence-file CLI — feature just stays off

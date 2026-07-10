@@ -441,7 +441,7 @@ sealed class ClaudeSession : IAsyncDisposable
     public async Task<bool> SwitchPermissionModeAsync(string uiMode)
     {
         var cliMode = uiMode == "plan" ? "plan" : (_pipeName != null ? "bypassPermissions" : "default");
-        var resp = await SendControlRequestAsync(new { subtype = "set_permission_mode", mode = cliMode }, "set-permission-mode");
+        var resp = await SendControlRequestAsync(new { subtype = "set_permission_mode", mode = cliMode }, "set-permission-mode", quietErrors: true);
         if (resp == null) return false;
         UiPermissionMode = uiMode;
         return true;
@@ -1079,7 +1079,10 @@ The user's IDE selection (if any) is included in the conversation context and ma
     // Called between turns only (claude idle), so it owns stdout while waiting;
     // anything else claude emits meanwhile (rate_limit_event, keep-alives) is
     // skipped.
-    private async Task<JsonElement?> SendControlRequestAsync(object request, string label)
+    // quietErrors: failures go to the timing channel (extension OutputLog) instead
+    // of a user-visible error bubble — for requests with a silent fallback, like
+    // set_permission_mode (a failed switch just respawns).
+    private async Task<JsonElement?> SendControlRequestAsync(object request, string label, bool quietErrors = false)
     {
         if (_stdin == null || _stdout == null || _proc == null || _proc.HasExited)
             throw new InvalidOperationException("session not started or already exited");
@@ -1110,7 +1113,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
             if (subtype == "error")
             {
                 var errMsg = resp.TryGetProperty("error", out var er) ? er.GetString() : $"{label} failed";
-                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = $"{label}: {errMsg}" }));
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = quietErrors ? "timing" : "error", Text = $"{label}: {errMsg}" }));
                 Console.Out.Flush();
                 return null;
             }
@@ -1119,7 +1122,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
             return JsonSerializer.Deserialize<JsonElement>("{}");
         }
 
-        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = $"{label}: claude exited before responding" }));
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = quietErrors ? "timing" : "error", Text = $"{label}: claude exited before responding" }));
         Console.Out.Flush();
         return null;
     }

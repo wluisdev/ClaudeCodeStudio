@@ -19,6 +19,11 @@ public sealed class JsonlWatcher : IDisposable
     private string? _filePath;
     private long _offset;
     private readonly byte[] _buffer = new byte[8192];
+    // Stateful decoder: a multibyte UTF-8 char split across two reads must not
+    // be decoded per-chunk (audit 2026-07-10 #7 — per-chunk GetString turned
+    // accented chars on the 8KB boundary into mojibake).
+    private readonly System.Text.Decoder _decoder = Encoding.UTF8.GetDecoder();
+    private readonly char[] _charBuffer = new char[Encoding.UTF8.GetMaxCharCount(8192)];
     private readonly StringBuilder _pending = new();
     private readonly object _gate = new();
     private bool _disposed;
@@ -41,6 +46,7 @@ public sealed class JsonlWatcher : IDisposable
         _filePath = filePath;
         _offset = 0;
         _pending.Clear();
+        _decoder.Reset();
 
         // If the file already exists (resume case), skip to the end so we only see new lines
         try
@@ -131,13 +137,15 @@ public sealed class JsonlWatcher : IDisposable
             // File was truncated/rewritten — reset
             _offset = 0;
             _pending.Clear();
+            _decoder.Reset();
         }
 
         fs.Seek(_offset, SeekOrigin.Begin);
         int read;
         while ((read = fs.Read(_buffer, 0, _buffer.Length)) > 0)
         {
-            _pending.Append(Encoding.UTF8.GetString(_buffer, 0, read));
+            var chars = _decoder.GetChars(_buffer, 0, read, _charBuffer, 0);
+            _pending.Append(_charBuffer, 0, chars);
             _offset += read;
         }
 
