@@ -362,6 +362,7 @@ sealed class ClaudeSession : IAsyncDisposable
     private readonly bool _autoResume;
     private readonly string? _pipeName;
     private readonly ClaudeSettings? _claudeSettings;
+    private readonly string? _cliPath;
 
     private Process? _proc;
     private StreamWriter? _stdin;
@@ -395,11 +396,12 @@ sealed class ClaudeSession : IAsyncDisposable
         _autoResume = request.AutoResume;
         _pipeName = pipeName;
         _claudeSettings = request.ClaudeSettings;
+        _cliPath = request.CliPath;
         Key = MakeKey(request);
     }
 
     public static string MakeKey(ChatRequest r) =>
-        $"{r.Model}|{r.Effort}|{r.PermissionMode}|{r.WorkingDirectory}|{r.ResumeSessionId}|{r.AutoResume}";
+        $"{r.Model}|{r.Effort}|{r.PermissionMode}|{r.WorkingDirectory}|{r.ResumeSessionId}|{r.AutoResume}|{r.CliPath}";
 
     // Appended to claude's system prompt (--append-system-prompt). Mirrors the
     // official VS Code extension's append (v2.1.145): markdown-link file
@@ -430,7 +432,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
 
         var psi = new ProcessStartInfo
         {
-            FileName = FindClaudeExe(),
+            FileName = FindClaudeExe(_cliPath),
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -1325,8 +1327,22 @@ The user's IDE selection (if any) is included in the conversation context and ma
         return settingsPath;
     }
 
-    private static string FindClaudeExe()
+    private static string FindClaudeExe(string? configured)
     {
+        // Explicit path from the UI (D7) wins; a bad value fails loudly (with
+        // the value in the message) instead of silently falling back to PATH.
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            var p = configured!.Trim();
+            if (File.Exists(p))
+                return p;
+            var inDir = Path.Combine(p, "claude.exe");
+            if (Directory.Exists(p) && File.Exists(inDir))
+                return inDir;
+            throw new ClaudeNotFoundException(
+                $"The configured CLI path was not found: {p} — fix or clear it in settings (Claude Code → CLI path).");
+        }
+
         var pathDirs = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
         foreach (var dir in pathDirs)
         {

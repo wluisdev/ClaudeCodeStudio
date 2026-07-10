@@ -57,6 +57,10 @@ public class ChatRequest
     // User-configurable claude.exe settings (V7) the agent writes into the
     // settings.json passed via --settings. Null = use claude's own defaults.
     public ClaudeSettings? ClaudeSettings { get; set; }
+
+    // Explicit claude.exe location (D7), for installs not on PATH. Null →
+    // FindClaudeExe searches PATH and the standard install locations.
+    public string? CliPath { get; set; }
 }
 
 public class ClaudeSettings

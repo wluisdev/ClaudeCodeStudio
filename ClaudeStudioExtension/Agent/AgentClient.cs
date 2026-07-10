@@ -38,6 +38,11 @@ public class AgentClient
     // settings.json it passes to claude.
     public ClaudeStudioShared.ClaudeSettings? ClaudeSettings { get; set; }
 
+    // Explicit claude.exe path (D7). Set by the control from the UI; attached
+    // to each outbound ChatRequest so the agent spawns that binary instead of
+    // searching PATH (a change respawns claude via the session key).
+    public string? CliPath { get; set; }
+
     public void CancelCurrent()
     {
         OutputLog.Info("request cancel requested");
@@ -412,7 +417,8 @@ public class AgentClient
             ResumeSessionId = resumeId,
             WorkingDirectory = workingDirectory,
             AutoResume = autoResume,
-            ClaudeSettings = ClaudeSettings
+            ClaudeSettings = ClaudeSettings,
+            CliPath = CliPath
         };
         var json = JsonSerializer.Serialize(request);
 

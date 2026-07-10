@@ -801,6 +801,49 @@ let _cwdVsPath = "";    // resolved from VS (Solution / Open Folder), via C#
 let _cwdFullPath = "";  // effective cwd shown / copied (override wins when set)
 let _workspaceTrusted = true;  // updated by trust-required / workspace-trusted events
 
+// ── Working directory overrides (D6: per solution) ─────────
+// Overrides live in a map keyed by the VS-resolved workspace path, so switching
+// solutions never carries another solution's override along. The old global
+// "workingDirectory" key is migrated under the first workspace seen (cwd-info)
+// and removed; until then it still answers as a fallback.
+function workingDirKey() {
+    const p = (_cwdVsPath || "").trim().replace(/[\\/]+$/, "").toLowerCase();
+    return p || "(none)";
+}
+
+function loadWorkingDirOverrides() {
+    try { return JSON.parse(localStorage.getItem("workingDirOverrides") || "{}") || {}; }
+    catch (e) { return {}; }
+}
+
+function getWorkingDirOverride() {
+    const map = loadWorkingDirOverrides();
+    const val = map[workingDirKey()];
+    if (val !== undefined) return val;
+    return (localStorage.getItem("workingDirectory") || "").trim();
+}
+
+function setWorkingDirOverride(value) {
+    const map = loadWorkingDirOverrides();
+    const v = (value || "").trim();
+    if (v) map[workingDirKey()] = v;
+    else delete map[workingDirKey()];
+    localStorage.setItem("workingDirOverrides", JSON.stringify(map));
+    localStorage.removeItem("workingDirectory");
+}
+
+function migrateLegacyWorkingDir() {
+    const legacy = localStorage.getItem("workingDirectory");
+    if (legacy === null) return;
+    const v = legacy.trim();
+    const map = loadWorkingDirOverrides();
+    if (v && map[workingDirKey()] === undefined) {
+        map[workingDirKey()] = v;
+        localStorage.setItem("workingDirOverrides", JSON.stringify(map));
+    }
+    localStorage.removeItem("workingDirectory");
+}
+
 function truncateCwdPath(full) {
     if (!full) return "";
     const parts = full.split(/[\\/]+/).filter(Boolean);
@@ -813,7 +856,7 @@ function truncateCwdPath(full) {
 
 function renderCwd(vsPath) {
     if (vsPath !== undefined) _cwdVsPath = vsPath || "";
-    const override = (localStorage.getItem("workingDirectory") || "").trim();
+    const override = getWorkingDirOverride();
 
     const bar = document.getElementById("cwdbar");
     const pathEl = document.getElementById("cwdbar-path");
@@ -1081,7 +1124,10 @@ function toggleEffortPopup() {
 effortPopupSlider.addEventListener("input", () => {
     const idx = +effortPopupSlider.value;
     updateEffortButton(idx);
-    localStorage.setItem("effortLevel", idx);
+    // "max" is session-only (D8, política do dliedke v43): it never persists,
+    // so a VS restart falls back to the last durable level instead of
+    // silently keeping max effort burning across sessions.
+    if (effortValues[idx] !== "max") localStorage.setItem("effortLevel", idx);
 });
 
 // Click outside the effort control closes the popup. Capture phase so we
@@ -1615,7 +1661,8 @@ function sendMessage() {
             model: modelSelect.value,
             effort: effortSelect.value || null,
             permissionMode: permissionSelect.value,
-            workingDirectory: localStorage.getItem("workingDirectory") || null,
+            workingDirectory: getWorkingDirOverride() || null,
+            cliPath: getCliPath(),
             // After clearChat / reset-chat, the next send must NOT resume. Otherwise
             // claude.exe gets --continue and reuses the previous session instead of
             // creating a fresh one (turn count keeps going up in the old row).
@@ -1700,6 +1747,10 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "cwd-info") {
         renderCwd(event.data.path || "");
+        // Workspace identity is now known: migrate the legacy global override
+        // (one-shot) and point the settings input at this workspace's entry.
+        migrateLegacyWorkingDir();
+        syncWorkingDirInput();
         return;
     }
 
@@ -2303,22 +2354,46 @@ function applyAccent() {
 
 applyAccent();
 
-// Working directory
+// Working directory (per-solution overrides — see workingDirKey above)
 const workingDirInput = document.getElementById("working-dir-input");
-workingDirInput.value = localStorage.getItem("workingDirectory") || "";
+workingDirInput.value = getWorkingDirOverride();
 
 function setWorkingDirectory(value) {
-    localStorage.setItem("workingDirectory", value.trim());
+    setWorkingDirOverride(value);
     renderCwd();
     requestCwdRefresh();
 }
 
 function clearWorkingDirectory() {
     workingDirInput.value = "";
-    localStorage.setItem("workingDirectory", "");
+    setWorkingDirOverride("");
     renderCwd();
     requestCwdRefresh();
     workingDirInput.focus();
+}
+
+function syncWorkingDirInput() {
+    // Don't clobber the field mid-typing; cwd-info can arrive at any time.
+    if (workingDirInput && document.activeElement !== workingDirInput)
+        workingDirInput.value = getWorkingDirOverride();
+}
+
+// Claude CLI path (D7): explicit claude.exe for installs not on PATH.
+const cliPathInput = document.getElementById("cli-path-input");
+cliPathInput.value = localStorage.getItem("claudeCliPath") || "";
+
+function getCliPath() {
+    return (localStorage.getItem("claudeCliPath") || "").trim() || null;
+}
+
+function setCliPath(value) {
+    localStorage.setItem("claudeCliPath", value.trim());
+}
+
+function clearCliPath() {
+    cliPathInput.value = "";
+    localStorage.setItem("claudeCliPath", "");
+    cliPathInput.focus();
 }
 
 function requestCwdRefresh() {
@@ -2413,6 +2488,39 @@ function clearCostLimit(which) {
     // Sync with disk to handle edits from other VS instances
     try { window.chrome.webview.postMessage({ type: "get-cost-limits" }); } catch (_) { }
 })();
+
+// Reset to defaults (D10): clears every settings key and reloads the webview.
+// Non-setting data (prompt history, custom commands, sessions) is kept.
+const SETTINGS_KEYS = [
+    // Appearance
+    "themeOverride", "accentCustom",
+    // Chat
+    "sendWithEnter", "autoResume", "autoSaveLevel", "soundOnInput", "soundOnDone",
+    // Display / layout
+    "showTokens", "showTokenEstimate", "timingMode", "timeUnit", "compactLayout",
+    "composerFontSize", "composerTextareaHeight",
+    // Claude Code
+    "coAuthoredBy", "autoCompact", "cleanupPeriodDays", "permissionRules", "claudeCliPath",
+    // Workspace
+    "workingDirOverrides", "workingDirectory", "showCwdbar", "statusLineCommand",
+    "displayName", "accountInfoSource",
+    // Cost limits (localStorage cache; disk copy cleared via set-cost-limits)
+    "costSessionLimit", "costDailyLimit", "costBlock",
+    // Composer selectors (incl. legacy effort key)
+    "effortLevel", "effortValue"
+];
+
+function resetSettingsToDefaults() {
+    if (!confirm("Reset all settings to defaults? This includes permission rules, cost limits and per-solution working directories. Prompt history and sessions are kept; the chat view will reload.")) return;
+    for (const k of SETTINGS_KEYS) localStorage.removeItem(k);
+    // Cost limits also live on disk (cost_limits.json) — clear them there too,
+    // or the reload would just sync the old values straight back.
+    try {
+        window.chrome.webview.postMessage({ type: "set-cost-limits", sessionLimit: null, dailyLimit: null, block: false });
+    } catch (e) {}
+    // Small delay so the host receives the message before navigation.
+    setTimeout(() => location.reload(), 150);
+}
 
 function showCostWarning(text, blocked) {
     const el = document.getElementById("cost-warning");
@@ -3593,7 +3701,7 @@ function showAuthRequiredCard() {
 }
 
 function startClaudeLogin(card) {
-    try { window.chrome.webview.postMessage({ type: "start-claude-login" }); } catch (e) {}
+    try { window.chrome.webview.postMessage({ type: "start-claude-login", cliPath: getCliPath() }); } catch (e) {}
     if (card && card.classList) card.classList.add("question-answered");
 }
 
@@ -3606,7 +3714,7 @@ function showClaudeNotFoundCard(detail) {
     card.className = "question-card claude-not-found-card";
     card.innerHTML = `
 <div class="question-text">🧩 <strong>Claude Code not found.</strong> The agent couldn't find <code>claude.exe</code> on your PATH or any standard install location. Install it, then send your message again.</div>
-<div class="claude-install-hint">Documented method: <code>npm install -g @anthropic-ai/claude-code</code> (or choco / the native installer). You may need to restart VS so an updated PATH is picked up.</div>
+<div class="claude-install-hint">Documented method: <code>npm install -g @anthropic-ai/claude-code</code> (or choco / the native installer). You may need to restart VS so an updated PATH is picked up. Already installed somewhere custom? Point ⚙ → Claude Code → CLI path at it.</div>
 <div class="question-buttons">
 <button class="q-btn q-yes" onclick="startClaudeInstall(this.closest('.question-card'))">Install via npm</button>
 </div>`;

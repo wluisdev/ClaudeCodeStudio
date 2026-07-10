@@ -256,12 +256,22 @@
                             </span>
                             <button type="button" class="settings-manage-btn" onclick="openPermRulesModal()">Manage…</button>
                         </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                CLI path
+                                <span class="info-icon" title="Full path to claude.exe (or its folder) when it isn't on your PATH — custom installs. Leave blank to auto-detect. Applies to new/restarted sessions.">ⓘ</span>
+                            </span>
+                        </div>
+                        <div class="settings-input-wrap">
+                            <input type="text" id="cli-path-input" class="settings-input" placeholder="Auto (PATH + standard locations)" oninput="setCliPath(this.value)" />
+                            <button type="button" class="settings-input-clear" title="Clear" onclick="clearCliPath()">✕</button>
+                        </div>
                         <div class="cmd-divider"></div>
                         <div class="cmd-section">Workspace</div>
                         <div class="settings-row">
                             <span class="settings-label">
                                 Working directory
-                                <span class="info-icon" title="Folder where claude runs. Leave blank to auto-resolve (solution → open folder → active document). Changing it restarts the session.">ⓘ</span>
+                                <span class="info-icon" title="Folder where claude runs. Leave blank to auto-resolve (solution → open folder → active document). Saved per solution — switching solutions won't carry it over. Changing it restarts the session.">ⓘ</span>
                             </span>
                             <div class="inline-toggle-wrap">
                                 <span class="inline-toggle-label">Show</span>
@@ -343,6 +353,14 @@
                                 <input type="checkbox" id="cost-block-toggle" onchange="setCostBlock(this.checked)" />
                                 <span class="toggle-track"></span>
                             </label>
+                        </div>
+                        <div class="cmd-divider"></div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                Reset settings
+                                <span class="info-icon" title="Restore every setting in this panel to its default, including permission rules, cost limits and per-solution working directories. Prompt history and session data are kept; the chat view reloads.">ⓘ</span>
+                            </span>
+                            <button type="button" class="settings-manage-btn" onclick="resetSettingsToDefaults()">Reset…</button>
                         </div>
 
                         <div class="about-section">

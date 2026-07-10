@@ -751,14 +751,18 @@ public partial class AgentToolWindowControl : UserControl
     // the OAuth flow. cmd /K keeps the window open after the command exits so
     // any error message is readable. The watcher picks up the ~/.claude.json
     // update and posts claude-login-completed when oauthAccount appears.
-    private void StartClaudeLogin()
+    // cliPath (D7): explicit claude.exe to use instead of whatever PATH finds.
+    private void StartClaudeLogin(string? cliPath = null)
     {
         try
         {
+            var exe = string.IsNullOrWhiteSpace(cliPath) ? "claude" : cliPath.Trim();
             var psi = new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = "/K \"claude login\"",
+                // /S: with the whole command re-quoted, cmd strips only the
+                // outer quotes — required once exe can be a path with spaces.
+                Arguments = $"/S /K \"\"{exe}\" login\"",
                 UseShellExecute = true,
                 WindowStyle = ProcessWindowStyle.Normal,
             };
@@ -841,7 +845,7 @@ public partial class AgentToolWindowControl : UserControl
 
             if (request.Type == "start-claude-login")
             {
-                StartClaudeLogin();
+                StartClaudeLogin(request.CliPath);
                 return;
             }
 
@@ -1349,6 +1353,10 @@ public partial class AgentToolWindowControl : UserControl
             await _agentClient.StartAsync();
 
             VsStatusBar.ShowThinking();
+
+            // Explicit CLI path (D7) — attached to every outbound request; a
+            // change respawns claude via the session key on the agent side.
+            _agentClient.CliPath = string.IsNullOrWhiteSpace(request.CliPath) ? null : request.CliPath.Trim();
 
             // User-configurable claude settings (V7). Booleans default to true
             // when the webview omits them (older payloads).
@@ -3058,6 +3066,11 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("workingDirectory")]
         public string? WorkingDirectory { get; set; }
+
+        // Explicit claude.exe location (D7); sent with chat and
+        // start-claude-login messages.
+        [JsonPropertyName("cliPath")]
+        public string? CliPath { get; set; }
 
         [JsonPropertyName("autoResume")]
         public bool AutoResume { get; set; }
