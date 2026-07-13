@@ -40,6 +40,12 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\ClaudeStudioShared\ClaudeStudioShared.csproj" />
+    <!-- Build-order only: the agent (net10.0) must be built before this project packs it into the VSIX. -->
+    <ProjectReference Include="..\ClaudeStudioAgent\ClaudeStudioAgent.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
+      <Private>false</Private>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.14.40265" ExcludeAssets="runtime" />
@@ -60,13 +66,29 @@
       <Generator>VsctGenerator</Generator>
     </VSCTCompile>
   </ItemGroup>
-<ItemGroup>
-  <Content Include="..\ClaudeStudioAgent\bin\Debug\net10.0\**\*">
-    <Link>ClaudeStudioAgent\%(RecursiveDir)%(Filename)%(Extension)</Link>
-    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    <IncludeInVSIX>true</IncludeInVSIX>
-  </Content>
-</ItemGroup>
+  <PropertyGroup>
+    <AgentOutputDir>..\ClaudeStudioAgent\bin\$(Configuration)\net10.0\</AgentOutputDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Makes VS's fast up-to-date check rebuild (and repack the VSIX) when the agent changes. -->
+    <UpToDateCheckInput Include="$(AgentOutputDir)ClaudeStudioAgent.exe" />
+  </ItemGroup>
+
+  <!-- Expands the agent output glob at build time. A static <Content> glob is expanded when the
+       project is evaluated (cached by VS), so after a Clean the VSIX silently packed zero agent
+       files even though the agent was rebuilt before this project. -->
+  <Target Name="IncludeAgentInVsix" BeforeTargets="AssignTargetPaths;GetVsixSourceItems">
+    <Error Condition="!Exists('$(AgentOutputDir)ClaudeStudioAgent.exe')"
+           Text="ClaudeStudioAgent.exe not found in $(AgentOutputDir) — build ClaudeStudioAgent first." />
+    <ItemGroup>
+      <Content Include="$(AgentOutputDir)**\*">
+        <Link>ClaudeStudioAgent\%(RecursiveDir)%(Filename)%(Extension)</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <IncludeInVSIX>true</IncludeInVSIX>
+      </Content>
+    </ItemGroup>
+  </Target>
 
   <Target Name="SyncVsixVersion" BeforeTargets="CreateVsixContainer">
     <XmlPoke
