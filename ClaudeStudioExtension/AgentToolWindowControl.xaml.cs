@@ -129,6 +129,25 @@ public partial class AgentToolWindowControl : UserControl
 
         Browser.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
 
+        // target=_blank anchors (external http links in chat) raise
+        // NewWindowRequested; unhandled, the click dies silently inside the
+        // webview. Route them to the default browser instead.
+        Browser.CoreWebView2.NewWindowRequested += (_, e) =>
+        {
+            e.Handled = true;
+            var uri = e.Uri;
+            if (!string.IsNullOrEmpty(uri) &&
+                (uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                 uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri) { UseShellExecute = true });
+                }
+                catch (Exception ex) { OutputLog.Warn($"open link failed: {ex.Message}"); }
+            }
+        };
+
         var extensionAssemblyPath = System.IO.Path.GetDirectoryName(typeof(AgentToolWindowControl).Assembly.Location)!;
 
         var htmlPath = System.IO.Path.Combine(
@@ -556,12 +575,17 @@ public partial class AgentToolWindowControl : UserControl
         // watcher would never restart. Keep it alive for the control's lifetime.
     }
 
-    // U4: watches the CLI's live presence file (~/.claude/sessions/<pid>.json)
-    // for status/waitingFor changes and forwards them to the webview. The file
-    // is per-PID and deleted when claude exits, so the watcher is re-pointed on
-    // every (re)spawn via AgentClient.OnClaudePid.
+    // U4: watches the CLI's live presence files (~/.claude/sessions/*.json)
+    // for status/waitingFor changes and forwards them to the webview. The pid
+    // the agent hands us is the process it spawned — under a shim install
+    // (chocolatey) that is NOT the pid the real CLI stamps on its presence
+    // file, so events are matched by the file's sessionId (or pid, when they
+    // do agree) instead of watching one fixed filename (bloco 20, validation
+    // 2026-07-18). Re-pointed on every (re)spawn via AgentClient.OnClaudePid.
     private FileSystemWatcher? _presenceWatcher;
     private string _lastPresencePosted = "";
+    private int _presenceClaudePid;
+    private string? _presenceMatchedFile;
 
     private void StartPresenceWatcher(int pid)
     {
@@ -569,27 +593,34 @@ public partial class AgentToolWindowControl : UserControl
         {
             _presenceWatcher?.Dispose();
             _presenceWatcher = null;
-            // New PID, clean slate — a dedupe carried across respawns could
+            // New spawn, clean slate — a dedupe carried across respawns could
             // swallow the first post if the state happens to repeat.
             _lastPresencePosted = "";
+            _presenceClaudePid = pid;
+            _presenceMatchedFile = null;
 
             var dir = Path.Combine(ClaudePaths.ConfigDir, "sessions");
             if (!Directory.Exists(dir)) return; // pre-presence-file CLI — feature just stays off
 
-            var fileName = pid + ".json";
-            _presenceWatcher = new FileSystemWatcher(dir, fileName)
+            _presenceWatcher = new FileSystemWatcher(dir, "*.json")
             {
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
                 EnableRaisingEvents = true,
             };
-            FileSystemEventHandler onChange = (_, __) => PostPresenceUpdate(Path.Combine(dir, fileName));
+            FileSystemEventHandler onChange = (_, e) => PostPresenceUpdate(e.FullPath);
             _presenceWatcher.Changed += onChange;
             _presenceWatcher.Created += onChange;
-            _presenceWatcher.Deleted += (_, __) => PostPresence("", "");
+            _presenceWatcher.Deleted += (_, e) =>
+            {
+                // Only the file we matched means OUR claude went away.
+                if (string.Equals(e.Name, _presenceMatchedFile, StringComparison.OrdinalIgnoreCase))
+                    PostPresence("", "");
+            };
 
-            // Seed from the current contents (the file usually exists already
-            // by the time the pid chunk reaches us).
-            PostPresenceUpdate(Path.Combine(dir, fileName));
+            // Seed from whatever is already on disk (the presence file usually
+            // exists by the time the pid chunk reaches us).
+            foreach (var f in Directory.EnumerateFiles(dir, "*.json"))
+                PostPresenceUpdate(f);
         }
         catch (Exception ex)
         {
@@ -601,13 +632,24 @@ public partial class AgentToolWindowControl : UserControl
     {
         try
         {
-            if (!File.Exists(path)) { PostPresence("", ""); return; }
+            if (!File.Exists(path)) return;
             // Tolerate the CLI mid-write: share everything, and let a parse
             // failure just skip this event (the next write fires another).
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             using var sr = new StreamReader(fs);
             using var doc = JsonDocument.Parse(sr.ReadToEnd());
             var root = doc.RootElement;
+
+            // Ours? Match by pid (native install: spawned pid == stamped pid)
+            // or by sessionId (shim install: pids differ, session id doesn't).
+            var filePid = root.TryGetProperty("pid", out var p) && p.TryGetInt32(out var pv) ? pv : -1;
+            var fileSession = root.TryGetProperty("sessionId", out var sid) ? sid.GetString() : null;
+            var ourSession = _agentClient?.CurrentSessionId;
+            var isOurs = filePid == _presenceClaudePid
+                || (!string.IsNullOrEmpty(fileSession) && fileSession == ourSession);
+            if (!isOurs) return;
+            _presenceMatchedFile = Path.GetFileName(path);
+
             var status = root.TryGetProperty("status", out var s) ? s.GetString() ?? "" : "";
             var waitingFor = root.TryGetProperty("waitingFor", out var w) ? w.GetString() ?? "" : "";
             PostPresence(status, waitingFor);
@@ -1349,6 +1391,9 @@ public partial class AgentToolWindowControl : UserControl
 
             if (string.IsNullOrWhiteSpace(request.Text))
                 return;
+
+            if (!string.IsNullOrEmpty(request.WorkingDirectory) && !Directory.Exists(request.WorkingDirectory))
+                OutputLog.Warn($"working dir override does not exist, falling back to solution dir: {request.WorkingDirectory}");
 
             var workingDir = (!string.IsNullOrEmpty(request.WorkingDirectory) && Directory.Exists(request.WorkingDirectory))
                 ? request.WorkingDirectory

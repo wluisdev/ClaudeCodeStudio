@@ -506,6 +506,15 @@ public class AgentClient
                 continue;
             }
 
+            // CLI informational notices ("Unknown command: /x") — shown as a
+            // muted system line so the turn doesn't look like a silent no-op.
+            if (chunk.Type == "system-info")
+            {
+                OutputLog.Info($"system-info: {chunk.Text}");
+                onTool?.Invoke("system-info", "", null, chunk.Text, null);
+                continue;
+            }
+
             if (chunk.Type == "session")
             {
                 CurrentSessionId = chunk.Text;
@@ -515,12 +524,18 @@ public class AgentClient
                 continue;
             }
 
+            // NEVER break on error/claude-not-found: the agent always follows a
+            // fatal one with "done" (and mid-turn errors are informational — the
+            // turn keeps streaming). Breaking early left that "done" orphaned in
+            // the pipe, and every subsequent request then completed instantly
+            // against the previous request's done — the chat ran one message
+            // behind until the agent restarted (D7, validation 2026-07-18).
             if (chunk.Type == "error")
             {
                 OutputLog.Error($"agent error: {chunk.Text}");
                 if (!string.IsNullOrEmpty(chunk.Text))
                     onChunk(chunk.Text);
-                break;
+                continue;
             }
 
             // claude.exe missing — route through onChunk with a sentinel so the
@@ -529,7 +544,7 @@ public class AgentClient
             {
                 OutputLog.Error($"claude not found: {chunk.Text}");
                 onChunk("CLAUDE_NOT_FOUND::" + (chunk.Text ?? ""));
-                break;
+                continue;
             }
 
             if (chunk.Type == "chunk" && !string.IsNullOrEmpty(chunk.Text))

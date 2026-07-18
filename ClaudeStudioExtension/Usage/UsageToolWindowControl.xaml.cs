@@ -196,6 +196,8 @@ public partial class UsageToolWindowControl : UserControl
 
         private static string ShortenModel(string m)
         {
+            if (m.Contains("fable", StringComparison.OrdinalIgnoreCase)
+                || m.Contains("mythos", StringComparison.OrdinalIgnoreCase)) return "fable";
             if (m.Contains("opus", StringComparison.OrdinalIgnoreCase)) return "opus";
             if (m.Contains("haiku", StringComparison.OrdinalIgnoreCase)) return "haiku";
             if (m.Contains("sonnet", StringComparison.OrdinalIgnoreCase)) return "sonnet";

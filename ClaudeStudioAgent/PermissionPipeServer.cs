@@ -135,6 +135,27 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
         return null;
     }
 
+    // True when the tool call is claude writing/updating its own plan document
+    // (plan mode keeps them under <config>/plans/). Honors CLAUDE_CONFIG_DIR.
+    private static readonly string PlansDir = Path.Combine(
+        Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"),
+        "plans");
+
+    private static bool IsPlanFileWrite(string toolName, string? toolInputJson)
+    {
+        if (toolName is not ("Write" or "Edit" or "MultiEdit" or "NotebookEdit")) return false;
+        var filePath = ExtractPrimaryInput(toolInputJson);
+        if (string.IsNullOrEmpty(filePath)) return false;
+        try
+        {
+            var full = Path.GetFullPath(filePath!);
+            var plans = Path.GetFullPath(PlansDir);
+            return full.StartsWith(plans + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
     private static bool SpecMatches(string spec, string? value)
     {
         if (value == null) return false;
@@ -222,7 +243,15 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
             var (verdict, matchedRule) = EvaluateRules(toolName!, toolInput);
 
             Decision decision;
-            if (verdict == RuleVerdict.Deny)
+            if (IsPlanFileWrite(toolName!, toolInput))
+            {
+                // Plan mode saves its plan document to ~/.claude/plans/<slug>.md
+                // through the Write tool — CLI bookkeeping, not a workspace edit.
+                // Without this bypass every plan-mode turn pops a scary Write
+                // modal for the plan file (validation round 2026-07-16).
+                decision = new Decision(true, null);
+            }
+            else if (verdict == RuleVerdict.Deny)
             {
                 decision = new Decision(false, $"Denied by permission rule: {matchedRule}");
             }

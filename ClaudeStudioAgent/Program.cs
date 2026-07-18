@@ -100,15 +100,21 @@ var stdinReader = Task.Run(async () =>
 
             if (request.PermissionResponse != null)
             {
-                if (pipeServer == null)
-                {
-                    EmitError("permission response received but hook server is disabled");
-                    continue;
-                }
                 var pr = request.PermissionResponse;
                 if (!string.IsNullOrEmpty(pr.AllowSession))
-                    pipeServer.AllowForSession(pr.AllowSession);
-                if (!pipeServer.Respond(pr.ToolUseId, pr.Allow, pr.Reason))
+                    pipeServer?.AllowForSession(pr.AllowSession);
+
+                // Hook-pipe prompts first; control-channel gates (ExitPlanMode
+                // plan approval) ride the same PermissionResponse message.
+                if (pipeServer?.Respond(pr.ToolUseId, pr.Allow, pr.Reason) == true)
+                    continue;
+                var controlHandled = false;
+                if (session != null)
+                {
+                    try { controlHandled = await session.TryRespondControlPermissionAsync(pr); }
+                    catch (Exception ex) { EmitError($"control permission response failed: {ex.Message}"); controlHandled = true; }
+                }
+                if (!controlHandled)
                     EmitError($"no pending permission request for tool_use_id {pr.ToolUseId}");
                 continue;
             }
@@ -398,6 +404,11 @@ sealed class ClaudeSession : IAsyncDisposable
     // the UI knows). Maps to the request_id needed for the control_response and
     // the original tool input (echoed back with an `answers` field).
     private readonly ConcurrentDictionary<string, PendingAsk> _pendingAsks = new();
+
+    // Pending control-channel permission gates (ExitPlanMode plan approval),
+    // keyed by tool_use_id. Answered via the same PermissionResponse the hook
+    // modal uses — the stdin reader tries the pipe first, then this registry.
+    private readonly ConcurrentDictionary<string, PendingAsk> _pendingControlPerms = new();
     private StreamReader? _stdout;
     private readonly StringBuilder _stderrBuffer = new();
     private Task? _stderrPump;
@@ -448,7 +459,16 @@ sealed class ClaudeSession : IAsyncDisposable
     }
 
     public static string MakeKey(ChatRequest r) =>
-        $"{r.Model}|{r.Effort}|{PermissionProfile(r.PermissionMode)}|{r.WorkingDirectory}|{r.ResumeSessionId}|{r.AutoResume}|{r.CliPath}";
+        $"{r.Model}|{r.Effort}|{PermissionProfile(r.PermissionMode)}|{r.WorkingDirectory}|{r.ResumeSessionId}|{r.AutoResume}|{r.CliPath}|{SpawnSettingsFingerprint(r.ClaudeSettings)}";
+
+    // Settings claude only reads at startup (V7: attribution / cleanup /
+    // auto-compact). Baking them into the key makes a toggle flip respawn the
+    // session so the new settings.json actually applies — without this, a
+    // mid-conversation change was silently ignored until some unrelated respawn
+    // (validation round 2026-07-16). Permission rules stay OUT of the key: the
+    // pipe re-reads them on every request, no respawn needed.
+    private static string SpawnSettingsFingerprint(ClaudeSettings? s) =>
+        s == null ? "True||True" : $"{s.CoAuthoredBy}|{s.CleanupPeriodDays}|{s.AutoCompact}";
 
     // ask and plan share a spawn profile (hooks + prompt tool + settings) and
     // flip between each other live via set_permission_mode — so the key must
@@ -663,6 +683,12 @@ The user's IDE selection (if any) is included in the conversation context and ma
 
         EmitTiming("claude spawned", sw.ElapsedMilliseconds);
 
+        // Which claude.exe actually launched — a stale install shadowing the
+        // expected one on PATH cost a whole validation round to diagnose
+        // (2026-07-16: chocolatey 2.1.144 vs ~/.local/bin 2.1.211).
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"claude exe: {psi.FileName}" }));
+        Console.Out.Flush();
+
         // U4: hand the claude PID to the extension so it can watch the CLI's
         // live presence file (~/.claude/sessions/<pid>.json) for status /
         // waitingFor updates. Emitted mid-turn, so the read loop picks it up.
@@ -702,6 +728,28 @@ The user's IDE selection (if any) is included in the conversation context and ma
         }
 
         await WriteControlResponseAsync(pending.RequestId, inner);
+    }
+
+    // Answers a pending control-channel permission gate (ExitPlanMode). Returns
+    // false when the tool_use_id isn't ours — the caller falls back to an error.
+    public async Task<bool> TryRespondControlPermissionAsync(PermissionResponse pr)
+    {
+        if (!_pendingControlPerms.TryRemove(pr.ToolUseId, out var pending)) return false;
+        if (pr.Allow)
+        {
+            await WriteControlAllowAsync(pending.RequestId, pending.InputJson);
+            // Approving the plan gate makes the CLI leave plan mode on its own.
+            // Track that here so a later UI flip back to plan actually issues
+            // set_permission_mode (with UiPermissionMode stuck on "plan" the
+            // main loop would see no change and skip the switch — bloco 20,
+            // validation 2026-07-18). The UI flips its pill to ask in parallel.
+            if (UiPermissionMode == "plan")
+                UiPermissionMode = "ask";
+        }
+        else
+            await WriteControlResponseAsync(pending.RequestId,
+                new { behavior = "deny", message = string.IsNullOrEmpty(pr.Reason) ? "User rejected the plan — keep planning." : pr.Reason });
+        return true;
     }
 
     // Auto-allow an unexpected control_request, echoing the input unchanged.
@@ -786,9 +834,24 @@ The user's IDE selection (if any) is included in the conversation context and ma
                 // `system/init` is the first event claude emits after receiving the
                 // first stdin line (no `-p` mode). Capture session_id, emit a session
                 // chunk on first sighting, and record timing. Other system subtypes
-                // (status, rate_limit_event) are intentionally ignored.
+                // (status, rate_limit_event) are intentionally ignored — except
+                // `informational` (e.g. "Unknown command: /teste"), which the UI
+                // must show or the turn looks like a silent 0-token no-op
+                // (validation round 2026-07-16).
                 if (!evt.TryGetProperty("subtype", out var subProp)) continue;
-                if (subProp.GetString() != "init") continue;
+                var subtypeStr = subProp.GetString();
+                if (subtypeStr == "informational")
+                {
+                    var infoText = evt.TryGetProperty("content", out var infoProp) && infoProp.ValueKind == JsonValueKind.String
+                        ? infoProp.GetString() : null;
+                    if (!string.IsNullOrEmpty(infoText))
+                    {
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "system-info", Text = infoText! }));
+                        Console.Out.Flush();
+                    }
+                    continue;
+                }
+                if (subtypeStr != "init") continue;
 
                 if (evt.TryGetProperty("session_id", out var sidProp))
                 {
@@ -963,6 +1026,24 @@ The user's IDE selection (if any) is included in the conversation context and ma
                         // chunk. Just remember the request_id so SendControlResponseAsync
                         // can answer it when the user picks. claude waits on stdin.
                         _pendingAsks[toolUseId] = new PendingAsk(reqId, inputRaw);
+                    }
+                    else if (toolName == "ExitPlanMode" && toolUseId != null)
+                    {
+                        // Plan approval gate. Auto-allowing here meant plans executed
+                        // without anyone reviewing them (validation 2026-07-16) —
+                        // surface the request as a permission modal instead. The
+                        // response comes back through the PermissionResponse path,
+                        // which tries the hook pipe first and then this registry.
+                        _pendingControlPerms[toolUseId] = new PendingAsk(reqId, inputRaw);
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+                        {
+                            Type = "permission_request",
+                            Tool = "ExitPlanMode",
+                            ToolInput = inputRaw,
+                            ToolId = toolUseId,
+                            Cwd = _workingDirectory
+                        }));
+                        Console.Out.Flush();
                     }
                     else
                     {
@@ -1299,6 +1380,8 @@ The user's IDE selection (if any) is included in the conversation context and ma
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var fallbacks = new[]
         {
+            // Native installer / `claude update` target — often missing from PATH.
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".local\bin\claude.exe"),
             Path.Combine(appData, @"npm\claude.exe"),
             Path.Combine(appData, @"npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"nodejs\claude.exe"),

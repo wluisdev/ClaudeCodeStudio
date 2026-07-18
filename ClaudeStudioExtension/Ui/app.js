@@ -240,7 +240,12 @@ function toggleCmdMenu() {
 
 // Renders the discovered .claude/commands entries (project + user scope) into
 // the ⌘ menu. Clicking forwards "/name" to claude, which expands the command.
+// Discovered custom commands (V9) also feed the composer's "/" autocomplete —
+// refreshed whenever the ⌘ menu opens or the workspace changes.
+let discoveredSlashCommands = [];
+
 function renderSlashCommands(project, user) {
+    discoveredSlashCommands = [...(project || []), ...(user || [])].map(c => "/" + c.name);
     const fill = (wrapId, listId, cmds) => {
         const wrap = document.getElementById(wrapId);
         const list = document.getElementById(listId);
@@ -266,9 +271,11 @@ function requestContextUsage() {
 
     const card = document.createElement("div");
     card.className = "question-card ctx-usage-card";
-    card.innerHTML = `<div class="question-text">◔ Context usage</div><div class="ctx-usage-body">Loading…</div>`;
-    messages.appendChild(card);
-    autoScroll();
+    card.innerHTML = `<div class="question-text">◔ Context usage` +
+        `<button type="button" class="pinned-close" title="Close — moves the card into the chat history">✕</button></div>` +
+        `<div class="ctx-usage-body">Loading…</div>`;
+    card.querySelector(".pinned-close").onclick = () => unpinCard(card);
+    pinCard(card, messages, "manual");
     _pendingCtxUsageCard = card;
 
     try { window.chrome.webview.postMessage({ type: "get-context-usage" }); }
@@ -1248,6 +1255,42 @@ const messages = document.querySelector("#messages");
 const attachmentsEl = document.getElementById("attachments");
 let welcome = document.querySelector(".welcome");
 
+// ── Pinned dock ───────────────────────────────────────────────
+// Active interactive cards (a pending AskUserQuestion, the context-usage
+// panel) live between the chat and the composer so they can't scroll away
+// with the transcript (validation 2026-07-18 — the sticky-bottom approach
+// stops working once new content streams in below the card). A hidden
+// placeholder marks where the card re-enters the transcript once resolved.
+const pinnedDock = document.getElementById("pinned-dock");
+
+function pinCard(card, flowParent, scope) {
+    const ph = document.createElement("span");
+    ph.className = "pin-placeholder";
+    ph.hidden = true;
+    flowParent.appendChild(ph);
+    card._pinPlaceholder = ph;
+    card.dataset.pinScope = scope; // "turn" flushes at stream-done; "manual" waits for ✕
+    pinnedDock.appendChild(card);
+    pinnedDock.hidden = false;
+}
+
+function unpinCard(card) {
+    const ph = card._pinPlaceholder;
+    card._pinPlaceholder = null;
+    delete card.dataset.pinScope;
+    if (ph && ph.parentNode) ph.parentNode.replaceChild(card, ph);
+    else if (!messages.contains(card)) messages.appendChild(card);
+    if (!pinnedDock.firstElementChild) pinnedDock.hidden = true;
+    autoScroll();
+}
+
+// Turn-scoped cards still docked when the turn ends (cancel, error — the pick
+// never came) fall back into the transcript instead of lingering.
+function flushPinnedDock() {
+    for (const card of [...pinnedDock.children])
+        if (card.dataset.pinScope === "turn") unpinCard(card);
+}
+
 let _userScrolledUp = false;
 const btnScrollBottom = document.getElementById("btn-scroll-bottom");
 
@@ -1427,7 +1470,7 @@ let acIndex = -1;
 const builtinCommands = ["/model", "/usage", "/compact", "/review", "/clear"];
 
 function getMatchingCommands(query) {
-    const all = [...builtinCommands, ...customCommands.map(c => c.command)];
+    const all = [...new Set([...builtinCommands, ...customCommands.map(c => c.command), ...discoveredSlashCommands])];
     return query === "/" ? all : all.filter(c => c.startsWith(query));
 }
 
@@ -1810,6 +1853,11 @@ textarea.addEventListener("paste", e => {
 });
 
 function sendMessage() {
+    // A turn is already in flight (possibly still respawning claude — slow and
+    // silent): a second send here queues in the agent and the answers tramples
+    // the transcript (D7 validation 2026-07-16). Stop it — the user can cancel
+    // with ■ first if they really want to abandon the pending turn.
+    if (isStreaming) return;
     _userScrolledUp = false;
     const text = textarea.value.trim();
     pushPromptHistory(text);
@@ -1959,8 +2007,10 @@ window.chrome.webview.addEventListener("message", event => {
         // (one-shot) and point the settings input at this workspace's entry.
         migrateLegacyWorkingDir();
         syncWorkingDirInput();
-        // Workspace changed → the @ picker's file index belongs to the old one.
+        // Workspace changed → the @ picker's file index belongs to the old one,
+        // and the "/" autocomplete's discovered commands too.
         if (_cwdVsPath !== prevVsPath) atEntries = null;
+        try { window.chrome.webview.postMessage({ type: "get-slash-commands" }); } catch (e) {}
         return;
     }
 
@@ -2149,6 +2199,7 @@ window.chrome.webview.addEventListener("message", event => {
             finalizeBubbleStream(currentStreamBubble);
             currentStreamBubble = null;
         }
+        flushPinnedDock();
         setStreaming(false);
         return;
     }
@@ -2160,6 +2211,11 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "tokens-live") {
         updateLiveTokens(event.data.text || "");
+        return;
+    }
+
+    if (event.data.type === "system-info") {
+        appendSystemInfo(event.data.text || "");
         return;
     }
 
@@ -2289,7 +2345,11 @@ function openPermissionModal(tool, input, id, cwd) {
 
     const pre = document.getElementById("perm-modal-input");
     let formatted = input;
-    if (input) {
+    if (tool === "ExitPlanMode") {
+        // Plan approval gate: show the plan markdown itself, not escaped JSON.
+        document.getElementById("perm-modal-tool").textContent = "Approve plan? (ExitPlanMode)";
+        try { formatted = JSON.parse(input).plan || input; } catch (_) { /* leave as-is */ }
+    } else if (input) {
         try { formatted = JSON.stringify(JSON.parse(input), null, 2); }
         catch (_) { /* leave as-is */ }
     }
@@ -2311,6 +2371,7 @@ function closePermissionModal() {
 
 function permissionAllow() {
     if (!pendingPermissionToolId) { closePermissionModal(); return; }
+    const wasPlanApproval = pendingPermissionToolName === "ExitPlanMode";
     window.chrome.webview.postMessage({
         type: "permission-response",
         toolUseId: pendingPermissionToolId,
@@ -2318,6 +2379,20 @@ function permissionAllow() {
         reason: null
     });
     closePermissionModal();
+
+    // Approving a plan makes the CLI leave plan mode (it does NOT return to
+    // planning on its own) — mirror that on the composer pill, or the next
+    // send claims perm=plan while the session is really in default mode
+    // (bloco 20 desync, validation 2026-07-18). Deny keeps everything in plan.
+    if (wasPlanApproval && _permissionValue === "plan") {
+        setPermission("ask");
+        const div = document.createElement("div");
+        div.className = "model-divider";
+        div.innerHTML = `<span class="model-divider-label"></span>`;
+        div.querySelector(".model-divider-label").textContent = "📋 Plan approved — permission mode back to ask";
+        messages.appendChild(div);
+        autoScroll();
+    }
 }
 
 function permissionAllowSession() {
@@ -2334,6 +2409,9 @@ function permissionAllowSession() {
 
 function permissionDeny(reason) {
     if (!pendingPermissionToolId) { closePermissionModal(); return; }
+    // Plan rejection needs a message claude can act on, not "dismissed".
+    if (pendingPermissionToolName === "ExitPlanMode")
+        reason = "User rejected the plan — keep planning.";
     window.chrome.webview.postMessage({
         type: "permission-response",
         toolUseId: pendingPermissionToolId,
@@ -2842,6 +2920,18 @@ function appendTiming(text) {
     autoScroll();
 }
 
+// CLI informational notices ("Unknown command: /x") — muted line in the
+// transcript so the turn doesn't read as a silent 0-token no-op.
+function appendSystemInfo(text) {
+    if (!text) return;
+    if (welcome) { welcome.remove(); welcome = null; }
+    const el = document.createElement("div");
+    el.className = "system-info-line";
+    el.textContent = `ⓘ ${text}`;
+    messages.appendChild(el);
+    autoScroll();
+}
+
 function applyMarkdown(bubble, raw) {
     bubble.innerHTML = renderMarkdown(raw);
     bubble.querySelectorAll("pre code").forEach(el => {
@@ -2949,6 +3039,11 @@ function renderMarkdown(raw) {
         const end = fm[3] || fm[2] || "0";
         return `<a href="#" class="file-link" data-path="${path}" data-start="${start}" data-end="${end}" onclick="openFileLink(this);return false;">${label}</a>`;
     });
+
+    // Bare URLs (no markdown syntax) — linkify too. The leading [\s(] guard
+    // skips URLs already inside href="..." (preceded by a quote) and anchor
+    // labels (preceded by >).
+    text = text.replace(/(^|[\s(])(https?:\/\/[^\s<>"')\]]+)/g, '$1<a href="$2" target="_blank">$2</a>');
 
     // Paragraphs
     text = text.split(/\n{2,}/).map(block => {
@@ -3290,8 +3385,10 @@ function appendToolEvent(kind, name, inputJson, text, id) {
     // is sent back as a control_response (the agent runs claude with
     // --permission-prompt-tool stdio), which becomes the tool's real tool_result.
     if (kind === "tool_use" && name === "AskUserQuestion" && id && inputJson) {
-        // Dedupe: JSONL watcher may re-emit the same tool_use after stream-json
-        if (bubble.querySelector(`.ask-question-card[data-tool-id="${CSS.escape(id)}"]`)) {
+        // Dedupe: JSONL watcher may re-emit the same tool_use after stream-json.
+        // While pending the card lives in the dock, not the bubble — check both.
+        if (bubble.querySelector(`.ask-question-card[data-tool-id="${CSS.escape(id)}"]`) ||
+            pinnedDock.querySelector(`.ask-question-card[data-tool-id="${CSS.escape(id)}"]`)) {
             autoScroll();
             return;
         }
@@ -3624,7 +3721,9 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
     }
     card.appendChild(footer);
 
-    bubble.appendChild(card);
+    // Pending picks dock above the composer so streaming can't scroll them
+    // away; submitAnswers moves the card back into the bubble.
+    pinCard(card, bubble, "turn");
 
     function updateConfirmState() {
         if (!confirmBtn) return;
@@ -3654,6 +3753,7 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
 
         card.classList.add("ask-question-answered");
         card.querySelectorAll("button, input").forEach(el => el.disabled = true);
+        unpinCard(card); // answered — back into the transcript flow
 
         // claude resumes working as soon as it gets the answer — unfreeze the timer.
         resumeLiveTimer();
@@ -3820,6 +3920,8 @@ function removeLiveTimer() {
 let _suppressNextAutoResume = false;
 
 function clearChat() {
+    pinnedDock.innerHTML = "";
+    pinnedDock.hidden = true;
     messages.innerHTML = `
         <div class="welcome">
             <div class="hero"><span class="logo">✺</span> Claude Code Studio</div>

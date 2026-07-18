@@ -425,6 +425,11 @@
             </div>
         </div>
 
+        <!-- Active interactive cards (pending question, context usage) dock here
+             so they never scroll away with the transcript; resolved cards move
+             back into the chat flow. -->
+        <div class="pinned-dock" id="pinned-dock" hidden></div>
+
         <div class="cost-warning" id="cost-warning" style="display:none">
             <span class="cost-warning-icon">⚠</span>
             <span class="cost-warning-text" id="cost-warning-text"></span>
@@ -459,7 +464,7 @@
                             <div class="effort-popup" id="effort-popup" hidden>
                                 <input type="range" class="effort-popup-slider" id="effort-popup-slider" min="0" max="5" step="1" value="0" />
                                 <div class="effort-popup-ticks">
-                                    <span>auto</span><span>low</span><span>med</span><span>high</span><span>max</span>
+                                    <span>auto</span><span>low</span><span>med</span><span>high</span><span>xhigh</span><span>max</span>
                                 </div>
                             </div>
                         </div>
