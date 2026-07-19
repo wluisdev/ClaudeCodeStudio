@@ -1872,6 +1872,11 @@ html.light-theme .effort-btn-caret { color: #888; }
     display: inline-flex;
     align-items: center;
 }
+.model-control {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
 .permission-popup {
     position: absolute;
     bottom: calc(100% + 6px);
@@ -1890,6 +1895,14 @@ html.light-theme .effort-btn-caret { color: #888; }
 /* `display: flex` above overrides the [hidden] attribute's default
    `display: none` — restore it explicitly. */
 .permission-popup[hidden] { display: none; }
+/* The model button lives in the titlebar (top of the window), so its popup
+   opens downward — unlike the composer popups, which open upward. The compound
+   selector outweighs `.permission-popup`, so `bottom` can't leak back in and
+   pin both edges (which collapsed the popup box to zero height). */
+.permission-popup.model-popup {
+    bottom: auto;
+    top: calc(100% + 6px);
+}
 .permission-item {
     background: transparent;
     border: 1px solid transparent;

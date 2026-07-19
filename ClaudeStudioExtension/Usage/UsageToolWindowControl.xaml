@@ -258,6 +258,7 @@
                 <ComboBoxItem Content="7 days"/>
                 <ComboBoxItem Content="30 days"/>
             </ComboBox>
+            <ComboBox x:Name="SessionCombo" SelectedIndex="0" Margin="10,0,0,0" Width="240" MaxDropDownHeight="420" SelectionChanged="OnSessionChanged"/>
             <CheckBox x:Name="AllProjects" Content="all projects" Margin="14,0,0,0" VerticalAlignment="Center" Checked="OnFilterChanged" Unchecked="OnFilterChanged"/>
         </StackPanel>
 

@@ -1192,6 +1192,57 @@ function noteModelSwitch() {
     autoScroll();
 }
 modelSelect.addEventListener("change", noteModelSwitch);
+
+// ── Model picker (titlebar) ──────────────────────────────────
+// Effort-style button + popup replacing the OS-rendered <select> dropdown so
+// the model pick matches the effort/permission controls (rounded popup, item
+// highlight). The hidden native select stays the single source of truth;
+// picking an item writes it and dispatches "change" so every existing
+// listener (caption, transcript divider, this button's label) runs unchanged.
+const modelControl = document.getElementById("model-control");
+const modelPopup = document.getElementById("model-popup");
+const modelBtn = document.getElementById("model-btn");
+const modelBtnLabel = document.getElementById("model-btn-label");
+
+function toggleModelPopup() {
+    if (modelPopup.hidden) buildModelPopup();
+    modelPopup.hidden = !modelPopup.hidden;
+}
+
+function buildModelPopup() {
+    modelPopup.innerHTML = "";
+    [...modelSelect.options].forEach(opt => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "permission-item" + (opt.value === modelSelect.value ? " active" : "");
+        btn.title = opt.title || opt.value;
+        const span = document.createElement("span");
+        span.textContent = opt.text;
+        btn.appendChild(span);
+        btn.onclick = () => {
+            modelPopup.hidden = true;
+            if (opt.value === modelSelect.value) return;
+            modelSelect.value = opt.value;
+            modelSelect.dispatchEvent(new Event("change"));
+        };
+        modelPopup.appendChild(btn);
+    });
+}
+
+function refreshModelButton() {
+    const opt = modelSelect.options[modelSelect.selectedIndex];
+    modelBtnLabel.textContent = opt?.text || modelSelect.value;
+    modelBtn.title = opt?.title || modelSelect.value;
+}
+modelSelect.addEventListener("change", refreshModelButton);
+refreshModelButton();
+
+// Click outside closes; capture phase, same as the other popups.
+document.addEventListener("click", (e) => {
+    if (modelPopup.hidden) return;
+    if (!modelControl.contains(e.target)) modelPopup.hidden = true;
+}, true);
+
 // Effort selector: compact button in the composer-actions row that opens a
 // popup with a slider above it. Avoids the native <select> dropdown direction
 // flipping (5 options need ~120px vertical and the composer sits at the
@@ -1899,10 +1950,9 @@ function selectModel(id, card) {
     const label = modelSelect.options[modelSelect.selectedIndex]?.text || id;
     card.innerHTML = `<div class="question-text">🤖 Model: <strong>${escapeHtml(label)}</strong></div>`;
     card.classList.add("question-answered");
-    updateCaption();
-    // Setting .value programmatically doesn't fire the change event, so the
-    // transcript marker has to be triggered explicitly here.
-    noteModelSwitch();
+    // Setting .value programmatically doesn't fire the change event — dispatch
+    // it so caption, transcript divider and the titlebar button all update.
+    modelSelect.dispatchEvent(new Event("change"));
 }
 
 // ── Drag & drop ───────────────────────────────────────────────

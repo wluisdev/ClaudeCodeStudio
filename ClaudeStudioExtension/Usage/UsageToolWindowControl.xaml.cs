@@ -60,8 +60,16 @@ public partial class UsageToolWindowControl : UserControl
         catch { /* best-effort */ }
     }
 
+    // Suppresses OnSessionChanged while ApplyFilters repopulates the combo —
+    // programmatic item churn fires SelectionChanged just like a user click.
+    private bool _rebuildingSessionCombo;
+
     private void OnRefreshClick(object sender, RoutedEventArgs e) => Refresh();
     private void OnRangeChanged(object sender, SelectionChangedEventArgs e) => ApplyFilters();
+    private void OnSessionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_rebuildingSessionCombo) ApplyFilters();
+    }
     private void OnFilterChanged(object sender, RoutedEventArgs e)
     {
         // Programmatic IsChecked changes also fire Checked/Unchecked. The guard
@@ -153,7 +161,14 @@ public partial class UsageToolWindowControl : UserControl
         if (!showAll && !string.IsNullOrEmpty(_currentCwd))
             filtered = filtered.Where(s => s.Cwd.Equals(_currentCwd, StringComparison.OrdinalIgnoreCase));
 
-        var list = filtered.Select(s => new SessionRow(s)).ToList();
+        // Session filter: the combo lists the sessions inside the current
+        // range+project scope; picking one narrows tiles and grid to it.
+        var scope = filtered.ToList();
+        var selectedSession = RebuildSessionCombo(scope);
+        if (selectedSession != null)
+            scope = scope.Where(s => s.SessionId == selectedSession).ToList();
+
+        var list = scope.Select(s => new SessionRow(s)).ToList();
         SessionsGrid.ItemsSource = list;
 
         var totalCost  = list.Sum(r => r.Cost);
@@ -166,6 +181,55 @@ public partial class UsageToolWindowControl : UserControl
         TotalOutText.Text      = totalOut.ToString("N0");
         TotalCacheText.Text    = totalCache.ToString("N0");
         SessionCountText.Text  = list.Count.ToString();
+    }
+
+    /// <summary>
+    /// Repopulates the session combo from the sessions in scope, preserving the
+    /// current pick when that session is still present. Returns the selected
+    /// session id, or null for "All sessions" (or when the pick left the scope).
+    /// </summary>
+    private string? RebuildSessionCombo(List<SessionUsage> scope)
+    {
+        if (SessionCombo == null) return null;
+
+        var previous = (SessionCombo.SelectedItem as ComboBoxItem)?.Tag as string;
+
+        _rebuildingSessionCombo = true;
+        try
+        {
+            SessionCombo.Items.Clear();
+            SessionCombo.Items.Add(new ComboBoxItem { Content = "All sessions" });
+
+            foreach (var s in scope)
+            {
+                var item = new ComboBoxItem
+                {
+                    Content = $"{ResolveSessionLabel(s)} · {s.LastTimestamp:dd/MM HH:mm}",
+                    Tag = s.SessionId,
+                    ToolTip = s.SessionId,
+                };
+                SessionCombo.Items.Add(item);
+                if (s.SessionId == previous) SessionCombo.SelectedItem = item;
+            }
+
+            if (SessionCombo.SelectedItem == null) SessionCombo.SelectedIndex = 0;
+        }
+        finally { _rebuildingSessionCombo = false; }
+
+        return (SessionCombo.SelectedItem as ComboBoxItem)?.Tag as string;
+    }
+
+    // Same precedence History uses: store custom > native custom (unless the
+    // user explicitly cleared it) > store generated > native ai > preview.
+    private static string ResolveSessionLabel(SessionUsage s)
+    {
+        var title = SessionTitlesStore.GetCustom(s.SessionId)
+            ?? (s.NativeCustomTitle.Length > 0 && !SessionTitlesStore.WasCustomCleared(s.SessionId)
+                ? s.NativeCustomTitle : null)
+            ?? SessionTitlesStore.GetGenerated(s.SessionId)
+            ?? (s.NativeAiTitle.Length > 0 ? s.NativeAiTitle : null)
+            ?? (s.Preview.Length > 0 ? s.Preview : "(untitled)");
+        return title.Length > 46 ? title.Substring(0, 46) + "…" : title;
     }
 
     public class SessionRow

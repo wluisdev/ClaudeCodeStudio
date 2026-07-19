@@ -19,6 +19,11 @@ public class SessionUsage
     public long CacheCreationTokens { get; set; }
     public int TurnCount { get; set; }
     public decimal Cost { get; set; }
+    // Naming inputs for the session filter combo — resolved against
+    // SessionTitlesStore by the UI (same precedence History uses).
+    public string NativeCustomTitle { get; set; } = "";
+    public string NativeAiTitle { get; set; } = "";
+    public string Preview { get; set; } = "";
 }
 
 public static class Pricing
@@ -86,6 +91,7 @@ public static class UsageReader
         DateTime first = DateTime.MaxValue, last = DateTime.MinValue;
         long inp = 0, outp = 0, cr = 0, cc = 0;
         int turns = 0;
+        string nativeCustom = "", nativeAi = "", preview = "";
 
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using var sr = new StreamReader(fs);
@@ -108,7 +114,44 @@ public static class UsageReader
                 if (ts > last) last = ts;
             }
 
-            if (!el.TryGetProperty("type", out var typeEl) || typeEl.GetString() != "assistant") continue;
+            if (!el.TryGetProperty("type", out var typeEl)) continue;
+            var entryType = typeEl.GetString();
+
+            // Title lines the CLI appends on rename / auto-naming (U2).
+            if (entryType == "custom-title")
+            {
+                if (el.TryGetProperty("customTitle", out var ctEl)) nativeCustom = ctEl.GetString() ?? "";
+                continue;
+            }
+            if (entryType == "ai-title")
+            {
+                if (el.TryGetProperty("aiTitle", out var atEl)) nativeAi = atEl.GetString() ?? "";
+                continue;
+            }
+
+            // First user text = preview fallback for the session filter combo.
+            if (preview.Length == 0 && entryType == "user" &&
+                el.TryGetProperty("message", out var userMsg) &&
+                userMsg.TryGetProperty("content", out var content))
+            {
+                string? text = null;
+                if (content.ValueKind == JsonValueKind.String)
+                    text = content.GetString();
+                else if (content.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in content.EnumerateArray())
+                        if (item.TryGetProperty("type", out var itEl) && itEl.GetString() == "text" &&
+                            item.TryGetProperty("text", out var txEl))
+                        { text = txEl.GetString(); break; }
+                }
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    text = text!.Trim().Replace('\n', ' ');
+                    preview = text.Length > 60 ? text.Substring(0, 60) : text;
+                }
+            }
+
+            if (entryType != "assistant") continue;
             if (!el.TryGetProperty("message", out var msg)) continue;
 
             // Claude Code emits "<synthetic>" for internal assistant turns
@@ -148,6 +191,9 @@ public static class UsageReader
             CacheCreationTokens = cc,
             TurnCount = turns,
             Cost = Pricing.Calculate(model, inp, outp, cr, cc),
+            NativeCustomTitle = nativeCustom,
+            NativeAiTitle = nativeAi,
+            Preview = preview,
         };
     }
 }
