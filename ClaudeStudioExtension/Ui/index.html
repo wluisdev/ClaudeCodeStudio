@@ -93,6 +93,13 @@
                 <div class="cmd-wrap" id="settings-wrap">
                     <button class="cmd-trigger" title="Settings" onclick="toggleSettings()">⚙</button>
                     <div class="cmd-menu settings-menu" id="settings-menu">
+                        <div class="settings-search-wrap">
+                            <input type="text" id="settings-search" class="settings-input settings-search" placeholder="Search settings…"
+                                oninput="filterSettings()"
+                                onkeydown="if(event.key==='Escape'&&this.value){event.stopPropagation();this.value='';filterSettings();}" />
+                            <button type="button" class="settings-input-clear settings-search-clear" title="Clear" onclick="clearSettingsSearch()">✕</button>
+                        </div>
+                        <div class="settings-search-empty" id="settings-search-empty" hidden>No matching settings</div>
                         <div class="cmd-section">Appearance</div>
                         <div class="settings-row">
                             <span class="settings-label">

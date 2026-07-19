@@ -71,7 +71,87 @@ function toggleLayout() {
 // ── Settings panel ───────────────────────────────────────────
 function toggleSettings() {
     const menu = document.getElementById("settings-menu");
-    menu.classList.toggle("open");
+    const opened = menu.classList.toggle("open");
+    if (opened) {
+        // Stale filters from the last visit would silently hide settings.
+        const search = document.getElementById("settings-search");
+        if (search) {
+            if (search.value) { search.value = ""; filterSettings(); }
+            search.focus();
+        }
+    }
+}
+
+function clearSettingsSearch() {
+    const search = document.getElementById("settings-search");
+    if (!search) return;
+    search.value = "";
+    filterSettings();
+    search.focus();
+}
+
+// ── Settings search ──────────────────────────────────────────
+// Filters ⚙ panel rows by name (label text + ⓘ tooltip). The menu is a flat
+// list where control blocks (slider wraps, input wraps, timing options, cost
+// limits) are SIBLINGS of the .settings-row that names them — they inherit
+// the visibility of the row above. A section title that matches keeps its
+// whole section; a section with no visible row hides its header. Dividers
+// and the about block only show when no filter is active.
+function filterSettings() {
+    const menu = document.getElementById("settings-menu");
+    if (!menu) return;
+    const q = (document.getElementById("settings-search")?.value || "").trim().toLowerCase();
+    const filtering = q.length > 0;
+
+    let section = null;
+    let sectionTitleHit = false;
+    let sectionHasHit = false;
+    let rowVisible = true;
+    let anyHit = false;
+
+    const flushSection = () => {
+        if (section) section.style.display = (!filtering || sectionTitleHit || sectionHasHit) ? "" : "none";
+        section = null;
+        sectionTitleHit = false;
+        sectionHasHit = false;
+    };
+
+    for (const el of menu.children) {
+        const cl = el.classList;
+        if (cl.contains("settings-search-wrap") || cl.contains("settings-search-empty")) continue;
+
+        if (cl.contains("cmd-divider") || cl.contains("about-section")) {
+            flushSection();
+            el.style.display = filtering ? "none" : "";
+            rowVisible = true;
+            continue;
+        }
+
+        if (cl.contains("cmd-section")) {
+            flushSection();
+            section = el;
+            sectionTitleHit = filtering && (el.textContent || "").toLowerCase().includes(q);
+            if (sectionTitleHit) anyHit = true;
+            continue;
+        }
+
+        if (cl.contains("settings-row")) {
+            const label = el.querySelector(".settings-label");
+            const name = ((label ? label.textContent : el.textContent) || "").toLowerCase();
+            const hint = (label?.querySelector(".info-icon")?.title || "").toLowerCase();
+            rowVisible = !filtering || sectionTitleHit || name.includes(q) || hint.includes(q);
+            if (rowVisible) { sectionHasHit = true; anyHit = true; }
+            el.style.display = rowVisible ? "" : "none";
+            continue;
+        }
+
+        // Companion control block — follows the row that precedes it.
+        el.style.display = rowVisible ? "" : "none";
+    }
+    flushSection();
+
+    const empty = document.getElementById("settings-search-empty");
+    if (empty) empty.hidden = !filtering || anyHit;
 }
 
 function openTrustedWorkspacesModal() {

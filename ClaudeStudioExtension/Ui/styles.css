@@ -9,9 +9,15 @@
        the orange brand color. Light-theme override below provides a darker
        variant for better contrast on light backgrounds. */
     --accent: #d88763;
+    /* Dim/secondary text. Was a hardcoded #555 scattered across text rules —
+       too dark against the dark background. Light theme keeps a darker gray
+       for contrast on light backgrounds. Border/scrollbar #555s are separate
+       and intentionally not tied to this token. */
+    --text-dim: #888;
 }
 html.light-theme {
     --accent: #b05c35;
+    --text-dim: #666;
 }
 
 body {
@@ -149,6 +155,40 @@ body {
     scrollbar-width: thin;
     scrollbar-color: #3a3a3a transparent;
 }
+
+/* ── Settings search ──────────────────────────────────────────
+   Sticky filter box at the top of the ⚙ panel. Negative margins swallow the
+   menu's own padding so the pinned bar spans the full menu width with an
+   opaque background while the rows scroll underneath. */
+.settings-search-wrap {
+    position: sticky;
+    top: -8px;
+    z-index: 2;
+    background: #252525;
+    margin: -8px -3px 4px;
+    padding: 8px 10px 6px;
+}
+
+.settings-search {
+    width: 100%;
+}
+
+/* Same ✕ as the other settings inputs; the sticky wrap's top padding pushes
+   the input down, so the 50% anchor lands above the field — nudge the ✕ down
+   to sit centered on the input (tuned visually, rodada 8). The descendant
+   selector is required: .settings-input-clear sets margin-top -2px much later
+   in the file, and at equal specificity that rule would win. */
+.settings-search-wrap .settings-search-clear {
+    margin-top: 2px;
+}
+
+.settings-search-empty {
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 8px 14px;
+}
+
+html.light-theme .settings-search-wrap { background: #f0f0f0; }
 .settings-menu::-webkit-scrollbar { width: 6px; }
 .settings-menu::-webkit-scrollbar-track { background: transparent; }
 .settings-menu::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
@@ -327,7 +367,7 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
     padding: 10px 12px;
 }
 
-.usage-loading { color: #555; font-style: italic; }
+.usage-loading { color: var(--text-dim); font-style: italic; }
 
 .usage-divider {
     border-top: 1px solid #333;
@@ -336,7 +376,7 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
 
 .usage-session-label {
     font-size: 10px;
-    color: #555;
+    color: var(--text-dim);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     margin-bottom: 6px;
@@ -364,14 +404,14 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
 
 .about-meta {
     font-size: 11px;
-    color: #555;
+    color: var(--text-dim);
     font-family: monospace;
     margin-bottom: 4px;
 }
 
 .about-desc {
     font-size: 11px;
-    color: #555;
+    color: var(--text-dim);
 }
 
 .unit-toggle {
@@ -450,7 +490,7 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
 
 .effort-ticks span {
     font-size: 10px;
-    color: #555;
+    color: var(--text-dim);
     font-family: monospace;
 }
 
@@ -483,14 +523,15 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
 
 .timing-opt-ex {
     font-size: 11px;
-    color: #555;
+    color: var(--text-dim);
     font-family: monospace;
     white-space: nowrap;
 }
 
 .cmd-section {
     font-size: 10px;
-    color: #555;
+    font-weight: 600;
+    color: var(--text-dim);
     padding: 6px 12px 2px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -528,7 +569,7 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
 .cmd-custom-remove {
     background: none;
     border: none;
-    color: #555;
+    color: var(--text-dim);
     cursor: pointer;
     font-size: 14px;
     padding: 0 4px;
@@ -838,7 +879,7 @@ html.light-theme .history-footer {
 
 .history-date {
     font-size: 10px;
-    color: #555;
+    color: var(--text-dim);
     margin-top: 2px;
 }
 
@@ -2381,7 +2422,7 @@ html.light-theme .assistant .bubble .md-table tbody tr:nth-child(even) { backgro
 .diff-line.diff-del .diff-indicator { color: #d05050; }
 .diff-line.diff-ctx { color: #bbb; }
 .diff-line.diff-gap {
-    color: #555;
+    color: var(--text-dim);
     background: #161616;
     text-align: center;
     user-select: none;
@@ -2570,7 +2611,7 @@ html.light-theme .resume-overlay-inner .dots span { color: var(--accent); }
 
 .cancelled {
     font-size: 11px;
-    color: #555;
+    color: var(--text-dim);
     font-family: monospace;
 }
 
@@ -2632,7 +2673,7 @@ html.light-theme .resume-overlay-inner .dots span { color: var(--accent); }
 
 .timing {
     font-size: 11px;
-    color: #555;
+    color: var(--text-dim);
     padding: 1px 12px;
     font-family: monospace;
 }
@@ -2773,7 +2814,7 @@ html.light-theme .resume-overlay-inner .dots span { color: var(--accent); }
 
 .live-timer {
     font-size: 11px;
-    color: #555;
+    color: var(--text-dim);
     font-family: monospace;
     margin-left: 8px;
     vertical-align: middle;
@@ -2838,7 +2879,7 @@ html.light-theme .resume-overlay-inner .dots span { color: var(--accent); }
     font-family: Cascadia Code, Consolas, monospace;
 }
 .settings-input:focus { border-color: var(--accent); }
-.settings-input::placeholder { color: #555; }
+.settings-input::placeholder { color: var(--text-dim); }
 .settings-input-clear {
     position: absolute;
     right: 14px;
@@ -3092,7 +3133,7 @@ html.light-theme .ask-question-btn.selected { color: #5a3210; background: rgba(2
 .history-delete {
     background: none;
     border: none;
-    color: #555;
+    color: var(--text-dim);
     font-size: 16px;
     cursor: pointer;
     padding: 0 4px;
@@ -3249,11 +3290,9 @@ html.light-theme textarea::placeholder { color: #999; }
 html.light-theme .composer-btn { color: #555; }
 html.light-theme .composer-btn:hover { background: #ddd; color: #000; }
 html.light-theme .cmd-menu { background: #f0f0f0; border-color: #d0d0d0; }
-html.light-theme .cmd-section { color: #888; }
 html.light-theme .cmd-item { color: #333; }
 html.light-theme .cmd-item:hover { background: #e0e0e0; }
 html.light-theme .cmd-divider { background: #d0d0d0; }
-html.light-theme .timing { color: #888; }
 html.light-theme .cancelled { color: #aaa; }
 html.light-theme .scroll-bottom { background: #eee; border-color: #ccc; color: #666; }
 html.light-theme .scroll-bottom:hover { background: #ddd; color: #333; }
