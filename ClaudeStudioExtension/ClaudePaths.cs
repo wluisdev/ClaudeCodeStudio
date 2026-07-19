@@ -49,4 +49,7 @@ public static class ClaudePaths
 
     // User-scope custom slash commands.
     public static string UserCommandsDir => Path.Combine(ConfigDir, "commands");
+
+    // User-scope skills (one folder per skill, each with a SKILL.md).
+    public static string UserSkillsDir => Path.Combine(ConfigDir, "skills");
 }

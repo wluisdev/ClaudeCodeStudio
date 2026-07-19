@@ -1664,6 +1664,12 @@ public partial class AgentToolWindowControl : UserControl
                         var (title, error) = await _agentClient.GenerateSessionTitleAsync(titleDescription);
                         if (!string.IsNullOrEmpty(title))
                             SessionTitlesStore.SetGenerated(titleSessionId!, title!);
+                        else if (error != null &&
+                                 (error.Contains("no active session") || error.Contains("disposed") ||
+                                  error.Contains("exited") || error.Contains("ended unexpectedly")))
+                            // Expected race, not a failure: cancel/clear right after
+                            // the turn kills claude before the title request lands.
+                            OutputLog.Info("session title skipped: session ended before generation");
                         else if (error != null)
                             OutputLog.Warn($"session title generation failed: {error}");
                     }
@@ -2095,6 +2101,7 @@ public partial class AgentToolWindowControl : UserControl
                     catch { continue; }
                     var type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
                     if (type != "user" && type != "assistant") continue;
+                    if (IsMetaLine(root)) continue;
                     if (!root.TryGetProperty("message", out var msg)) continue;
                     if (!msg.TryGetProperty("content", out var content)) continue;
 
@@ -2177,16 +2184,55 @@ public partial class AgentToolWindowControl : UserControl
                             .ToList();
             }
 
+            // Skills live one folder per skill (<dir>/<name>/SKILL.md), unlike
+            // commands (one .md per command). Name = folder, description from
+            // the SKILL.md frontmatter. The CLI expands "/<name>" for skills
+            // the same way it does for commands.
+            List<object> ScanSkills(string? dir)
+            {
+                var items = new List<(string name, string description)>();
+                try
+                {
+                    if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return new List<object>();
+                    foreach (var sub in Directory.EnumerateDirectories(dir))
+                    {
+                        var skillMd = System.IO.Path.Combine(sub, "SKILL.md");
+                        if (!File.Exists(skillMd)) continue;
+                        items.Add((System.IO.Path.GetFileName(sub), ReadFrontmatterDescription(skillMd)));
+                    }
+                }
+                catch { /* unreadable dir — treat as empty */ }
+                return items.OrderBy(i => i.name, StringComparer.OrdinalIgnoreCase)
+                            .Select(i => (object)new { i.name, i.description })
+                            .ToList();
+            }
+
             var projectCmds = string.IsNullOrEmpty(projectDir)
                 ? new List<object>()
                 : Scan(System.IO.Path.Combine(projectDir, ".claude", "commands"));
-            return new { project = projectCmds, user = Scan(ClaudePaths.UserCommandsDir) };
+            var projectSkills = string.IsNullOrEmpty(projectDir)
+                ? new List<object>()
+                : ScanSkills(System.IO.Path.Combine(projectDir, ".claude", "skills"));
+            return new
+            {
+                project = projectCmds,
+                user = Scan(ClaudePaths.UserCommandsDir),
+                projectSkills,
+                userSkills = ScanSkills(ClaudePaths.UserSkillsDir)
+            };
         });
 
         var dispatcher = System.Windows.Application.Current.Dispatcher;
         dispatcher.Invoke(() =>
             Browser.CoreWebView2.PostWebMessageAsJson(
-                JsonSerializer.Serialize(new { type = "slash-commands", project = result.project, user = result.user })));
+                JsonSerializer.Serialize(new
+                {
+                    type = "slash-commands",
+                    project = result.project,
+                    user = result.user,
+                    projectSkills = result.projectSkills,
+                    userSkills = result.userSkills
+                })));
     }
 
     // Folders never worth offering in the @ file picker (build output, VCS
@@ -2654,6 +2700,11 @@ public partial class AgentToolWindowControl : UserControl
 
                         if (entryType == "user")
                         {
+                            // Skill expansions and caveats are CLI-injected
+                            // (isMeta) — not real user messages; keep them out
+                            // of the count and the preview.
+                            if (IsMetaLine(root)) continue;
+
                             messageCount++;
 
                             if (string.IsNullOrEmpty(preview))
@@ -2778,7 +2829,7 @@ public partial class AgentToolWindowControl : UserControl
         }
 
         var msgs = new System.Collections.Generic.List<object>();
-        var pendingAsks = new Dictionary<string, Dictionary<string, object?>>();
+        var pendingTools = new Dictionary<string, Dictionary<string, object?>>();
 
         try
         {
@@ -2796,6 +2847,7 @@ public partial class AgentToolWindowControl : UserControl
                     if (!root.TryGetProperty("type", out var tEl)) continue;
                     var entryType = tEl.GetString();
                     if (entryType != "user" && entryType != "assistant") continue;
+                    if (IsMetaLine(root)) continue;
                     if (!root.TryGetProperty("message", out var msg)) continue;
                     if (!msg.TryGetProperty("content", out var content)) continue;
 
@@ -2819,10 +2871,11 @@ public partial class AgentToolWindowControl : UserControl
                     if (!string.IsNullOrEmpty(text))
                         msgs.Add(new { role = entryType, text });
 
-                    // Question cards ride along with the text bubbles — the
-                    // replay used to be text-only, so answered cards vanished
-                    // when reopening from History (rodadas 4/5 screenshots).
-                    CollectAskReplay(root, content, msgs, pendingAsks);
+                    // Question cards and tool chips ride along with the text
+                    // bubbles — the replay used to be text-only, so answered
+                    // cards and Edit/Bash/todo activity vanished when reopening
+                    // from History (rodadas 4/5 screenshots).
+                    CollectToolReplay(root, content, msgs, pendingTools);
                 }
                 catch { continue; }
             }
@@ -2845,18 +2898,31 @@ public partial class AgentToolWindowControl : UserControl
         dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
     }
 
-    // AskUserQuestion replay for transcript re-renders (History resume and
-    // branch): each tool_use becomes an {role:"ask"} entry carrying the raw
-    // input JSON; the matching tool_result line arrives later and patches the
-    // chosen answers in via the CLI's top-level toolUseResult.answers map
-    // ({question: label}, multi-select joined with ", "). Entries stay
+    // CLI-injected transcript lines (skill expansions, local-command caveats)
+    // are flagged isMeta:true. The official UI hides them; rendering one paints
+    // a multi-hundred-KB skill prompt as a user bubble (rodada 11). Every
+    // JSONL consumer that counts or displays user/assistant lines must skip
+    // them, or ⎇/⟲ ordinals desync from the DOM (which never renders them).
+    private static bool IsMetaLine(JsonElement root) =>
+        root.TryGetProperty("isMeta", out var metaEl) && metaEl.ValueKind == JsonValueKind.True;
+
+    // Tool replay for transcript re-renders (History resume and branch): every
+    // tool_use becomes a replayable entry — AskUserQuestion as {role:"ask"}
+    // (answers patched from the CLI's top-level toolUseResult.answers map,
+    // multi-select joined with ", "), everything else as {role:"tool"} carrying
+    // name/id/raw input, with the error flag and a short ↳ result summary
+    // patched in when the matching tool_result line arrives. Entries stay
     // dictionaries so the patch can happen after the entry is already listed.
-    private static void CollectAskReplay(
+    // Sidechain (subagent) lines are skipped — the live UI never showed their
+    // tools either. The rewind ⟲ card is NOT replayable: the CLI records
+    // checkpoints (file-history-snapshot) but not the rewind event itself.
+    private static void CollectToolReplay(
         JsonElement root, JsonElement content,
         System.Collections.Generic.List<object> msgs,
-        Dictionary<string, Dictionary<string, object?>> pendingAsks)
+        Dictionary<string, Dictionary<string, object?>> pendingTools)
     {
         if (content.ValueKind != JsonValueKind.Array) return;
+        if (root.TryGetProperty("isSidechain", out var sideEl) && sideEl.ValueKind == JsonValueKind.True) return;
 
         foreach (var item in content.EnumerateArray())
         {
@@ -2865,30 +2931,74 @@ public partial class AgentToolWindowControl : UserControl
 
             if (itemType == "tool_use")
             {
-                if (!item.TryGetProperty("name", out var nEl) || nEl.GetString() != "AskUserQuestion") continue;
                 if (!item.TryGetProperty("id", out var idEl) || !item.TryGetProperty("input", out var inEl)) continue;
                 var id = idEl.GetString();
-                if (string.IsNullOrEmpty(id) || pendingAsks.ContainsKey(id!)) continue;
+                if (string.IsNullOrEmpty(id) || pendingTools.ContainsKey(id!)) continue;
+                var name = item.TryGetProperty("name", out var nEl) ? nEl.GetString() : null;
+                if (string.IsNullOrEmpty(name)) continue;
 
-                var entry = new Dictionary<string, object?>
-                {
-                    ["role"] = "ask",
-                    ["input"] = inEl.GetRawText(),
-                    ["answers"] = null
-                };
-                pendingAsks[id!] = entry;
+                var entry = name == "AskUserQuestion"
+                    ? new Dictionary<string, object?>
+                    {
+                        ["role"] = "ask",
+                        ["input"] = inEl.GetRawText(),
+                        ["answers"] = null
+                    }
+                    : new Dictionary<string, object?>
+                    {
+                        ["role"] = "tool",
+                        ["name"] = name,
+                        ["id"] = id,
+                        ["input"] = inEl.GetRawText(),
+                        ["error"] = false,
+                        ["result"] = null
+                    };
+                pendingTools[id!] = entry;
                 msgs.Add(entry);
             }
             else if (itemType == "tool_result")
             {
                 if (!item.TryGetProperty("tool_use_id", out var idEl)) continue;
                 var id = idEl.GetString();
-                if (id == null || !pendingAsks.TryGetValue(id, out var entry)) continue;
+                if (id == null || !pendingTools.TryGetValue(id, out var entry)) continue;
 
-                if (root.TryGetProperty("toolUseResult", out var tur) && tur.ValueKind == JsonValueKind.Object &&
-                    tur.TryGetProperty("answers", out var ans) && ans.ValueKind == JsonValueKind.Object)
+                if (Equals(entry["role"], "ask"))
                 {
-                    entry["answers"] = ans.GetRawText();
+                    if (root.TryGetProperty("toolUseResult", out var tur) && tur.ValueKind == JsonValueKind.Object &&
+                        tur.TryGetProperty("answers", out var ans) && ans.ValueKind == JsonValueKind.Object)
+                    {
+                        entry["answers"] = ans.GetRawText();
+                    }
+                    continue;
+                }
+
+                if (item.TryGetProperty("is_error", out var errEl) && errEl.ValueKind == JsonValueKind.True)
+                    entry["error"] = true;
+
+                string? resultText = null;
+                if (item.TryGetProperty("content", out var rc))
+                {
+                    if (rc.ValueKind == JsonValueKind.String)
+                    {
+                        resultText = rc.GetString();
+                    }
+                    else if (rc.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var part in rc.EnumerateArray())
+                        {
+                            if (part.TryGetProperty("type", out var ptEl) && ptEl.GetString() == "text" &&
+                                part.TryGetProperty("text", out var ptxEl))
+                            {
+                                resultText = ptxEl.GetString();
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (!string.IsNullOrWhiteSpace(resultText))
+                {
+                    var firstLine = resultText!.TrimStart().Split('\n')[0].TrimEnd('\r');
+                    entry["result"] = firstLine.Length > 200 ? firstLine.Substring(0, 200) + "…" : firstLine;
                 }
             }
         }
@@ -2923,7 +3033,7 @@ public partial class AgentToolWindowControl : UserControl
 
         var keptLines = new System.Collections.Generic.List<string>();
         var msgs = new System.Collections.Generic.List<object>();
-        var pendingAsks = new Dictionary<string, Dictionary<string, object?>>();
+        var pendingTools = new Dictionary<string, Dictionary<string, object?>>();
         int visibleCount = 0;
 
         try
@@ -2942,6 +3052,10 @@ public partial class AgentToolWindowControl : UserControl
                     if (!root.TryGetProperty("type", out var tEl)) { keptLines.Add(line); continue; }
                     var entryType = tEl.GetString();
                     if (entryType != "user" && entryType != "assistant") { keptLines.Add(line); continue; }
+                    // isMeta lines stay in the copy (CLI context) but render no
+                    // bubble and consume no visibleCount ordinal — the UI never
+                    // shows them, and msgIndex counts DOM text bubbles.
+                    if (IsMetaLine(root)) { keptLines.Add(line); continue; }
                     if (!root.TryGetProperty("message", out var msg)) { keptLines.Add(line); continue; }
                     if (!msg.TryGetProperty("content", out var content)) { keptLines.Add(line); continue; }
 
@@ -2964,18 +3078,18 @@ public partial class AgentToolWindowControl : UserControl
 
                     if (string.IsNullOrEmpty(text))
                     {
-                        // No visible bubble, but the line may carry an
-                        // AskUserQuestion tool_use/tool_result — replayed as a
-                        // card without consuming a visible-message ordinal
-                        // (branch/rewind ordinals index text bubbles only).
-                        CollectAskReplay(root, content, msgs, pendingAsks);
+                        // No visible bubble, but the line may carry tool_use/
+                        // tool_result content — replayed as cards/chips without
+                        // consuming a visible-message ordinal (branch/rewind
+                        // ordinals index text bubbles only).
+                        CollectToolReplay(root, content, msgs, pendingTools);
                         keptLines.Add(line);
                         continue;
                     }
 
                     keptLines.Add(RewriteSessionIdInLine(line, newSessionId));
                     msgs.Add(new { role = entryType, text });
-                    CollectAskReplay(root, content, msgs, pendingAsks);
+                    CollectToolReplay(root, content, msgs, pendingTools);
                 }
                 catch { keptLines.Add(line); continue; }
 
@@ -3050,6 +3164,9 @@ public partial class AgentToolWindowControl : UserControl
                     using var doc = JsonDocument.Parse(line);
                     var root = doc.RootElement;
                     if (!root.TryGetProperty("type", out var tEl) || tEl.GetString() != "user") continue;
+                    // isMeta lines carry text but never render as bubbles — counting
+                    // them here would shift ⟲ ordinals after a skill runs.
+                    if (IsMetaLine(root)) continue;
                     if (!root.TryGetProperty("message", out var msg)) continue;
                     if (!msg.TryGetProperty("content", out var content)) continue;
 

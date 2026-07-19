@@ -296,8 +296,11 @@ public class AgentClient
             {
                 var chunk = JsonSerializer.Deserialize<ChatChunk>(line);
                 if (chunk == null) continue;
+                // No OutputLog.Error here: the caller classifies. Canceling or
+                // clearing right after a turn kills claude before this request
+                // lands ("no active session") — an expected race, not a failure.
                 if (chunk.Type == "session-title-result") title = chunk.Text;
-                else if (chunk.Type == "error") { error = chunk.Text; OutputLog.Error($"session-title error: {chunk.Text}"); }
+                else if (chunk.Type == "error") error = chunk.Text;
                 else if (chunk.Type == "done") break;
             }
             return (title, error);

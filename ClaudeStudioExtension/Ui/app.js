@@ -324,8 +324,16 @@ function toggleCmdMenu() {
 // refreshed whenever the ⌘ menu opens or the workspace changes.
 let discoveredSlashCommands = [];
 
-function renderSlashCommands(project, user) {
-    discoveredSlashCommands = [...(project || []), ...(user || [])].map(c => "/" + c.name);
+function renderSlashCommands(project, user, projectSkills, userSkills) {
+    // Skills invoke like commands (the CLI expands "/<name>" for both), so
+    // they join the "/" autocomplete pool; a project and a user skill with the
+    // same name dedupe to one entry (most-specific wins, like the CLI).
+    const skillNames = new Map();
+    [...(projectSkills || []), ...(userSkills || [])].forEach(s => {
+        if (!skillNames.has(s.name)) skillNames.set(s.name, s);
+    });
+    const skills = [...skillNames.values()];
+    discoveredSlashCommands = [...(project || []), ...(user || []), ...skills].map(c => "/" + c.name);
     const fill = (wrapId, listId, cmds) => {
         const wrap = document.getElementById(wrapId);
         const list = document.getElementById(listId);
@@ -338,6 +346,7 @@ function renderSlashCommands(project, user) {
     };
     fill("project-cmds", "project-cmd-list", project);
     fill("user-cmds", "user-cmd-list", user);
+    fill("skill-cmds", "skill-cmd-list", skills);
 }
 
 // ── Context usage (V12) ───────────────────────────────────────
@@ -570,6 +579,9 @@ function exportChatToMarkdown() {
         const isUser = msg.classList.contains("user");
         const isAssistant = msg.classList.contains("assistant");
         if (!isUser && !isAssistant) continue;
+        // Synthetic replay hosts have no text of their own — their textContent
+        // is chip labels, which would export as a garbage Claude turn.
+        if (msg.classList.contains("replay-tool-host")) continue;
         const role = isUser ? "You" : "Claude";
         const raw = bubble.dataset.raw;
         let text = (raw && raw.length > 0) ? raw : (bubble.textContent || "").trim();
@@ -2422,7 +2434,8 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "slash-commands") {
-        renderSlashCommands(event.data.project || [], event.data.user || []);
+        renderSlashCommands(event.data.project || [], event.data.user || [],
+            event.data.projectSkills || [], event.data.userSkills || []);
         return;
     }
 
@@ -2517,6 +2530,15 @@ function openPermissionModal(tool, input, id, cwd) {
         // Plan approval gate: show the plan markdown itself, not escaped JSON.
         document.getElementById("perm-modal-tool").textContent = "Approve plan? (ExitPlanMode)";
         try { formatted = JSON.parse(input).plan || input; } catch (_) { /* leave as-is */ }
+    } else if (tool === "Skill") {
+        // Skill gate: title the modal with the skill being invoked (official
+        // extension pattern: "Use skill /name?").
+        try {
+            const parsed = JSON.parse(input);
+            const s = String(parsed.skill || "").replace(/^\//, "");
+            if (s) document.getElementById("perm-modal-tool").textContent = `Use skill /${s}? (Skill)`;
+            formatted = JSON.stringify(parsed, null, 2);
+        } catch (_) { /* leave as-is */ }
     } else if (input) {
         try { formatted = JSON.stringify(JSON.parse(input), null, 2); }
         catch (_) { /* leave as-is */ }
@@ -3319,6 +3341,12 @@ function summarizeToolInput(name, inputJson) {
     let input;
     try { input = JSON.parse(inputJson); } catch { return ""; }
     if (!input || typeof input !== "object") return "";
+    // Skill invocations carry {skill, args} — show "/name args" instead of the
+    // generic first-key fallback (which would just print "skill").
+    if (name === "Skill" && input.skill) {
+        const s = "/" + String(input.skill).replace(/^\//, "") + (input.args ? " " + String(input.args) : "");
+        return s.length > 80 ? s.slice(0, 79) + "…" : s;
+    }
     const arg = input.file_path || input.path || input.command || input.pattern || input.url || input.notebook_path || input.query;
     if (arg) {
         const s = String(arg);
@@ -4158,9 +4186,34 @@ function renderBranchedMessages(newSessionId, msgs) {
     _rewindBaseUserIdx = 0;
     _turnUserIdx = 0;
 
+    // Replayed chips attach to the preceding assistant bubble, mirroring the
+    // live layout (appendToolEvent appends chips inside the stream bubble —
+    // rodada 11: as bare siblings they looked "loose" between text bubbles).
+    // A turn that opens with tools before any text gets a bare UNdecorated
+    // host bubble: it maps to no JSONL text line, so it must not consume a
+    // ⎇ ordinal (msgIndex counts DOM text bubbles 1:1 with visible JSONL
+    // lines). TodoWrite keeps the live behavior of ONE card per user turn:
+    // it pins to its first host bubble and updates in place (last call wins).
+    let hostBubble = null;
+    let todoBubble = null;
+
+    const ensureHostBubble = () => {
+        if (hostBubble) return hostBubble;
+        const msg = document.createElement("div");
+        msg.className = "message assistant replay-tool-host";
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+        msg.appendChild(bubble);
+        messages.appendChild(msg);
+        hostBubble = bubble;
+        return bubble;
+    };
+
     for (const m of msgs) {
         if (m.role === "user") {
             addMessage("user", m.text || "");
+            hostBubble = null;
+            todoBubble = null;
         } else if (m.role === "assistant") {
             const msg = document.createElement("div");
             msg.className = "message assistant";
@@ -4171,11 +4224,80 @@ function renderBranchedMessages(newSessionId, msgs) {
             msg.appendChild(bubble);
             applyMarkdown(bubble, m.text || "");
             decorateMessage(msg);
+            hostBubble = bubble;
         } else if (m.role === "ask") {
             renderReplayAskCard(m.input, m.answers);
+            // The card is a flow sibling — chips appended to the pre-ask
+            // bubble would land visually ABOVE it, so start a fresh host.
+            hostBubble = null;
+        } else if (m.role === "tool") {
+            if (m.name === "TodoWrite") {
+                if (!todoBubble) todoBubble = ensureHostBubble();
+                try { renderTodoCard(todoBubble, m.input); } catch (e) { /* malformed payload — skip */ }
+            } else {
+                renderReplayToolChip(ensureHostBubble(), m);
+            }
         }
     }
     autoScroll();
+}
+
+// Re-renders a tool call from a session transcript (History resume / branch)
+// as an inert chip inside its assistant host bubble — same look as the live
+// chips, including the ↳ result summary and error tint. Edit/Write/MultiEdit keep the inline diff:
+// the JSONL input carries the full old/new content, so toggleToolDiff works
+// unchanged via toolInputData.
+function renderReplayToolChip(container, m) {
+    const chip = document.createElement("div");
+    chip.className = "tool-chip";
+    if (m.error) chip.classList.add("tool-error");
+
+    const dot = document.createElement("span");
+    dot.className = "tool-dot";
+    dot.textContent = "●";
+    chip.appendChild(dot);
+
+    const label = document.createElement("span");
+    label.className = "tool-name";
+    label.textContent = m.name || "tool";
+    chip.appendChild(label);
+
+    const arg = summarizeToolInput(m.name, m.input);
+    if (arg) {
+        const argEl = document.createElement("span");
+        argEl.className = "tool-arg";
+        argEl.textContent = `(${arg})`;
+        chip.appendChild(argEl);
+    }
+
+    if (m.id && DIFF_TOOLS.has(m.name) && m.input) {
+        try {
+            const parsed = JSON.parse(m.input);
+            if (parsed && typeof parsed === "object") {
+                toolInputData.set(m.id, { name: m.name, input: parsed });
+                chip.dataset.toolId = m.id;
+                chip.classList.add("tool-chip-diffable");
+                const caret = document.createElement("span");
+                caret.className = "tool-diff-caret";
+                caret.textContent = "▸";
+                chip.appendChild(caret);
+                chip.addEventListener("click", e => {
+                    if (e.target.closest(".tool-diff-inline")) return;
+                    toggleToolDiff(chip);
+                });
+            }
+        } catch { /* leave unclickable */ }
+    }
+
+    if (m.result) {
+        const summary = document.createElement("div");
+        summary.className = "tool-summary";
+        const firstLine = String(m.result).split(/\r?\n/)[0];
+        summary.textContent = "↳ " + (firstLine.length > 160 ? firstLine.slice(0, 160) + "…" : firstLine);
+        chip.appendChild(summary);
+    }
+
+    container.appendChild(chip);
 }
 
 // Re-renders an AskUserQuestion from a session transcript (History resume /
