@@ -1551,7 +1551,7 @@ public partial class AgentToolWindowControl : UserControl
                 autoResume: request.AutoResume,
                 onSession: sid => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
-                        JsonSerializer.Serialize(new { type = "session-info", sessionId = sid }))),
+                        JsonSerializer.Serialize(new { type = "session-info", sessionId = sid, resumed = _agentClient.LastTurnResumed }))),
                 onTool: (kind, name, input, text, id) => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = kind, name, input, text, id }))),

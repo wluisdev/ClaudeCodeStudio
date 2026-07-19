@@ -922,6 +922,9 @@ function renderCwd(vsPath) {
 // Live status from the CLI's presence file (~/.claude/sessions/<pid>.json).
 // Only "waiting" states carry information the UI doesn't already show
 // (streaming/pending are covered elsewhere), so that's all we render.
+// Probed 2026-07-18 (2.1.205 and 2.1.214): the sdk-cli entrypoint never
+// stamps status/waitingFor — the file watcher stays as future-proofing, and
+// the waiting states are synthesized by the UI itself (modal/question open).
 function renderPresence(status, waitingFor) {
     const el = document.getElementById("cwdbar-presence");
     if (!el) return;
@@ -1278,6 +1281,11 @@ function unpinCard(card) {
     const ph = card._pinPlaceholder;
     card._pinPlaceholder = null;
     delete card.dataset.pinScope;
+    // Neutralize the sticky-bottom rule once back in the flow: the "answered"
+    // class names it excludes don't match these cards (ask-question-answered,
+    // ctx-usage-card), so without this the resolved card floats translucently
+    // over the transcript while scrolling (rodada 3 screenshots).
+    card.classList.add("pin-resolved");
     if (ph && ph.parentNode) ph.parentNode.replaceChild(card, ph);
     else if (!messages.contains(card)) messages.appendChild(card);
     if (!pinnedDock.firstElementChild) pinnedDock.hidden = true;
@@ -1349,6 +1357,14 @@ let msgCounter = 0;
 // bubbles and drifts vs the transcript).
 let userMsgCounter = 0;
 let currentSessionId = null;
+// First user-bubble ordinal still reachable by ⟲ in the CURRENT session's
+// JSONL. A mid-chat session change WITHOUT resume starts an empty transcript,
+// so bubbles from before that turn have no JSONL entry to rewind to (rodada 3:
+// "user ordinal N out of range"). Resumed sessions fork the history and keep
+// the base. The ordinal sent to the backend is relative to this base.
+let _rewindBaseUserIdx = 0;
+// userIndex of the user message that opened the in-flight turn.
+let _turnUserIdx = 0;
 
 function decorateMessage(msgEl) {
     const idx = msgCounter++;
@@ -1381,8 +1397,13 @@ function branchFromMessage(idx) {
 
 function rewindFromMessage(idx) {
     if (!currentSessionId) return;
-    // dry run first → preview stats → confirm → apply
-    window.chrome.webview.postMessage({ type: "rewind", msgIndex: idx, dryRun: true });
+    if (idx < _rewindBaseUserIdx) {
+        showToast("This message is from a previous CLI session — rewind can't reach it");
+        return;
+    }
+    // dry run first → preview stats → confirm → apply. The backend indexes into
+    // the current session's JSONL, so send the ordinal relative to the base.
+    window.chrome.webview.postMessage({ type: "rewind", msgIndex: idx - _rewindBaseUserIdx, dryRun: true });
 }
 
 function showRewindConfirm(idx, result) {
@@ -1875,6 +1896,9 @@ function sendMessage() {
         return;
 
     addMessage("user", text || `(${activeAttachments.map(a => a.displayName).join(", ")})`);
+    // Remember which user bubble opened this turn — if the turn spawns a fresh
+    // (non-resumed) session, it becomes the new rewind base.
+    _turnUserIdx = userMsgCounter - 1;
 
     let fullMessage = text;
     const filePaths = [];
@@ -2112,7 +2136,13 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "session-info") {
-        currentSessionId = event.data.sessionId;
+        const newId = event.data.sessionId;
+        // Fresh session mid-chat (no resume/--continue): everything above the
+        // current turn is unreachable for ⟲ — anchor the rewind base at the
+        // message that opened this session.
+        if (currentSessionId && newId !== currentSessionId && !event.data.resumed)
+            _rewindBaseUserIdx = _turnUserIdx;
+        currentSessionId = newId;
         return;
     }
 
@@ -2200,6 +2230,7 @@ window.chrome.webview.addEventListener("message", event => {
             currentStreamBubble = null;
         }
         flushPinnedDock();
+        renderPresence("", ""); // safety: no waiting state can outlive the turn
         setStreaming(false);
         return;
     }
@@ -2304,6 +2335,8 @@ window.chrome.webview.addEventListener("message", event => {
         msgCounter = 0;
         userMsgCounter = 0;
         currentSessionId = null;
+        _rewindBaseUserIdx = 0;
+        _turnUserIdx = 0;
         updateUsageSessionValues();
         _suppressNextAutoResume = true;
         return;
@@ -2356,10 +2389,12 @@ function openPermissionModal(tool, input, id, cwd) {
     pre.textContent = formatted || "(no input)";
 
     document.getElementById("perm-modal-overlay").classList.add("open");
+    renderPresence("waiting", "permission prompt");
 }
 
 function closePermissionModal() {
     if (_captionAttention === "pending") setCaptionAttention(null);
+    renderPresence("", "");
     document.getElementById("perm-modal-overlay").classList.remove("open");
     if (pendingPermissionToolId) {
         const chip = messages.querySelector(`.tool-chip[data-tool-id="${CSS.escape(pendingPermissionToolId)}"]`);
@@ -3724,6 +3759,7 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
     // Pending picks dock above the composer so streaming can't scroll them
     // away; submitAnswers moves the card back into the bubble.
     pinCard(card, bubble, "turn");
+    renderPresence("waiting", "question");
 
     function updateConfirmState() {
         if (!confirmBtn) return;
@@ -3754,6 +3790,7 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
         card.classList.add("ask-question-answered");
         card.querySelectorAll("button, input").forEach(el => el.disabled = true);
         unpinCard(card); // answered — back into the transcript flow
+        renderPresence("", "");
 
         // claude resumes working as soon as it gets the answer — unfreeze the timer.
         resumeLiveTimer();
@@ -3935,6 +3972,8 @@ function clearChat() {
     msgCounter = 0;
     userMsgCounter = 0;
     currentSessionId = null;
+    _rewindBaseUserIdx = 0;
+    _turnUserIdx = 0;
     updateUsageSessionValues();
     // User explicitly asked for a fresh chat — suppress --continue on the next
     // outbound message even if the "Auto-resume" setting is on.
@@ -3949,6 +3988,9 @@ function renderBranchedMessages(newSessionId, msgs) {
     msgCounter = 0;
     userMsgCounter = 0;
     currentSessionId = newSessionId;
+    // Bubbles are re-rendered 1:1 from this session's JSONL — full range rewindable.
+    _rewindBaseUserIdx = 0;
+    _turnUserIdx = 0;
 
     for (const m of msgs) {
         if (m.role === "user") {

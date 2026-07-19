@@ -1047,10 +1047,13 @@ The user's IDE selection (if any) is included in the conversation context and ma
                     }
                     else
                     {
-                        // Non-interactive tool routed through the prompt tool. Under
-                        // bypassPermissions this shouldn't happen (the hook is the gate),
-                        // but auto-allow so claude never hangs on an unhandled request.
-                        EmitError($"auto-allowing unexpected control_request for tool '{toolName}'");
+                        // Non-interactive tool routed through the prompt tool. Happens
+                        // legitimately (2.1.2xx consults can_use_tool for e.g. compound
+                        // Bash even after the hook allowed it) — auto-allow so claude
+                        // never hangs. Timing channel: OutputLog only, not a red error
+                        // bubble in the chat (rodada 3 noise).
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"auto-allowing control_request for tool '{toolName}'" }));
+                        Console.Out.Flush();
                         try { await WriteControlAllowAsync(reqId, inputRaw); }
                         catch (Exception ex) { EmitError($"control auto-allow write failed: {ex.Message}"); }
                     }

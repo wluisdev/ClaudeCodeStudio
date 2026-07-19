@@ -33,6 +33,10 @@ public class AgentClient
     public string? PendingResumeSessionId { get; set; }
     public string? CurrentSessionId { get; private set; }
 
+    // True while the in-flight/last turn was sent with --resume or --continue
+    // (its session forks the previous transcript instead of starting empty).
+    public bool LastTurnResumed { get; private set; }
+
     // U4: fired with claude.exe's PID right after the agent spawns it, so the
     // control can point a FileSystemWatcher at the CLI's presence file
     // (~/.claude/sessions/<pid>.json — carries status/waitingFor).
@@ -414,6 +418,10 @@ public class AgentClient
     {
         var resumeId = PendingResumeSessionId;
         PendingResumeSessionId = null;
+        // Whether this turn carries the previous transcript forward (--resume /
+        // --continue). The control forwards it with session-info so the UI can
+        // tell a forked-with-history session from a fresh one (rewind base).
+        LastTurnResumed = resumeId != null || autoResume;
 
         // If we already know the session id from a resume or prior turn, start the JSONL watcher early
         var preKnownSessionId = resumeId ?? CurrentSessionId;

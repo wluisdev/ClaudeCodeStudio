@@ -2691,6 +2691,15 @@ html.light-theme .resume-overlay-inner .dots span { color: var(--accent); }
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
 }
 
+/* Cards released from the dock re-enter the transcript as plain flow content.
+   The sticky rule above still matches them (their "resolved" classes have
+   other names: ask-question-answered, ctx-usage-card) — without this override
+   the card floats translucently over the chat while scrolling. */
+.question-card.pin-resolved {
+    position: static;
+    box-shadow: none;
+}
+
 /* ✕ on dock-resident cards that only leave when dismissed (context usage). */
 .pinned-close {
     float: right;
@@ -2744,6 +2753,13 @@ html.light-theme .resume-overlay-inner .dots span { color: var(--accent); }
     font-size: 13px;
     background: #333;
     color: #ddd;
+}
+
+/* Resolved cards disable their controls (or just mark the card answered) but
+   the pointer cursor above survives :disabled — stop advertising clickability. */
+.q-btn:disabled,
+.question-answered .q-btn {
+    cursor: default;
 }
 
 .q-yes {
@@ -3033,6 +3049,22 @@ html.light-theme .ask-question-confirm:disabled:hover {
 
 .ask-question-card.ask-question-answered .ask-question-btn.selected {
     opacity: 1;
+}
+
+/* Same cursor reset as .question-answered above: once answered, checkboxes,
+   the write-in and the confirm button are inert — no pointer, no hover tint. */
+.ask-question-answered .ask-question-check,
+.ask-question-answered .ask-question-check input[type=checkbox] {
+    cursor: default;
+}
+
+.ask-question-answered .ask-question-check:hover {
+    background: none;
+}
+
+.ask-question-answered .ask-question-confirm:disabled,
+.ask-question-answered .ask-question-confirm:disabled:hover {
+    cursor: default;
 }
 
 html.light-theme .ask-question-header { color: #8a4a10; background: rgba(138, 74, 16, 0.1); }
