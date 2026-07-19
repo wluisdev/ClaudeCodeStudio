@@ -2406,6 +2406,11 @@ window.chrome.webview.addEventListener("message", event => {
         return;
     }
 
+    if (event.data.type === "build-errors") {
+        onBuildErrors(event.data);
+        return;
+    }
+
     if (event.data.type === "mcp-reconnect-done") {
         // Refresh the open card so the row reflects the post-reconnect state.
         if (event.data.error && _pendingMcpCard) {
@@ -2756,6 +2761,37 @@ function setSoundOnInput(checked) { localStorage.setItem("soundOnInput", checked
 const soundDoneToggle = document.getElementById("sound-done-toggle");
 if (soundDoneToggle) soundDoneToggle.checked = localStorage.getItem("soundOnDone") === "true";
 function setSoundOnDone(checked) { localStorage.setItem("soundOnDone", checked); }
+
+// ── Build errors → agent (D11) ─────────────────────────────────
+// The ⌘ item asks C# for the current Error List; a failing VS build posts the
+// same build-errors message with auto:true. All policy lives here: the opt-in
+// auto-send setting, a "same error set twice in a row" dedupe (breaks builds
+// looping without progress), and never stepping on a turn in flight.
+let _lastBuildErrorsSig = null;
+
+const buildErrorsToggle = document.getElementById("build-errors-toggle");
+if (buildErrorsToggle) buildErrorsToggle.checked = localStorage.getItem("autoSendBuildErrors") === "true";
+function setAutoSendBuildErrors(checked) { localStorage.setItem("autoSendBuildErrors", checked); }
+
+function requestBuildErrors() {
+    document.getElementById("cmd-menu").classList.remove("open");
+    window.chrome.webview?.postMessage({ type: "get-build-errors" });
+}
+
+function onBuildErrors(msg) {
+    if (msg.auto) {
+        if (!msg.errorCount) { _lastBuildErrorsSig = null; return; } // green build resets dedupe
+        if (localStorage.getItem("autoSendBuildErrors") !== "true") return;
+        if (msg.prompt === _lastBuildErrorsSig) return;
+        if (isStreaming) return;
+    } else {
+        if (!msg.errorCount) { showToast("No build errors in the Error List"); return; }
+        if (isStreaming) { showToast("A turn is in progress — try again when it finishes"); return; }
+    }
+    _lastBuildErrorsSig = msg.prompt;
+    textarea.value = msg.prompt;
+    sendMessage();
+}
 
 // ── V7 claude settings (apply to new/restarted sessions) ──────
 const coAuthoredToggle = document.getElementById("coauthored-toggle");

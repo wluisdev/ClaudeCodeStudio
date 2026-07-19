@@ -28,6 +28,9 @@ public partial class AgentToolWindowControl : UserControl
     private System.Threading.Timer? _claudeJsonDebounceTimer;
     private FileSystemWatcher? _trustedWorkspacesWatcher;
     private System.Threading.Timer? _trustedWorkspacesDebounceTimer;
+    // Holds the DTE build-event source: COM event objects are collectible, so
+    // without a field the OnBuildDone subscription silently dies after a GC.
+    private EnvDTE.BuildEvents? _buildEvents;
 
     public AgentToolWindowControl()
     {
@@ -176,6 +179,72 @@ public partial class AgentToolWindowControl : UserControl
         _agentClient.OnClaudePid = StartPresenceWatcher;
 
         VSColorTheme.ThemeChanged += OnVsThemeChanged;
+
+        // Build errors → agent: watch build completion so failing builds can be
+        // sent to the chat (the webview decides — opt-in setting lives there).
+#pragma warning disable VSTHRD010 // Loaded continuation stays on the UI thread
+        try
+        {
+            var dteBuild = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+            if (dteBuild?.Events != null)
+            {
+                _buildEvents = dteBuild.Events.BuildEvents;
+                _buildEvents.OnBuildDone += OnSolutionBuildDone;
+            }
+        }
+        catch (Exception ex) { OutputLog.Warn($"build events subscribe failed: {ex.Message}"); }
+#pragma warning restore VSTHRD010
+    }
+
+    // ── Build errors → agent (D11) ────────────────────────────────────────
+    // When a Build/Rebuild finishes, a cheap LastBuildInfo check gates reading
+    // the Error List: green builds only post errorCount 0 (the webview uses it
+    // to reset its auto-send dedupe), failing builds post the formatted prompt.
+    // Whether anything is actually sent to claude is the webview's call.
+    private void OnSolutionBuildDone(EnvDTE.vsBuildScope scope, EnvDTE.vsBuildAction action)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        if (action != EnvDTE.vsBuildAction.vsBuildActionBuild &&
+            action != EnvDTE.vsBuildAction.vsBuildActionRebuildAll)
+            return;
+
+        var failedProjects = 0;
+        string? cwd = null;
+        try
+        {
+            var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+            failedProjects = dte?.Solution?.SolutionBuild?.LastBuildInfo ?? 0;
+            cwd = ResolveCwd(dte);
+        }
+        catch { }
+
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+        {
+            try
+            {
+                if (failedProjects == 0)
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    Browser?.CoreWebView2?.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "build-errors", auto = true, errorCount = 0 }));
+                    return;
+                }
+
+                // Give the Error List a moment to finish populating after OnBuildDone.
+                await Task.Delay(250);
+                await PostBuildErrorsAsync(cwd, auto: true);
+            }
+            catch (Exception ex) { OutputLog.Warn($"build-errors auto-send failed: {ex.Message}"); }
+        });
+    }
+
+    /// <summary>Reads the full Error List and posts a build-errors message to the webview.</summary>
+    private async Task PostBuildErrorsAsync(string? cwd, bool auto)
+    {
+        var (errorCount, warningCount, prompt) = await Diagnostics.ErrorListReader.ReadAllAsync(cwd);
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        Browser?.CoreWebView2?.PostWebMessageAsJson(
+            JsonSerializer.Serialize(new { type = "build-errors", auto, errorCount, warningCount, prompt }));
     }
 
     private void OnVsThemeChanged(ThemeChangedEventArgs e)
@@ -1054,6 +1123,12 @@ public partial class AgentToolWindowControl : UserControl
                 mcpTrustDispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "mcp-trust-completed" })));
+                return;
+            }
+
+            if (request.Type == "get-build-errors")
+            {
+                await PostBuildErrorsAsync(currentSolutionDir, auto: false);
                 return;
             }
 

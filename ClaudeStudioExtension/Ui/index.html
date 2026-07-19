@@ -82,6 +82,7 @@
                         <div class="cmd-section">Local</div>
                         <div class="cmd-item" onclick="requestContextUsage()">◔ Context usage</div>
                         <div class="cmd-item" onclick="requestMcpStatus()">🔌 MCP status</div>
+                        <div class="cmd-item" onclick="requestBuildErrors()">🔨 Send build errors</div>
                         <div class="cmd-item" onclick="openSideQuestionCard()">💬 Side question</div>
                         <div class="cmd-item" onclick="exportChatToMarkdown()">⤓ Export to Markdown</div>
                         <div class="cmd-divider"></div>
@@ -176,6 +177,16 @@
                             <div class="effort-ticks">
                                 <span>none</span><span>active</span><span>all</span>
                             </div>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                Auto-send build errors
+                                <span class="info-icon" title="When a Visual Studio build finishes with errors, automatically send them to Claude to fix. Skipped while a turn is running; an identical error set is not re-sent twice in a row. The ⌘ menu has an on-demand version that always works.">ⓘ</span>
+                            </span>
+                            <label class="toggle">
+                                <input type="checkbox" id="build-errors-toggle" onchange="setAutoSendBuildErrors(this.checked)" />
+                                <span class="toggle-track"></span>
+                            </label>
                         </div>
                         <div class="cmd-divider"></div>
                         <div class="cmd-section">Display</div>
