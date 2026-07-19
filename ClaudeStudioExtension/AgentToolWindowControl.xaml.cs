@@ -2703,6 +2703,7 @@ public partial class AgentToolWindowControl : UserControl
         }
 
         var msgs = new System.Collections.Generic.List<object>();
+        var pendingAsks = new Dictionary<string, Dictionary<string, object?>>();
 
         try
         {
@@ -2713,8 +2714,6 @@ public partial class AgentToolWindowControl : UserControl
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
-                string? role = null;
-                string? text = null;
                 try
                 {
                     using var doc = JsonDocument.Parse(line);
@@ -2725,6 +2724,7 @@ public partial class AgentToolWindowControl : UserControl
                     if (!root.TryGetProperty("message", out var msg)) continue;
                     if (!msg.TryGetProperty("content", out var content)) continue;
 
+                    string? text = null;
                     if (content.ValueKind == JsonValueKind.Array)
                     {
                         foreach (var item in content.EnumerateArray())
@@ -2741,12 +2741,15 @@ public partial class AgentToolWindowControl : UserControl
                         text = content.GetString();
                     }
 
-                    if (string.IsNullOrEmpty(text)) continue;
-                    role = entryType;
+                    if (!string.IsNullOrEmpty(text))
+                        msgs.Add(new { role = entryType, text });
+
+                    // Question cards ride along with the text bubbles — the
+                    // replay used to be text-only, so answered cards vanished
+                    // when reopening from History (rodadas 4/5 screenshots).
+                    CollectAskReplay(root, content, msgs, pendingAsks);
                 }
                 catch { continue; }
-
-                msgs.Add(new { role, text });
             }
         }
         catch (Exception ex)
@@ -2765,6 +2768,55 @@ public partial class AgentToolWindowControl : UserControl
         });
         var dispatcher = System.Windows.Application.Current.Dispatcher;
         dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));
+    }
+
+    // AskUserQuestion replay for transcript re-renders (History resume and
+    // branch): each tool_use becomes an {role:"ask"} entry carrying the raw
+    // input JSON; the matching tool_result line arrives later and patches the
+    // chosen answers in via the CLI's top-level toolUseResult.answers map
+    // ({question: label}, multi-select joined with ", "). Entries stay
+    // dictionaries so the patch can happen after the entry is already listed.
+    private static void CollectAskReplay(
+        JsonElement root, JsonElement content,
+        System.Collections.Generic.List<object> msgs,
+        Dictionary<string, Dictionary<string, object?>> pendingAsks)
+    {
+        if (content.ValueKind != JsonValueKind.Array) return;
+
+        foreach (var item in content.EnumerateArray())
+        {
+            if (!item.TryGetProperty("type", out var tEl)) continue;
+            var itemType = tEl.GetString();
+
+            if (itemType == "tool_use")
+            {
+                if (!item.TryGetProperty("name", out var nEl) || nEl.GetString() != "AskUserQuestion") continue;
+                if (!item.TryGetProperty("id", out var idEl) || !item.TryGetProperty("input", out var inEl)) continue;
+                var id = idEl.GetString();
+                if (string.IsNullOrEmpty(id) || pendingAsks.ContainsKey(id!)) continue;
+
+                var entry = new Dictionary<string, object?>
+                {
+                    ["role"] = "ask",
+                    ["input"] = inEl.GetRawText(),
+                    ["answers"] = null
+                };
+                pendingAsks[id!] = entry;
+                msgs.Add(entry);
+            }
+            else if (itemType == "tool_result")
+            {
+                if (!item.TryGetProperty("tool_use_id", out var idEl)) continue;
+                var id = idEl.GetString();
+                if (id == null || !pendingAsks.TryGetValue(id, out var entry)) continue;
+
+                if (root.TryGetProperty("toolUseResult", out var tur) && tur.ValueKind == JsonValueKind.Object &&
+                    tur.TryGetProperty("answers", out var ans) && ans.ValueKind == JsonValueKind.Object)
+                {
+                    entry["answers"] = ans.GetRawText();
+                }
+            }
+        }
     }
 
     private async Task HandleBranchAsync(int msgIndex)
@@ -2796,6 +2848,7 @@ public partial class AgentToolWindowControl : UserControl
 
         var keptLines = new System.Collections.Generic.List<string>();
         var msgs = new System.Collections.Generic.List<object>();
+        var pendingAsks = new Dictionary<string, Dictionary<string, object?>>();
         int visibleCount = 0;
 
         try
@@ -2807,8 +2860,6 @@ public partial class AgentToolWindowControl : UserControl
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
-                string? role = null;
-                string? text = null;
                 try
                 {
                     using var doc = JsonDocument.Parse(line);
@@ -2819,6 +2870,7 @@ public partial class AgentToolWindowControl : UserControl
                     if (!root.TryGetProperty("message", out var msg)) { keptLines.Add(line); continue; }
                     if (!msg.TryGetProperty("content", out var content)) { keptLines.Add(line); continue; }
 
+                    string? text = null;
                     if (content.ValueKind == JsonValueKind.Array)
                     {
                         foreach (var item in content.EnumerateArray())
@@ -2835,14 +2887,22 @@ public partial class AgentToolWindowControl : UserControl
                         text = content.GetString();
                     }
 
-                    if (string.IsNullOrEmpty(text)) { keptLines.Add(line); continue; }
-                    role = entryType;
+                    if (string.IsNullOrEmpty(text))
+                    {
+                        // No visible bubble, but the line may carry an
+                        // AskUserQuestion tool_use/tool_result — replayed as a
+                        // card without consuming a visible-message ordinal
+                        // (branch/rewind ordinals index text bubbles only).
+                        CollectAskReplay(root, content, msgs, pendingAsks);
+                        keptLines.Add(line);
+                        continue;
+                    }
+
+                    keptLines.Add(RewriteSessionIdInLine(line, newSessionId));
+                    msgs.Add(new { role = entryType, text });
+                    CollectAskReplay(root, content, msgs, pendingAsks);
                 }
                 catch { keptLines.Add(line); continue; }
-
-                var rewritten = RewriteSessionIdInLine(line, newSessionId);
-                keptLines.Add(rewritten);
-                msgs.Add(new { role, text });
 
                 if (visibleCount == msgIndex)
                     break;

@@ -4005,9 +4005,102 @@ function renderBranchedMessages(newSessionId, msgs) {
             msg.appendChild(bubble);
             applyMarkdown(bubble, m.text || "");
             decorateMessage(msg);
+        } else if (m.role === "ask") {
+            renderReplayAskCard(m.input, m.answers);
         }
     }
     autoScroll();
+}
+
+// Re-renders an AskUserQuestion from a session transcript (History resume /
+// branch) as an inert, already-answered card. `answersJson` is the CLI's
+// toolUseResult.answers map ({question: label}, multi-select joined ", ") —
+// null when the question was dismissed or the session ended unanswered.
+// Appended as bare flow content, outside addMessage/decorateMessage, so
+// replayed cards never shift branch/rewind ordinals (text bubbles only).
+function renderReplayAskCard(inputJson, answersJson) {
+    let input;
+    try { input = JSON.parse(inputJson || "{}"); } catch (e) { return; }
+    const questions = Array.isArray(input.questions) ? input.questions : [];
+    if (questions.length === 0) return;
+    let answers = {};
+    try { answers = JSON.parse(answersJson || "{}") || {}; } catch (e) {}
+
+    const card = document.createElement("div");
+    card.className = "question-card ask-question-card ask-question-answered pin-resolved";
+
+    questions.forEach(q => {
+        const row = document.createElement("div");
+        row.className = "ask-question-row";
+
+        if (q.header) {
+            const header = document.createElement("div");
+            header.className = "ask-question-header";
+            header.textContent = q.header;
+            row.appendChild(header);
+        }
+
+        const text = document.createElement("div");
+        text.className = "ask-question-text";
+        text.textContent = q.question || "";
+        row.appendChild(text);
+
+        const answer = String(answers[q.question] ?? "");
+        // Multi-select answers were joined with ", " on submit; a label can
+        // itself contain ", ", so exact match doubles as the fallback.
+        const picked = new Set(answer ? answer.split(", ") : []);
+        const isPicked = lbl => lbl === answer || picked.has(lbl);
+
+        const opts = document.createElement("div");
+        opts.className = q.multiSelect ? "ask-question-checkboxes" : "ask-question-options";
+        const options = Array.isArray(q.options) ? q.options : [];
+        let anyMatch = false;
+
+        options.forEach(opt => {
+            if (!opt || !opt.label) return;
+            const hit = isPicked(opt.label);
+            anyMatch = anyMatch || hit;
+            if (q.multiSelect) {
+                const lbl = document.createElement("label");
+                lbl.className = "ask-question-check";
+                if (opt.description) lbl.title = opt.description;
+                const cb = document.createElement("input");
+                cb.type = "checkbox";
+                cb.checked = hit;
+                cb.disabled = true;
+                lbl.appendChild(cb);
+                const span = document.createElement("span");
+                span.textContent = opt.label;
+                lbl.appendChild(span);
+                opts.appendChild(lbl);
+            } else {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "q-btn ask-question-btn" + (hit ? " selected" : "");
+                btn.textContent = opt.label;
+                if (opt.description) btn.title = opt.description;
+                btn.disabled = true;
+                opts.appendChild(btn);
+            }
+        });
+
+        row.appendChild(opts);
+
+        // A write-in answer matches no option label — surface it where the
+        // live card's "Other" input sits.
+        if (answer && !anyMatch) {
+            const other = document.createElement("input");
+            other.type = "text";
+            other.className = "ask-question-other";
+            other.value = answer;
+            other.disabled = true;
+            row.appendChild(other);
+        }
+
+        card.appendChild(row);
+    });
+
+    messages.appendChild(card);
 }
 
 // Click handler for file-links rendered by renderMarkdown. Path may be
