@@ -404,6 +404,7 @@ sealed class ClaudeSession : IAsyncDisposable
     private readonly ClaudeSettings? _claudeSettings;
     private readonly string? _cliPath;
     private readonly string? _sessionName;
+    private readonly decimal? _maxBudgetUsd;
 
     // Set once by StartAsync's ProbeClaudeAsync call; read by the perf-log
     // writer (#22b) so each request line records which CLI build produced it.
@@ -448,6 +449,7 @@ sealed class ClaudeSession : IAsyncDisposable
         _pipeName = pipeName;
         _claudeSettings = request.ClaudeSettings;
         _cliPath = request.CliPath;
+        _maxBudgetUsd = request.MaxBudgetUsd;
         // Spawn-time hint only — deliberately NOT in MakeKey (a title change
         // alone must not force a respawn; it re-persists at the next natural one).
         _sessionName = request.SessionName;
@@ -476,7 +478,7 @@ sealed class ClaudeSession : IAsyncDisposable
     // otherwise look identical (same ResumeSessionId) to a fork request and
     // get reused, silently dropping --fork-session (#12).
     public static string MakeKey(ChatRequest r) =>
-        $"{r.Model}|{r.Effort}|{PermissionProfile(r.PermissionMode)}|{r.WorkingDirectory}|{r.ResumeSessionId}|{r.ForkSession}|{r.AutoResume}|{r.CliPath}|{SpawnSettingsFingerprint(r.ClaudeSettings)}";
+        $"{r.Model}|{r.Effort}|{PermissionProfile(r.PermissionMode)}|{r.WorkingDirectory}|{r.ResumeSessionId}|{r.ForkSession}|{r.AutoResume}|{r.CliPath}|{r.MaxBudgetUsd}|{SpawnSettingsFingerprint(r.ClaudeSettings)}";
 
     // Settings claude only reads at startup (V7: attribution / cleanup /
     // auto-compact). Baking them into the key makes a toggle flip respawn the
@@ -552,6 +554,11 @@ The user's IDE selection (if any) is included in the conversation context and ma
         psi.ArgumentList.Add("stream-json");
         psi.ArgumentList.Add("--verbose");
         psi.ArgumentList.Add("--include-partial-messages");
+        // #7: probed 2026-07-20 — the echoed line carries isReplay:true, so the
+        // UI's delivered-ack can match it without any text comparison. Always
+        // on: purely additive (one extra `type:"user"` line per turn) and the
+        // agent already ignores unrecognized events.
+        psi.ArgumentList.Add("--replay-user-messages");
         psi.ArgumentList.Add("--append-system-prompt");
         psi.ArgumentList.Add(VsContextPrompt);
         psi.ArgumentList.Add("--model");
@@ -658,6 +665,17 @@ The user's IDE selection (if any) is included in the conversation context and ma
         {
             psi.ArgumentList.Add("--effort");
             psi.ArgumentList.Add(_effort);
+        }
+
+        // #11: probed 2026-07-20 — works outside --print despite the --help
+        // text ("only works with --print"), same as --session-id before it.
+        // The turn still completes normally; claude reports the overage only
+        // in the terminal `result` (subtype "error_max_budget_usd") and then
+        // exits, so no special handling is needed here beyond passing it.
+        if (_maxBudgetUsd is decimal budget && budget > 0)
+        {
+            psi.ArgumentList.Add("--max-budget-usd");
+            psi.ArgumentList.Add(budget.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture));
         }
 
         // Pre-generate the id for a brand-new session (not resume/continue,
@@ -1043,6 +1061,15 @@ The user's IDE selection (if any) is included in the conversation context and ma
             }
             else if (type == "user")
             {
+                // #7: --replay-user-messages echoes our own message back with
+                // isReplay:true — a delivery ack, not a tool_result carrier.
+                if (evt.TryGetProperty("isReplay", out var replayProp) && replayProp.ValueKind == JsonValueKind.True)
+                {
+                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "user-ack" }));
+                    Console.Out.Flush();
+                    continue;
+                }
+
                 // tool_result content emitted by claude when a tool finished
                 if (!evt.TryGetProperty("message", out var userMsgObj)) continue;
                 if (!userMsgObj.TryGetProperty("content", out var userContent)) continue;
@@ -1144,6 +1171,23 @@ The user's IDE selection (if any) is included in the conversation context and ma
                     }
                 }
             }
+            else if (type == "rate_limit_event")
+            {
+                // #9: probed 2026-07-20 — fires on every turn (not just near the
+                // limit), always carrying the current status. Only forward when
+                // there's something to actually tell the user; the UI-side
+                // throttle then collapses repeats of the same status.
+                if (evt.TryGetProperty("rate_limit_info", out var rlInfo))
+                {
+                    var rlStatus = rlInfo.TryGetProperty("status", out var rlStatusEl) ? rlStatusEl.GetString() : null;
+                    var rlOverage = rlInfo.TryGetProperty("isUsingOverage", out var rlOverageEl) && rlOverageEl.ValueKind == JsonValueKind.True;
+                    if (rlOverage || !string.Equals(rlStatus, "allowed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "rate-limit", Text = rlInfo.GetRawText() }));
+                        Console.Out.Flush();
+                    }
+                }
+            }
             else if (type == "result")
             {
                 resultMs = sw.ElapsedMilliseconds;
@@ -1176,7 +1220,26 @@ The user's IDE selection (if any) is included in the conversation context and ma
                     Console.Out.Flush();
                 }
 
-                if (evt.TryGetProperty("is_error", out var isErrProp) && isErrProp.GetBoolean() &&
+                // #11: probed 2026-07-20 — this terminal subtype carries no
+                // "result" string (unlike a normal error), so it needs its own
+                // check rather than falling into the generic is_error branch
+                // below. The turn's own text already streamed normally before
+                // this arrived; claude.exe exits right after (respawns like
+                // any other dead-process case on the next send).
+                if (evt.TryGetProperty("subtype", out var resultSubtype) && resultSubtype.GetString() == "error_max_budget_usd")
+                {
+                    string? budgetMsg = null;
+                    if (evt.TryGetProperty("errors", out var errsEl) && errsEl.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var e in errsEl.EnumerateArray())
+                        {
+                            if (e.ValueKind == JsonValueKind.String) { budgetMsg = e.GetString(); break; }
+                        }
+                    }
+                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "budget-exceeded", Text = budgetMsg ?? "Max budget reached" }));
+                    Console.Out.Flush();
+                }
+                else if (evt.TryGetProperty("is_error", out var isErrProp) && isErrProp.GetBoolean() &&
                     evt.TryGetProperty("result", out var resultProp))
                 {
                     Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = resultProp.GetString() ?? "" }));

@@ -1678,9 +1678,13 @@ public partial class AgentToolWindowControl : UserControl
                 chunk => dispatcher.Invoke(() =>
                 {
                     const string notFound = "CLAUDE_NOT_FOUND::";
+                    const string budgetExceeded = "BUDGET_EXCEEDED::";
                     if (chunk != null && chunk.StartsWith(notFound, StringComparison.Ordinal))
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "claude-not-found", detail = chunk.Substring(notFound.Length) }));
+                    else if (chunk != null && chunk.StartsWith(budgetExceeded, StringComparison.Ordinal))
+                        Browser.CoreWebView2.PostWebMessageAsJson(
+                            JsonSerializer.Serialize(new { type = "budget-exceeded", detail = chunk.Substring(budgetExceeded.Length) }));
                     else
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "chunk", text = chunk }));
@@ -1705,7 +1709,8 @@ public partial class AgentToolWindowControl : UserControl
                 onPermissionRequest: (tool, input, id, cwd) => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "permission_request", tool, input, id, cwd }))),
-                onDiagnosticsRequest: (filePath, requestId) => _ = HandleDiagnosticsRequestAsync(filePath, requestId));
+                onDiagnosticsRequest: (filePath, requestId) => _ = HandleDiagnosticsRequestAsync(filePath, requestId),
+                maxBudgetUsd: request.MaxBudgetUsd);
 
             VsStatusBar.Clear();
 
@@ -3694,6 +3699,10 @@ public partial class AgentToolWindowControl : UserControl
         // start-claude-login messages.
         [JsonPropertyName("cliPath")]
         public string? CliPath { get; set; }
+
+        // #11: hard CLI-enforced budget cap for this send (--max-budget-usd).
+        [JsonPropertyName("maxBudgetUsd")]
+        public decimal? MaxBudgetUsd { get; set; }
 
         [JsonPropertyName("autoResume")]
         public bool AutoResume { get; set; }

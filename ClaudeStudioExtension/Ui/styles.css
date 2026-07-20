@@ -2658,6 +2658,17 @@ html.light-theme .resume-overlay-inner .dots span { color: var(--accent); }
 
 .message.user .bubble {
     border-radius: 12px 12px 4px 12px;
+    position: relative;
+}
+
+/* #7: delivery ack from --replay-user-messages */
+.message.user.msg-delivered .bubble::after {
+    content: "✓";
+    position: absolute;
+    right: -4px;
+    bottom: -14px;
+    font-size: 10px;
+    color: var(--text-dim, #888);
 }
 
 .message.assistant .bubble {

@@ -1544,6 +1544,11 @@ let currentSessionId = null;
 let _rewindBaseUserIdx = 0;
 // userIndex of the user message that opened the in-flight turn.
 let _turnUserIdx = 0;
+// #7: the user bubble awaiting a --replay-user-messages delivery ack.
+let _pendingUserAckBubble = null;
+// #9: last rate-limit status shown, so repeats of the same status (fires
+// every turn) don't spam a toast each time.
+let _lastRateLimitStatus = null;
 
 function decorateMessage(msgEl) {
     const idx = msgCounter++;
@@ -2077,7 +2082,9 @@ function sendMessage() {
     if (!text && activeAttachments.length === 0)
         return;
 
-    addMessage("user", text || `(${activeAttachments.map(a => a.displayName).join(", ")})`);
+    // #7: only one turn is ever in flight (isStreaming guards a second send
+    // above), so a single pending reference is enough — no queue needed.
+    _pendingUserAckBubble = addMessage("user", text || `(${activeAttachments.map(a => a.displayName).join(", ")})`);
     // Remember which user bubble opened this turn — if the turn spawns a fresh
     // (non-resumed) session, it becomes the new rewind base.
     _turnUserIdx = userMsgCounter - 1;
@@ -2124,6 +2131,7 @@ function sendMessage() {
             permissionMode: permissionSelect.value,
             workingDirectory: getWorkingDirOverride() || null,
             cliPath: getCliPath(),
+            maxBudgetUsd: getMaxBudget(),
             // After clearChat / reset-chat, the next send must NOT resume. Otherwise
             // claude.exe gets --continue and reuses the previous session instead of
             // creating a fresh one (turn count keeps going up in the old row).
@@ -2174,6 +2182,7 @@ function addMessage(role, text) {
     decorateMessage(message);
 
     autoScroll();
+    return message;
 }
 
 window.chrome.webview.addEventListener("message", event => {
@@ -2417,6 +2426,9 @@ window.chrome.webview.addEventListener("message", event => {
         // popping one later would show a modal nobody is listening to.
         permissionQueue = [];
         setStreaming(false);
+        // #7 safety: no ack can outlive the turn either (cancel, or an older
+        // CLI that silently ignores --replay-user-messages).
+        _pendingUserAckBubble = null;
         return;
     }
 
@@ -2432,6 +2444,33 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "thinking-status") {
         renderPresence(event.data.status === "start" ? "thinking" : "", "");
+        return;
+    }
+
+    if (event.data.type === "user-ack") {
+        if (_pendingUserAckBubble && document.body.contains(_pendingUserAckBubble)) {
+            _pendingUserAckBubble.classList.add("msg-delivered");
+        }
+        _pendingUserAckBubble = null;
+        return;
+    }
+
+    if (event.data.type === "rate-limit") {
+        try {
+            const info = JSON.parse(event.data.text || "{}");
+            const status = info.status || "unknown";
+            if (status !== _lastRateLimitStatus) {
+                _lastRateLimitStatus = status;
+                const resetStr = info.resetsAt ? new Date(info.resetsAt * 1000).toLocaleString() : "";
+                const overage = info.isUsingOverage ? " · using overage" : "";
+                showToast(`⚠ Rate limit: ${status}${overage}${resetStr ? " · resets " + resetStr : ""}`);
+            }
+        } catch (e) { /* unexpected shape — skip rather than show garbage */ }
+        return;
+    }
+
+    if (event.data.type === "budget-exceeded") {
+        showToast(`💸 ${event.data.detail || "Max budget reached"}`);
         return;
     }
 
@@ -2997,6 +3036,26 @@ function clearCliPath() {
     cliPathInput.focus();
 }
 
+// #11: hard, CLI-enforced budget cap (--max-budget-usd) — distinct from the
+// Cost limits section above, which is a client-side estimate/warning only.
+const maxBudgetInput = document.getElementById("max-budget-input");
+maxBudgetInput.value = localStorage.getItem("maxBudgetUsd") || "";
+
+function getMaxBudget() {
+    const n = parseFloat(localStorage.getItem("maxBudgetUsd") || "");
+    return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function setMaxBudget(value) {
+    localStorage.setItem("maxBudgetUsd", value.trim());
+}
+
+function clearMaxBudget() {
+    maxBudgetInput.value = "";
+    localStorage.setItem("maxBudgetUsd", "");
+    maxBudgetInput.focus();
+}
+
 function requestCwdRefresh() {
     try { window.chrome.webview.postMessage({ type: "refresh-cwd" }); } catch (e) {}
 }
@@ -3106,7 +3165,7 @@ const SETTINGS_KEYS = [
     "workingDirOverrides", "workingDirectory", "showCwdbar", "statusLineCommand",
     "displayName", "accountInfoSource",
     // Cost limits (localStorage cache; disk copy cleared via set-cost-limits)
-    "costSessionLimit", "costDailyLimit", "costBlock",
+    "costSessionLimit", "costDailyLimit", "costBlock", "maxBudgetUsd",
     // Composer selectors (incl. legacy effort key)
     "effortLevel", "effortValue", "chatModel"
 ];

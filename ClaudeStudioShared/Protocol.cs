@@ -14,6 +14,10 @@ public class ChatRequest
     public bool ForkSession { get; set; }
     public string? WorkingDirectory { get; set; }
     public bool AutoResume { get; set; }
+    // #11: hard CLI-enforced cap (--max-budget-usd). Distinct from the
+    // client-side Usage.CostLimits estimate — this one kills the claude.exe
+    // process when the CLI's own tracked spend crosses it.
+    public decimal? MaxBudgetUsd { get; set; }
     public PermissionResponse? PermissionResponse { get; set; }
 
     // Answer to an AskUserQuestion control_request. The agent correlates the

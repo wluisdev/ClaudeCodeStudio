@@ -378,6 +378,18 @@
                                 <span class="toggle-track"></span>
                             </label>
                         </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                Hard budget per session ($)
+                                <span class="info-icon" title="CLI-enforced (--max-budget-usd): unlike the warning above, this actually ends the session once claude's own tracked spend crosses it. Leave blank to disable.">ⓘ</span>
+                            </span>
+                        </div>
+                        <div class="settings-input-wrap">
+                            <input type="text" inputmode="decimal" id="max-budget-input" class="settings-input" placeholder="off"
+                                oninput="setMaxBudget(this.value)"
+                                onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" />
+                            <button type="button" class="settings-input-clear" title="Clear" onclick="clearMaxBudget()">✕</button>
+                        </div>
                         <div class="cmd-divider"></div>
                         <div class="settings-row">
                             <span class="settings-label">

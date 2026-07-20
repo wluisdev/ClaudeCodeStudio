@@ -418,13 +418,13 @@ public class AgentClient
     // (claude is appending to the same file mid-turn).
     public bool IsStreaming { get; private set; }
 
-    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null)
+    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null, decimal? maxBudgetUsd = null)
     {
         await _streamingSemaphore.WaitAsync();
         IsStreaming = true;
         try
         {
-            await AskStreamingCoreAsync(message, model, effort, permissionMode, onChunk, onTiming, onTokens, workingDirectory, autoResume, onSession, onTool, onPermissionRequest, onDiagnosticsRequest, onThinking);
+            await AskStreamingCoreAsync(message, model, effort, permissionMode, onChunk, onTiming, onTokens, workingDirectory, autoResume, onSession, onTool, onPermissionRequest, onDiagnosticsRequest, onThinking, maxBudgetUsd);
         }
         finally
         {
@@ -433,7 +433,7 @@ public class AgentClient
         }
     }
 
-    private async Task AskStreamingCoreAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null)
+    private async Task AskStreamingCoreAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null, decimal? maxBudgetUsd = null)
     {
         // A send can queue on the semaphore behind a stuck turn; by the time it
         // runs here, a clear/stop may have nulled the streams (rodada 12: NRE at
@@ -478,6 +478,7 @@ public class AgentClient
             AutoResume = autoResume,
             ClaudeSettings = ClaudeSettings,
             CliPath = CliPath,
+            MaxBudgetUsd = maxBudgetUsd,
             // U2: when resuming a session whose custom title we know, pass it
             // along so the agent spawns claude with --name — the CLI re-appends
             // its native custom-title line and the terminal picker stays in
@@ -580,6 +581,30 @@ public class AgentClient
             if (chunk.Type == "thinking")
             {
                 onThinking?.Invoke(chunk.Text);
+                continue;
+            }
+
+            // #7/#9: piggyback on the existing wide onTool callback (kind, name,
+            // input, text, id) the same way "system-info" already does — avoids
+            // growing this signature with two more single-purpose Actions.
+            if (chunk.Type == "user-ack")
+            {
+                onTool?.Invoke("user-ack", "", null, null, null);
+                continue;
+            }
+
+            if (chunk.Type == "rate-limit")
+            {
+                onTool?.Invoke("rate-limit", "", null, chunk.Text, null);
+                continue;
+            }
+
+            // #11: same sentinel-on-onChunk trick as CLAUDE_NOT_FOUND:: below —
+            // a terminal, turn-ending condition that needs distinct UI treatment
+            // (not a new callback param, not a plain chat error bubble).
+            if (chunk.Type == "budget-exceeded")
+            {
+                onChunk("BUDGET_EXCEEDED::" + (chunk.Text ?? ""));
                 continue;
             }
 
