@@ -404,6 +404,10 @@ sealed class ClaudeSession : IAsyncDisposable
     private readonly string? _cliPath;
     private readonly string? _sessionName;
 
+    // Set once by StartAsync's ProbeClaudeAsync call; read by the perf-log
+    // writer (#22b) so each request line records which CLI build produced it.
+    private string? _claudeVersion;
+
     private Process? _proc;
     private StreamWriter? _stdin;
     // Serializes writes to claude.stdin so partial NDJSON lines can't interleave.
@@ -716,6 +720,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
         // shadowing the expected one on PATH cost a whole validation round to
         // diagnose (2026-07-16: chocolatey 2.1.144 vs ~/.local/bin 2.1.211).
         var claudeVersion = await ProbeClaudeAsync(psi.FileName);
+        _claudeVersion = claudeVersion;
         var exeLabel = claudeVersion != null ? $"{psi.FileName} ({claudeVersion})" : psi.FileName;
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"claude exe: {exeLabel}" }));
         Console.Out.Flush();
@@ -820,6 +825,12 @@ The user's IDE selection (if any) is included in the conversation context and ma
 
         var sw = Stopwatch.StartNew();
 
+        // Checkpoints for the perf.jsonl line (#22b) — mirrors the EmitTiming
+        // calls below so the harness measures exactly what the timing chunks
+        // already show the UI, just persisted instead of transient.
+        long msgSentMs = 0, firstLineMs = 0, firstChunkMs = 0, resultMs = 0;
+        int finalInputTok = 0, finalOutputTok = 0, finalCacheCreate = 0, finalCacheRead = 0;
+
         var userMsg = new
         {
             type = "user",
@@ -837,7 +848,8 @@ The user's IDE selection (if any) is included in the conversation context and ma
         }
         finally { _stdinLock.Release(); }
 
-        EmitTiming("message sent", sw.ElapsedMilliseconds);
+        msgSentMs = sw.ElapsedMilliseconds;
+        EmitTiming("message sent", msgSentMs);
 
         bool firstLine = true;
         bool firstChunk = true;
@@ -850,7 +862,8 @@ The user's IDE selection (if any) is included in the conversation context and ma
 
             if (firstLine)
             {
-                EmitTiming("first stdout line", sw.ElapsedMilliseconds);
+                firstLineMs = sw.ElapsedMilliseconds;
+                EmitTiming("first stdout line", firstLineMs);
                 firstLine = false;
             }
 
@@ -943,7 +956,8 @@ The user's IDE selection (if any) is included in the conversation context and ma
                             {
                                 if (firstChunk)
                                 {
-                                    EmitTiming("first chunk", sw.ElapsedMilliseconds);
+                                    firstChunkMs = sw.ElapsedMilliseconds;
+                                    EmitTiming("first chunk", firstChunkMs);
                                     firstChunk = false;
                                 }
                                 Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "chunk", Text = text }));
@@ -1002,7 +1016,8 @@ The user's IDE selection (if any) is included in the conversation context and ma
 
                     if (firstChunk)
                     {
-                        EmitTiming("first chunk", sw.ElapsedMilliseconds);
+                        firstChunkMs = sw.ElapsedMilliseconds;
+                        EmitTiming("first chunk", firstChunkMs);
                         firstChunk = false;
                     }
                     Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "chunk", Text = text }));
@@ -1124,7 +1139,8 @@ The user's IDE selection (if any) is included in the conversation context and ma
             }
             else if (type == "result")
             {
-                EmitTiming("result received", sw.ElapsedMilliseconds);
+                resultMs = sw.ElapsedMilliseconds;
+                EmitTiming("result received", resultMs);
 
                 // session id is stable across turns once set, but the result event
                 // re-emits it — refresh + re-broadcast in case the extension missed it
@@ -1145,8 +1161,11 @@ The user's IDE selection (if any) is included in the conversation context and ma
                     var outputTok = usage.TryGetProperty("output_tokens", out var out_) ? out_.GetInt32() : 0;
                     var cacheCreate = usage.TryGetProperty("cache_creation_input_tokens", out var cc) ? cc.GetInt32() : 0;
                     var cacheRead = usage.TryGetProperty("cache_read_input_tokens", out var cr) ? cr.GetInt32() : 0;
-                    var newIn = inputTok + cacheCreate;
-                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "tokens", Text = $"{newIn}/{outputTok}/{cacheRead}" }));
+                    finalInputTok = inputTok + cacheCreate;
+                    finalOutputTok = outputTok;
+                    finalCacheCreate = cacheCreate;
+                    finalCacheRead = cacheRead;
+                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "tokens", Text = $"{finalInputTok}/{outputTok}/{cacheRead}" }));
                     Console.Out.Flush();
                 }
 
@@ -1157,7 +1176,32 @@ The user's IDE selection (if any) is included in the conversation context and ma
                     Console.Out.Flush();
                 }
 
-                EmitTiming("total", sw.ElapsedMilliseconds);
+                var totalMs = sw.ElapsedMilliseconds;
+                EmitTiming("total", totalMs);
+                AppendPerfLog(new
+                {
+                    ts = DateTime.UtcNow.ToString("o"),
+                    cliVersion = _claudeVersion,
+                    model = _model,
+                    effort = _effort,
+                    permissionMode = _permissionMode,
+                    sessionId = SessionId,
+                    timings = new
+                    {
+                        messageSentMs = msgSentMs,
+                        firstStdoutLineMs = firstLineMs,
+                        firstChunkMs,
+                        resultMs,
+                        totalMs
+                    },
+                    tokens = new
+                    {
+                        input = finalInputTok,
+                        output = finalOutputTok,
+                        cacheCreate = finalCacheCreate,
+                        cacheRead = finalCacheRead
+                    }
+                });
                 Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "done" }));
                 Console.Out.Flush();
                 return;
@@ -1339,6 +1383,28 @@ The user's IDE selection (if any) is included in the conversation context and ma
     {
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "warn", Text = text }));
         Console.Out.Flush();
+    }
+
+    private static readonly object _perfLogLock = new();
+
+    // #22b: measurement, not a test — one line per completed turn so A/B
+    // comparisons (e.g. did #5's --session-id change init latency?) can be
+    // made from real data instead of impression. Best-effort: a logging
+    // failure must never surface as a turn failure.
+    private static void AppendPerfLog(object record)
+    {
+        try
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClaudeStudio");
+            Directory.CreateDirectory(dir);
+            var line = JsonSerializer.Serialize(record) + Environment.NewLine;
+            lock (_perfLogLock)
+            {
+                File.AppendAllText(Path.Combine(dir, "perf.jsonl"), line);
+            }
+        }
+        catch { }
     }
 
     private object BuildHooks()
