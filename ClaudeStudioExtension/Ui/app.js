@@ -1023,6 +1023,9 @@ function renderPresence(status, waitingFor) {
     if (status === "waiting" && waitingFor) {
         el.textContent = "⏸ " + waitingFor;
         el.hidden = false;
+    } else if (status === "thinking") {
+        el.textContent = "✳ thinking…";
+        el.hidden = false;
     } else {
         el.textContent = "";
         el.hidden = true;
@@ -2391,6 +2394,11 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "tokens-live") {
         updateLiveTokens(event.data.text || "");
+        return;
+    }
+
+    if (event.data.type === "thinking-status") {
+        renderPresence(event.data.status === "start" ? "thinking" : "", "");
         return;
     }
 

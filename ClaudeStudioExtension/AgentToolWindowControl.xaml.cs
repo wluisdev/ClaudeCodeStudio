@@ -1633,6 +1633,9 @@ public partial class AgentToolWindowControl : UserControl
                 onTool: (kind, name, input, text, id) => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = kind, name, input, text, id }))),
+                onThinking: status => dispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "thinking-status", status }))),
                 onPermissionRequest: (tool, input, id, cwd) => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "permission_request", tool, input, id, cwd }))),

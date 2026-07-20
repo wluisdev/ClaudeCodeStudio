@@ -820,6 +820,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
 
         bool firstLine = true;
         bool firstChunk = true;
+        bool thinkingActive = false;
 
         string? line;
         while ((line = await _stdout.ReadLineAsync()) != null)
@@ -937,7 +938,31 @@ The user's IDE selection (if any) is included in the conversation context and ma
                 if (!streamEvt.TryGetProperty("type", out var evtType)) continue;
                 var evtTypeStr = evtType.GetString();
 
-                if (evtTypeStr == "content_block_delta")
+                if (evtTypeStr == "content_block_start")
+                {
+                    if (thinkingActive) continue; // already showing, nothing new to signal
+                    if (streamEvt.TryGetProperty("content_block", out var cb)
+                        && cb.TryGetProperty("type", out var cbType)
+                        && cbType.GetString() == "thinking")
+                    {
+                        thinkingActive = true;
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "thinking", Text = "start" }));
+                        Console.Out.Flush();
+                    }
+                }
+                else if (evtTypeStr == "content_block_stop")
+                {
+                    // Fires for every block (thinking, text, tool_use) — only acts
+                    // when a thinking block was left open (e.g. followed directly
+                    // by a tool_use with no text in between).
+                    if (thinkingActive)
+                    {
+                        thinkingActive = false;
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "thinking", Text = "stop" }));
+                        Console.Out.Flush();
+                    }
+                }
+                else if (evtTypeStr == "content_block_delta")
                 {
                     if (!streamEvt.TryGetProperty("delta", out var delta)) continue;
                     if (!delta.TryGetProperty("type", out var deltaType)) continue;
@@ -946,6 +971,13 @@ The user's IDE selection (if any) is included in the conversation context and ma
 
                     var text = deltaText.GetString();
                     if (string.IsNullOrEmpty(text)) continue;
+
+                    if (thinkingActive)
+                    {
+                        thinkingActive = false;
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "thinking", Text = "stop" }));
+                        Console.Out.Flush();
+                    }
 
                     if (firstChunk)
                     {

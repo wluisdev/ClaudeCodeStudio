@@ -415,13 +415,13 @@ public class AgentClient
     // (claude is appending to the same file mid-turn).
     public bool IsStreaming { get; private set; }
 
-    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null)
+    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null)
     {
         await _streamingSemaphore.WaitAsync();
         IsStreaming = true;
         try
         {
-            await AskStreamingCoreAsync(message, model, effort, permissionMode, onChunk, onTiming, onTokens, workingDirectory, autoResume, onSession, onTool, onPermissionRequest, onDiagnosticsRequest);
+            await AskStreamingCoreAsync(message, model, effort, permissionMode, onChunk, onTiming, onTokens, workingDirectory, autoResume, onSession, onTool, onPermissionRequest, onDiagnosticsRequest, onThinking);
         }
         finally
         {
@@ -430,7 +430,7 @@ public class AgentClient
         }
     }
 
-    private async Task AskStreamingCoreAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null)
+    private async Task AskStreamingCoreAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null)
     {
         // A send can queue on the semaphore behind a stuck turn; by the time it
         // runs here, a clear/stop may have nulled the streams (rodada 12: NRE at
@@ -564,6 +564,12 @@ public class AgentClient
                 OutputLog.Info($"session: {chunk.Text}");
                 onSession?.Invoke(chunk.Text);
                 StartJsonlWatcher(workingDirectory, chunk.Text, onTool);
+                continue;
+            }
+
+            if (chunk.Type == "thinking")
+            {
+                onThinking?.Invoke(chunk.Text);
                 continue;
             }
 
