@@ -31,6 +31,9 @@ public class AgentClient
     private readonly JsonlWatcher _jsonlWatcher = new();
 
     public string? PendingResumeSessionId { get; set; }
+    // #12: consumed together with PendingResumeSessionId on the next turn —
+    // set only by the History "resume as fork" action.
+    public bool PendingForkSession { get; set; }
     public string? CurrentSessionId { get; private set; }
 
     // True while the in-flight/last turn was sent with --resume or --continue
@@ -447,13 +450,19 @@ public class AgentClient
 
         var resumeId = PendingResumeSessionId;
         PendingResumeSessionId = null;
+        var forkSession = PendingForkSession;
+        PendingForkSession = false;
         // Whether this turn carries the previous transcript forward (--resume /
         // --continue). The control forwards it with session-info so the UI can
         // tell a forked-with-history session from a fresh one (rewind base).
         LastTurnResumed = resumeId != null || autoResume;
 
-        // If we already know the session id from a resume or prior turn, start the JSONL watcher early
-        var preKnownSessionId = resumeId ?? CurrentSessionId;
+        // If we already know the session id from a resume or prior turn, start
+        // the JSONL watcher early. Forking is the exception: --fork-session
+        // mints a NEW id different from resumeId, so pre-arming on resumeId
+        // would attach to the original session's file — wait for the real
+        // "session" chunk instead, same as any brand-new session (#12).
+        var preKnownSessionId = forkSession ? null : (resumeId ?? CurrentSessionId);
         if (!string.IsNullOrEmpty(preKnownSessionId))
             StartJsonlWatcher(workingDirectory, preKnownSessionId, onTool);
 
@@ -464,6 +473,7 @@ public class AgentClient
             Effort = effort,
             PermissionMode = permissionMode,
             ResumeSessionId = resumeId,
+            ForkSession = forkSession,
             WorkingDirectory = workingDirectory,
             AutoResume = autoResume,
             ClaudeSettings = ClaudeSettings,
@@ -639,6 +649,7 @@ public class AgentClient
     {
         CurrentSessionId = null;
         PendingResumeSessionId = null;
+        PendingForkSession = false;
         LastTurnResumed = false;
     }
 

@@ -497,6 +497,39 @@ function renderMcpStatusCard(serversJson, error) {
     autoScroll();
 }
 
+// ── Doctor (#10) ────────────────────────────────────────────
+let _pendingDoctorCard = null;
+
+function requestDoctor() {
+    document.getElementById("cmd-menu").classList.remove("open");
+    if (welcome) { welcome.remove(); welcome = null; }
+
+    const card = document.createElement("div");
+    card.className = "question-card doctor-card";
+    card.innerHTML = `<div class="question-text">🩺 Doctor</div><div class="doctor-body">Running claude doctor…</div>`;
+    messages.appendChild(card);
+    autoScroll();
+    _pendingDoctorCard = card;
+
+    try { window.chrome.webview.postMessage({ type: "run-doctor" }); }
+    catch (e) { card.querySelector(".doctor-body").textContent = "Failed to reach the extension."; }
+}
+
+function renderDoctorCard(output, error) {
+    const card = _pendingDoctorCard;
+    _pendingDoctorCard = null;
+    if (!card || !document.body.contains(card)) return;
+    const body = card.querySelector(".doctor-body");
+
+    if (error) {
+        body.textContent = error;
+        return;
+    }
+    body.innerHTML = `<pre class="doctor-output"></pre>`;
+    body.querySelector(".doctor-output").textContent = output || "(no output)";
+    autoScroll();
+}
+
 const _ctxPalette = ["#d97757", "#6a9bcc", "#8a7fd0", "#5faa8a", "#c9a75a", "#c47ba6", "#7fb6c9", "#a0a68a"];
 
 function fmtTokens(n) {
@@ -2420,6 +2453,11 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "context-usage") {
         renderContextUsageCard(event.data.usage || null, event.data.error || null);
+        return;
+    }
+
+    if (event.data.type === "doctor-result") {
+        renderDoctorCard(event.data.output || "", event.data.error || null);
         return;
     }
 
@@ -4651,6 +4689,7 @@ function renderHistoryList(sessions, query) {
   <div class="history-header">
     <div class="history-preview"${tooltip} onclick="resumeSession('${escapeAttr(s.id)}')">${escapeHtml(label)}</div>
     <button class="history-action" onclick="startRenameSession('${escapeAttr(s.id)}')" title="Rename">✎</button>
+    <button class="history-action" onclick="forkSession('${escapeAttr(s.id)}')" title="Resume as fork (new session, original untouched)">↳</button>
     <button class="history-action" onclick="viewSession('${escapeAttr(s.id)}')" title="Open transcript in editor">⤢</button>
     <button class="history-delete" onclick="deleteSession('${escapeAttr(s.id)}')" title="Delete session">×</button>
   </div>
@@ -4706,6 +4745,15 @@ function resumeSession(sessionId) {
     document.getElementById("history-menu").classList.remove("open");
     showResumeOverlay();
     window.chrome.webview.postMessage({ type: "resume-session", sessionId });
+}
+
+// #12: same replay as resumeSession, but the extension resumes with
+// --fork-session so claude mints a new session id instead of continuing to
+// write into this one — the original stays exactly as it is on disk.
+function forkSession(sessionId) {
+    document.getElementById("history-menu").classList.remove("open");
+    showResumeOverlay();
+    window.chrome.webview.postMessage({ type: "resume-session", sessionId, fork: true });
 }
 
 function showResumeOverlay() {

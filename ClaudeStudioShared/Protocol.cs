@@ -8,6 +8,10 @@ public class ChatRequest
     public string PermissionMode { get; set; } = "ask";
     public bool ResetSession { get; set; }
     public string? ResumeSessionId { get; set; }
+    // #12: passes --fork-session alongside --resume so claude creates a new
+    // session id carrying the resumed history, instead of continuing to
+    // write into the original session's transcript.
+    public bool ForkSession { get; set; }
     public string? WorkingDirectory { get; set; }
     public bool AutoResume { get; set; }
     public PermissionResponse? PermissionResponse { get; set; }

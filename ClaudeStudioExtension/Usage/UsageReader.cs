@@ -17,6 +17,11 @@ public class SessionUsage
     public long OutputTokens { get; set; }
     public long CacheReadTokens { get; set; }
     public long CacheCreationTokens { get; set; }
+    // Split by TTL for pricing (5m writes cost 1.25x input, 1h writes cost
+    // 2x). Falls back to Cache5mTokens when a turn's usage predates the
+    // nested cache_creation breakdown (older CLI versions).
+    public long Cache5mTokens { get; set; }
+    public long Cache1hTokens { get; set; }
     public int TurnCount { get; set; }
     public decimal Cost { get; set; }
     // Naming inputs for the session filter combo — resolved against
@@ -28,7 +33,8 @@ public class SessionUsage
 
 public static class Pricing
 {
-    // USD per 1M tokens. Cache write = input * 1.25; cache read = input * 0.10.
+    // USD per 1M tokens. Cache write = input * 1.25 (5m TTL) or input * 2 (1h
+    // TTL); cache read = input * 0.10.
     private static readonly Dictionary<string, (decimal input, decimal output)> _base = new(StringComparer.OrdinalIgnoreCase)
     {
         ["claude-sonnet-5"]   = (3m, 15m), // sticker price; intro $2/$10 runs through 2026-08-31
@@ -51,10 +57,10 @@ public static class Pricing
         return (3m, 15m); // sonnet default
     }
 
-    public static decimal Calculate(string model, long input, long output, long cacheRead, long cacheCreation)
+    public static decimal Calculate(string model, long input, long output, long cacheRead, long cache5m, long cache1h)
     {
         var (i, o) = Resolve(model);
-        return (input * i + output * o + cacheRead * (i * 0.10m) + cacheCreation * (i * 1.25m)) / 1_000_000m;
+        return (input * i + output * o + cacheRead * (i * 0.10m) + cache5m * (i * 1.25m) + cache1h * (i * 2.0m)) / 1_000_000m;
     }
 }
 
@@ -89,7 +95,7 @@ public static class UsageReader
         string? cwd = null;
         string model = "claude-sonnet-5";
         DateTime first = DateTime.MaxValue, last = DateTime.MinValue;
-        long inp = 0, outp = 0, cr = 0, cc = 0;
+        long inp = 0, outp = 0, cr = 0, cc = 0, cc5m = 0, cc1h = 0;
         int turns = 0;
         string nativeCustom = "", nativeAi = "", preview = "";
 
@@ -173,7 +179,21 @@ public static class UsageReader
             inp  += usage.TryGetProperty("input_tokens",                 out var x1) ? x1.GetInt64() : 0;
             outp += usage.TryGetProperty("output_tokens",                out var x2) ? x2.GetInt64() : 0;
             cr   += usage.TryGetProperty("cache_read_input_tokens",      out var x3) ? x3.GetInt64() : 0;
-            cc   += usage.TryGetProperty("cache_creation_input_tokens",  out var x4) ? x4.GetInt64() : 0;
+            var ccTurn = usage.TryGetProperty("cache_creation_input_tokens", out var x4) ? x4.GetInt64() : 0;
+            cc += ccTurn;
+
+            // Split by TTL for pricing (#4 — 1h writes cost 2x, not 1.25x).
+            // Older entries lack the nested breakdown; treat those as 5m,
+            // matching the flat rate this code charged before the split.
+            if (usage.TryGetProperty("cache_creation", out var ccObj) && ccObj.ValueKind == JsonValueKind.Object)
+            {
+                cc5m += ccObj.TryGetProperty("ephemeral_5m_input_tokens", out var e5) ? e5.GetInt64() : 0;
+                cc1h += ccObj.TryGetProperty("ephemeral_1h_input_tokens", out var e1h) ? e1h.GetInt64() : 0;
+            }
+            else
+            {
+                cc5m += ccTurn;
+            }
         }
 
         if (sessionId == null || turns == 0) return null;
@@ -189,8 +209,10 @@ public static class UsageReader
             OutputTokens = outp,
             CacheReadTokens = cr,
             CacheCreationTokens = cc,
+            Cache5mTokens = cc5m,
+            Cache1hTokens = cc1h,
             TurnCount = turns,
-            Cost = Pricing.Calculate(model, inp, outp, cr, cc),
+            Cost = Pricing.Calculate(model, inp, outp, cr, cc5m, cc1h),
             NativeCustomTitle = nativeCustom,
             NativeAiTitle = nativeAi,
             Preview = preview,

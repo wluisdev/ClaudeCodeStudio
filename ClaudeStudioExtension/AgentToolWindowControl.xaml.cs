@@ -977,6 +977,61 @@ public partial class AgentToolWindowControl : UserControl
         }
     }
 
+    // #10: runs `claude doctor` non-interactively and captures its output for
+    // the ⌘ menu's card, instead of opening a visible window like
+    // StartClaudeLogin above (there the user needs to see/complete an OAuth
+    // flow; here we just want the report). Same cliPath ?? "claude" fallback
+    // as StartClaudeLogin — relies on PATH when no CLI path is configured.
+    private static async Task<(string? output, string? error)> RunDoctorAsync(string? cliPath)
+    {
+        // net472 has no ProcessStartInfo.ArgumentList / Process.WaitForExitAsync /
+        // cancellable ReadToEndAsync (those are net5+ only) — times out via
+        // Task.WhenAny + Task.Delay instead, killing the process on timeout so
+        // the abandoned read tasks unblock (pipes close under them).
+        Process? proc = null;
+        try
+        {
+            var exe = string.IsNullOrWhiteSpace(cliPath) ? "claude" : cliPath.Trim();
+            var psi = new ProcessStartInfo
+            {
+                FileName = exe,
+                Arguments = "doctor",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                RedirectStandardInput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            proc = Process.Start(psi);
+            if (proc == null) return (null, "failed to start claude doctor");
+            proc.StandardInput.Close(); // doctor shouldn't need stdin — avoid it ever blocking on a read
+
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+            var stderrTask = proc.StandardError.ReadToEndAsync();
+            var bothDone = Task.WhenAll(stdoutTask, stderrTask);
+            var winner = await Task.WhenAny(bothDone, Task.Delay(TimeSpan.FromSeconds(30)));
+
+            if (winner != bothDone)
+            {
+                try { proc.Kill(); } catch { }
+                return (null, "claude doctor timed out after 30s");
+            }
+
+            var output = stdoutTask.Result;
+            if (!string.IsNullOrWhiteSpace(stderrTask.Result))
+                output += (string.IsNullOrEmpty(output) ? "" : "\n") + stderrTask.Result;
+            return (output, null);
+        }
+        catch (Exception ex)
+        {
+            return (null, $"claude doctor failed: {ex.Message}");
+        }
+        finally
+        {
+            proc?.Dispose();
+        }
+    }
+
     // Opens a visible cmd window running the documented npm install for Claude
     // Code. cmd /K keeps the window open so the user can read the result (and any
     // error if npm isn't present). After it finishes they re-send their message;
@@ -1212,9 +1267,10 @@ public partial class AgentToolWindowControl : UserControl
 
             if (request.Type == "resume-session")
             {
-                OutputLog.Info($"ui: resume session {request.SessionId}");
+                OutputLog.Info($"ui: resume session {request.SessionId}{(request.Fork ? " (fork)" : "")}");
                 await _agentClient.StopAsync();
                 _agentClient.PendingResumeSessionId = request.SessionId;
+                _agentClient.PendingForkSession = request.Fork;
                 await HandleResumeSessionAsync(request.SessionId);
                 return;
             }
@@ -1440,6 +1496,16 @@ public partial class AgentToolWindowControl : UserControl
                 mcpDispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "mcp-status", servers = serversJson, error = mcpErr })));
+                return;
+            }
+
+            if (request.Type == "run-doctor")
+            {
+                var (doctorOutput, doctorErr) = await RunDoctorAsync(request.CliPath);
+                var doctorDispatcher = System.Windows.Application.Current.Dispatcher;
+                doctorDispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "doctor-result", output = doctorOutput, error = doctorErr })));
                 return;
             }
 
@@ -3131,6 +3197,10 @@ public partial class AgentToolWindowControl : UserControl
 
         await _agentClient.StopAsync();
         _agentClient.PendingResumeSessionId = newSessionId;
+        // Defensive: a fork requested via History but never sent (user did a
+        // ⎇ branch instead before typing) must not leak into this unrelated
+        // resume — branch already has its own new session id on disk (#12).
+        _agentClient.PendingForkSession = false;
 
         var json = JsonSerializer.Serialize(new { type = "branched", sessionId = newSessionId, messages = msgs });
         var dispatcher = System.Windows.Application.Current.Dispatcher;
@@ -3601,6 +3671,11 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("sessionId")]
         public string? SessionId { get; set; }
+
+        // resume-session: true → resume as a fork (--fork-session), leaving
+        // the original session untouched (#12).
+        [JsonPropertyName("fork")]
+        public bool Fork { get; set; }
 
         // Custom session title for rename-session (D4).
         [JsonPropertyName("title")]

@@ -398,6 +398,7 @@ sealed class ClaudeSession : IAsyncDisposable
     private readonly string _permissionMode;
     private readonly string? _workingDirectory;
     private readonly string? _resumeSessionId;
+    private readonly bool _forkSession;
     private readonly bool _autoResume;
     private readonly string? _pipeName;
     private readonly ClaudeSettings? _claudeSettings;
@@ -442,6 +443,7 @@ sealed class ClaudeSession : IAsyncDisposable
         _permissionMode = request.PermissionMode ?? "ask";
         _workingDirectory = request.WorkingDirectory;
         _resumeSessionId = request.ResumeSessionId;
+        _forkSession = request.ForkSession;
         _autoResume = request.AutoResume;
         _pipeName = pipeName;
         _claudeSettings = request.ClaudeSettings;
@@ -470,8 +472,11 @@ sealed class ClaudeSession : IAsyncDisposable
         return true;
     }
 
+    // ForkSession must be in the key: a live session resumed WITHOUT it would
+    // otherwise look identical (same ResumeSessionId) to a fork request and
+    // get reused, silently dropping --fork-session (#12).
     public static string MakeKey(ChatRequest r) =>
-        $"{r.Model}|{r.Effort}|{PermissionProfile(r.PermissionMode)}|{r.WorkingDirectory}|{r.ResumeSessionId}|{r.AutoResume}|{r.CliPath}|{SpawnSettingsFingerprint(r.ClaudeSettings)}";
+        $"{r.Model}|{r.Effort}|{PermissionProfile(r.PermissionMode)}|{r.WorkingDirectory}|{r.ResumeSessionId}|{r.ForkSession}|{r.AutoResume}|{r.CliPath}|{SpawnSettingsFingerprint(r.ClaudeSettings)}";
 
     // Settings claude only reads at startup (V7: attribution / cleanup /
     // auto-compact). Baking them into the key makes a toggle flip respawn the
@@ -667,6 +672,8 @@ The user's IDE selection (if any) is included in the conversation context and ma
         {
             psi.ArgumentList.Add("--resume");
             psi.ArgumentList.Add(_resumeSessionId);
+            if (_forkSession)
+                psi.ArgumentList.Add("--fork-session");
         }
         else if (_autoResume)
         {
