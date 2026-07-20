@@ -1535,7 +1535,10 @@ function decorateMessage(msgEl) {
 
 function branchFromMessage(idx) {
     if (!currentSessionId) return;
-    window.chrome.webview.postMessage({ type: "branch", msgIndex: idx });
+    // Send the session THIS transcript belongs to — the backend's live-agent
+    // session id goes stale after a History replay (rodada 12: ⎇ kept forking
+    // the last live conversation instead of the one on screen).
+    window.chrome.webview.postMessage({ type: "branch", msgIndex: idx, sessionId: currentSessionId });
 }
 
 function rewindFromMessage(idx) {
@@ -1546,7 +1549,8 @@ function rewindFromMessage(idx) {
     }
     // dry run first → preview stats → confirm → apply. The backend indexes into
     // the current session's JSONL, so send the ordinal relative to the base.
-    window.chrome.webview.postMessage({ type: "rewind", msgIndex: idx - _rewindBaseUserIdx, dryRun: true });
+    // sessionId guards against rewinding a replayed (not yet live) session.
+    window.chrome.webview.postMessage({ type: "rewind", msgIndex: idx - _rewindBaseUserIdx, dryRun: true, sessionId: currentSessionId });
 }
 
 function showRewindConfirm(idx, result) {
@@ -1570,7 +1574,7 @@ function showRewindConfirm(idx, result) {
     btns[0].addEventListener("click", () => {
         card.classList.add("question-answered");
         btns[0].disabled = true; btns[1].disabled = true;
-        window.chrome.webview.postMessage({ type: "rewind", msgIndex: idx, dryRun: false });
+        window.chrome.webview.postMessage({ type: "rewind", msgIndex: idx, dryRun: false, sessionId: currentSessionId });
     });
     btns[1].addEventListener("click", () => card.remove());
     messages.appendChild(card);
@@ -2373,6 +2377,9 @@ window.chrome.webview.addEventListener("message", event => {
         }
         flushPinnedDock();
         renderPresence("", ""); // safety: no waiting state can outlive the turn
+        // Queued permission requests die with the turn (their hooks are gone) —
+        // popping one later would show a modal nobody is listening to.
+        permissionQueue = [];
         setStreaming(false);
         return;
     }
@@ -2393,7 +2400,7 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "permission_request") {
-        openPermissionModal(event.data.tool || "", event.data.input || "", event.data.id || "", event.data.cwd || "");
+        queuePermissionRequest(event.data.tool || "", event.data.input || "", event.data.id || "", event.data.cwd || "");
         return;
     }
 
@@ -2487,6 +2494,7 @@ window.chrome.webview.addEventListener("message", event => {
         _turnUserIdx = 0;
         updateUsageSessionValues();
         _suppressNextAutoResume = true;
+        permissionQueue = [];
         return;
     }
 
@@ -2502,6 +2510,24 @@ window.chrome.webview.addEventListener("message", event => {
 
 let pendingPermissionToolId = null;
 let pendingPermissionToolName = null;
+// Parallel tool calls fire overlapping permission_requests; the modal is
+// single, and the second used to clobber the first — whose hook then blocked
+// claude until the 3-minute pipe timeout (rodada 12). FIFO: one modal at a
+// time, the rest wait; each answered/dismissed request pops the next.
+let permissionQueue = [];
+
+function queuePermissionRequest(tool, input, id, cwd) {
+    if (pendingPermissionToolId) {
+        permissionQueue.push({ tool, input, id, cwd });
+        // Mark the chip as pending right away so the wait is visible.
+        if (id) {
+            const chip = messages.querySelector(`.tool-chip[data-tool-id="${CSS.escape(id)}"]`);
+            if (chip) chip.classList.add("tool-pending");
+        }
+        return;
+    }
+    openPermissionModal(tool, input, id, cwd);
+}
 
 function openPermissionModal(tool, input, id, cwd) {
     pendingPermissionToolId = id;
@@ -2559,6 +2585,8 @@ function closePermissionModal() {
     }
     pendingPermissionToolId = null;
     pendingPermissionToolName = null;
+    const next = permissionQueue.shift();
+    if (next) openPermissionModal(next.tool, next.input, next.id, next.cwd);
 }
 
 function permissionAllow() {
@@ -4172,6 +4200,7 @@ function clearChat() {
     // User explicitly asked for a fresh chat — suppress --continue on the next
     // outbound message even if the "Auto-resume" setting is on.
     _suppressNextAutoResume = true;
+    permissionQueue = [];
 
     window.chrome.webview.postMessage({ type: "clear" });
 }
@@ -4192,10 +4221,24 @@ function renderBranchedMessages(newSessionId, msgs) {
     // A turn that opens with tools before any text gets a bare UNdecorated
     // host bubble: it maps to no JSONL text line, so it must not consume a
     // ⎇ ordinal (msgIndex counts DOM text bubbles 1:1 with visible JSONL
-    // lines). TodoWrite keeps the live behavior of ONE card per user turn:
-    // it pins to its first host bubble and updates in place (last call wins).
+    // lines). When the turn's first text line then arrives, the host's chips
+    // are folded into that bubble's top — live they shared one bubble
+    // (rodada 12, image_1 vs image_2); a tools-only turn keeps its bare host.
+    // TodoWrite keeps the live behavior of ONE card per user turn: it pins to
+    // its first host bubble and updates in place (last call wins).
     let hostBubble = null;
+    let hostSynthetic = false;
     let todoBubble = null;
+
+    // Consecutive assistant bubbles are one live turn split across JSONL text
+    // lines (1 bubble = 1 line keeps ⎇ ordinals exact) — tag the followers so
+    // CSS glues the run into a single visual block like the live stream
+    // bubble. DOM-based: after a host fold the removed host no longer counts.
+    const markContinuation = (msg) => {
+        const prev = msg.previousElementSibling;
+        if (prev && prev.classList.contains("message") && prev.classList.contains("assistant"))
+            msg.classList.add("msg-cont");
+    };
 
     const ensureHostBubble = () => {
         if (hostBubble) return hostBubble;
@@ -4205,7 +4248,9 @@ function renderBranchedMessages(newSessionId, msgs) {
         bubble.className = "bubble";
         msg.appendChild(bubble);
         messages.appendChild(msg);
+        markContinuation(msg);
         hostBubble = bubble;
+        hostSynthetic = true;
         return bubble;
     };
 
@@ -4213,6 +4258,7 @@ function renderBranchedMessages(newSessionId, msgs) {
         if (m.role === "user") {
             addMessage("user", m.text || "");
             hostBubble = null;
+            hostSynthetic = false;
             todoBubble = null;
         } else if (m.role === "assistant") {
             const msg = document.createElement("div");
@@ -4223,13 +4269,26 @@ function renderBranchedMessages(newSessionId, msgs) {
             messages.appendChild(msg);
             msg.appendChild(bubble);
             applyMarkdown(bubble, m.text || "");
+            if (hostSynthetic && hostBubble) {
+                // Turn opened with tools: fold the chips-only host into this
+                // text bubble, chips on top (their live streaming order).
+                const hostMsg = hostBubble.parentElement;
+                const anchor = bubble.firstChild;
+                while (hostBubble.firstChild) bubble.insertBefore(hostBubble.firstChild, anchor);
+                if (todoBubble === hostBubble) todoBubble = bubble;
+                if (hostMsg) hostMsg.remove();
+            }
+            markContinuation(msg);
             decorateMessage(msg);
             hostBubble = bubble;
+            hostSynthetic = false;
         } else if (m.role === "ask") {
             renderReplayAskCard(m.input, m.answers);
             // The card is a flow sibling — chips appended to the pre-ask
-            // bubble would land visually ABOVE it, so start a fresh host.
+            // bubble would land visually ABOVE it, so start a fresh host
+            // (and never fold across the card).
             hostBubble = null;
+            hostSynthetic = false;
         } else if (m.role === "tool") {
             if (m.name === "TodoWrite") {
                 if (!todoBubble) todoBubble = ensureHostBubble();

@@ -1028,6 +1028,9 @@ public partial class AgentToolWindowControl : UserControl
             {
                 OutputLog.Info("ui: clear");
                 await _agentClient.StopAsync();
+                // New chat — drop the dead session's id so the watcher, title,
+                // branch and rewind can't target it anymore (rodada 12).
+                _agentClient.ResetSession();
                 _sessionStart = DateTime.Now;
                 return;
             }
@@ -1352,13 +1355,13 @@ public partial class AgentToolWindowControl : UserControl
 
             if (request.Type == "branch")
             {
-                await HandleBranchAsync(request.MsgIndex);
+                await HandleBranchAsync(request.MsgIndex, request.SessionId);
                 return;
             }
 
             if (request.Type == "rewind")
             {
-                await HandleRewindAsync(request.MsgIndex, request.DryRun);
+                await HandleRewindAsync(request.MsgIndex, request.DryRun, request.SessionId);
                 return;
             }
 
@@ -3004,12 +3007,17 @@ public partial class AgentToolWindowControl : UserControl
         }
     }
 
-    private async Task HandleBranchAsync(int msgIndex)
+    private async Task HandleBranchAsync(int msgIndex, string? uiSessionId)
     {
-        var currentSessionId = _agentClient.CurrentSessionId;
+        // The UI sends the session its transcript is SHOWING. After a History
+        // replay the agent's CurrentSessionId still points at the last live
+        // session — branching that forked the wrong conversation, repeatedly
+        // (rodada 12, image_4). The UI id also makes ⎇ work on a replayed
+        // session before any message is sent (no live agent required).
+        var currentSessionId = !string.IsNullOrEmpty(uiSessionId) ? uiSessionId : _agentClient.CurrentSessionId;
         if (string.IsNullOrEmpty(currentSessionId))
         {
-            OutputLog.Warn("branch ignored: no current session id");
+            OutputLog.Warn("branch ignored: no session id");
             return;
         }
 
@@ -3132,7 +3140,7 @@ public partial class AgentToolWindowControl : UserControl
     // assistant turn produces multiple text entries. We collect the uuids of user
     // entries that carry text (real messages, not tool_result entries) and index
     // into them. dryRun previews the diff stats; otherwise files are reverted.
-    private async Task HandleRewindAsync(int msgIndex, bool dryRun)
+    private async Task HandleRewindAsync(int msgIndex, bool dryRun, string? uiSessionId)
     {
         void PostRewindError(string m)
         {
@@ -3143,6 +3151,17 @@ public partial class AgentToolWindowControl : UserControl
 
         var currentSessionId = _agentClient.CurrentSessionId;
         if (string.IsNullOrEmpty(currentSessionId)) { PostRewindError("No active session."); return; }
+
+        // Rewind runs through the live CLI on ITS session. When the transcript
+        // on screen is a History replay of another session, the ordinals below
+        // would index the wrong file and revert the wrong checkpoints
+        // (rodada 12) — refuse until a message reactivates the session.
+        if (!string.IsNullOrEmpty(uiSessionId) &&
+            !string.Equals(uiSessionId, currentSessionId, StringComparison.OrdinalIgnoreCase))
+        {
+            PostRewindError("This session isn't active yet — send a message first, then rewind.");
+            return;
+        }
 
         var claudeDir = ClaudePaths.ProjectsDir;
         var sourceFile = Directory.Exists(claudeDir)

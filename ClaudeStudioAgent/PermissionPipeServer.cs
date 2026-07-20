@@ -49,6 +49,18 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
         return false;
     }
 
+    // Deny every wait still blocking a hook (turn canceled). claude sits inside
+    // PreToolUse until the hook returns — disposing the session while it was
+    // blocked left the process ignoring stdin-close and the cancel wedged
+    // (rodada 12). Entries are removed by each handler's finally, not here.
+    public void FailPending(string reason)
+    {
+        foreach (var kvp in _pending)
+            kvp.Value.TrySetResult(new Decision(false, reason));
+        foreach (var kvp in _pendingDiag)
+            kvp.Value.TrySetResult("");
+    }
+
     public void AllowForSession(string toolName)
     {
         lock (_sessionAllowedLock) _sessionAllowed.Add(toolName);

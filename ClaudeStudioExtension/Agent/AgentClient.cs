@@ -79,7 +79,20 @@ public class AgentClient
     public async Task StartAsync()
     {
         if (_process != null)
-            return;
+        {
+            // A crashed/killed agent leaves its carcass here — early-returning
+            // would hand the caller dead streams (rodada 12). Sweep and respawn.
+            bool alive;
+            try { alive = !_process.HasExited; } catch { alive = false; }
+            if (alive) return;
+            OutputLog.Warn("agent process was dead — restarting");
+            try { _reader?.Dispose(); } catch { }
+            try { _writer?.Dispose(); } catch { }
+            try { _process.Dispose(); } catch { }
+            _process = null;
+            _writer = null;
+            _reader = null;
+        }
 
         var agentPath = GetAgentPath();
         OutputLog.Info($"starting agent: {agentPath}");
@@ -419,6 +432,19 @@ public class AgentClient
 
     private async Task AskStreamingCoreAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null)
     {
+        // A send can queue on the semaphore behind a stuck turn; by the time it
+        // runs here, a clear/stop may have nulled the streams (rodada 12: NRE at
+        // WriteLineAsync) or the agent may have died. The caller's StartAsync
+        // ran BEFORE the semaphore wait and can be stale — revalidate under it.
+        bool agentDown;
+        try { agentDown = _writer == null || _reader == null || _process == null || _process.HasExited; }
+        catch { agentDown = true; }
+        if (agentDown)
+        {
+            OutputLog.Info("agent not running at turn start — restarting");
+            await StartAsync();
+        }
+
         var resumeId = PendingResumeSessionId;
         PendingResumeSessionId = null;
         // Whether this turn carries the previous transcript forward (--resume /
@@ -592,6 +618,16 @@ public class AgentClient
         _watcherSessionId = sessionId;
         _jsonlWatcher.OnEvent = onTool;
         _jsonlWatcher.Start(cwd, sessionId);
+    }
+
+    // New-chat reset (rodada 12): without this a cleared chat kept the dead
+    // session's id — the JSONL watcher re-attached to the old file and title/
+    // branch/rewind kept targeting the previous session.
+    public void ResetSession()
+    {
+        CurrentSessionId = null;
+        PendingResumeSessionId = null;
+        LastTurnResumed = false;
     }
 
     public async Task StopAsync()

@@ -2106,6 +2106,17 @@ html.light-theme .model-divider::after { background: #d8d8d8; }
     border: 1px solid #3a3a3a;
 }
 
+/* History-replay continuation: consecutive assistant bubbles are ONE live
+   turn split across JSONL text lines (one bubble per line keeps the ⎇
+   ordinals exact). Glue the run into a single visual block — -6px cancels
+   the .messages flex gap so the borders touch (no chat background seam),
+   squared facing corners on the aligned (left) edge — and keep ⎇ only on
+   the first bubble of the group, matching the live one-bubble-per-turn UX. */
+.message.assistant.msg-cont { margin-top: -6px; }
+.message.assistant.msg-cont .bubble { border-top-left-radius: 4px; }
+.message.assistant:has(+ .message.assistant.msg-cont) .bubble { border-bottom-left-radius: 4px; }
+.message.assistant.msg-cont .msg-branch { display: none; }
+
 .assistant .bubble p { margin: 0 0 8px; }
 .assistant .bubble p:last-child { margin-bottom: 0; }
 .assistant .bubble h1, .assistant .bubble h2, .assistant .bubble h3 {

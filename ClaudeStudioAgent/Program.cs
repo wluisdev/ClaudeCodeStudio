@@ -148,6 +148,14 @@ var stdinReader = Task.Run(async () =>
 
             if (request.CancelTurn)
             {
+                // Unblock any hook still waiting on a permission decision FIRST:
+                // claude sits inside PreToolUse until it gets an answer, and
+                // disposing while it was blocked wedged this stdin loop — the
+                // second cancel was never read and no done was ever emitted
+                // (rodada 12). With the denies delivered, claude can wind down
+                // and the dispose below completes normally.
+                pipeServer?.FailPending("Turn canceled by user");
+
                 // Hard cancel: dispose the active session so SendMessageAsync's
                 // read loop in the main loop sees ObjectDisposedException, the
                 // catch block then EmitDone()s — extension's reader is freed
@@ -1410,7 +1418,10 @@ The user's IDE selection (if any) is included in the conversation context and ma
                     if (!_proc.WaitForExit(2000))
                     {
                         try { _proc.Kill(entireProcessTree: true); } catch { }
-                        try { _proc.WaitForExit(); } catch { }
+                        // Bounded wait: Kill can fail partially on shim trees
+                        // (chocolatey claude.exe → node), and an infinite wait
+                        // here wedged the stdin loop for good (rodada 12).
+                        try { _proc.WaitForExit(2000); } catch { }
                     }
                 }
             }
