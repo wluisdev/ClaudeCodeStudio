@@ -520,6 +520,12 @@ public class AgentClient
                 continue;
             }
 
+            if (chunk.Type == "warn")
+            {
+                OutputLog.Warn(chunk.Text);
+                continue;
+            }
+
             if (chunk.Type == "claude-pid")
             {
                 if (int.TryParse(chunk.Text, out var claudePid))

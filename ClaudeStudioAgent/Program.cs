@@ -691,10 +691,12 @@ The user's IDE selection (if any) is included in the conversation context and ma
 
         EmitTiming("claude spawned", sw.ElapsedMilliseconds);
 
-        // Which claude.exe actually launched — a stale install shadowing the
-        // expected one on PATH cost a whole validation round to diagnose
-        // (2026-07-16: chocolatey 2.1.144 vs ~/.local/bin 2.1.211).
-        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"claude exe: {psi.FileName}" }));
+        // Which claude.exe actually launched, and its version — a stale install
+        // shadowing the expected one on PATH cost a whole validation round to
+        // diagnose (2026-07-16: chocolatey 2.1.144 vs ~/.local/bin 2.1.211).
+        var claudeVersion = await GetClaudeVersionAsync(psi.FileName);
+        var exeLabel = claudeVersion != null ? $"{psi.FileName} ({claudeVersion})" : psi.FileName;
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"claude exe: {exeLabel}" }));
         Console.Out.Flush();
 
         // U4: hand the claude PID to the extension so it can watch the CLI's
@@ -1280,6 +1282,12 @@ The user's IDE selection (if any) is included in the conversation context and ma
         Console.Out.Flush();
     }
 
+    private static void EmitWarn(string text)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "warn", Text = text }));
+        Console.Out.Flush();
+    }
+
     private object BuildHooks()
     {
         var agentPath = Environment.ProcessPath
@@ -1380,19 +1388,35 @@ The user's IDE selection (if any) is included in the conversation context and ma
                 $"The configured CLI path was not found: {p} — fix or clear it in settings (Claude Code → CLI path).");
         }
 
+        // Native installer / `claude update` target. Checked before the PATH scan:
+        // a stale shim earlier on PATH (e.g. chocolatey) would otherwise shadow
+        // this with an older version (drift found 2026-07-19 — choco stuck at
+        // 2.1.205 while ~\.local\bin had already moved to 2.1.215).
+        var nativeInstall = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".local\bin\claude.exe");
+        var nativeExists = File.Exists(nativeInstall);
+
         var pathDirs = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
+        string? pathMatch = null;
         foreach (var dir in pathDirs)
         {
             var candidate = Path.Combine(dir, "claude.exe");
-            if (File.Exists(candidate))
-                return candidate;
+            if (File.Exists(candidate)) { pathMatch = candidate; break; }
         }
+
+        if (nativeExists)
+        {
+            if (pathMatch != null && !string.Equals(pathMatch, nativeInstall, StringComparison.OrdinalIgnoreCase))
+                EmitWarn($"another claude.exe found on PATH at {pathMatch} — using {nativeInstall} instead");
+            return nativeInstall;
+        }
+
+        if (pathMatch != null)
+            return pathMatch;
 
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var fallbacks = new[]
         {
-            // Native installer / `claude update` target — often missing from PATH.
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".local\bin\claude.exe"),
             Path.Combine(appData, @"npm\claude.exe"),
             Path.Combine(appData, @"npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"nodejs\claude.exe"),
@@ -1404,6 +1428,35 @@ The user's IDE selection (if any) is included in the conversation context and ma
 
         throw new ClaudeNotFoundException(
             "claude.exe was not found on your PATH or any standard install location.");
+    }
+
+    private static async Task<string?> GetClaudeVersionAsync(string exePath)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = exePath,
+                ArgumentList = { "--version" },
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = Process.Start(psi);
+            if (proc == null) return null;
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            var output = await proc.StandardOutput.ReadToEndAsync(cts.Token);
+            await proc.WaitForExitAsync(cts.Token);
+            return string.IsNullOrWhiteSpace(output) ? null : output.Trim();
+        }
+        catch
+        {
+            // Timeout, missing exe, or unexpected --version behavior — the
+            // caller falls back to an unversioned log line, not fatal.
+            return null;
+        }
     }
 
     public async ValueTask DisposeAsync()
