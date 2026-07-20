@@ -18,6 +18,9 @@ public class ChatRequest
     // client-side Usage.CostLimits estimate — this one kills the claude.exe
     // process when the CLI's own tracked spend crosses it.
     public decimal? MaxBudgetUsd { get; set; }
+    // #14: --fallback-model — automatic retry on this model when the primary
+    // is overloaded or unavailable.
+    public string? FallbackModel { get; set; }
     public PermissionResponse? PermissionResponse { get; set; }
 
     // Answer to an AskUserQuestion control_request. The agent correlates the

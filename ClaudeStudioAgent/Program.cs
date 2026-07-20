@@ -405,6 +405,11 @@ sealed class ClaudeSession : IAsyncDisposable
     private readonly string? _cliPath;
     private readonly string? _sessionName;
     private readonly decimal? _maxBudgetUsd;
+    private readonly string? _fallbackModel;
+
+    // #14: tracks the actually-used model across turns so a --fallback-model
+    // engagement (or recovery) only signals the UI once, on the real change.
+    private string? _lastActiveModel;
 
     // Set once by StartAsync's ProbeClaudeAsync call; read by the perf-log
     // writer (#22b) so each request line records which CLI build produced it.
@@ -450,6 +455,8 @@ sealed class ClaudeSession : IAsyncDisposable
         _claudeSettings = request.ClaudeSettings;
         _cliPath = request.CliPath;
         _maxBudgetUsd = request.MaxBudgetUsd;
+        _fallbackModel = request.FallbackModel;
+        _lastActiveModel = _model;
         // Spawn-time hint only — deliberately NOT in MakeKey (a title change
         // alone must not force a respawn; it re-persists at the next natural one).
         _sessionName = request.SessionName;
@@ -478,7 +485,7 @@ sealed class ClaudeSession : IAsyncDisposable
     // otherwise look identical (same ResumeSessionId) to a fork request and
     // get reused, silently dropping --fork-session (#12).
     public static string MakeKey(ChatRequest r) =>
-        $"{r.Model}|{r.Effort}|{PermissionProfile(r.PermissionMode)}|{r.WorkingDirectory}|{r.ResumeSessionId}|{r.ForkSession}|{r.AutoResume}|{r.CliPath}|{r.MaxBudgetUsd}|{SpawnSettingsFingerprint(r.ClaudeSettings)}";
+        $"{r.Model}|{r.Effort}|{PermissionProfile(r.PermissionMode)}|{r.WorkingDirectory}|{r.ResumeSessionId}|{r.ForkSession}|{r.AutoResume}|{r.CliPath}|{r.MaxBudgetUsd}|{r.FallbackModel}|{SpawnSettingsFingerprint(r.ClaudeSettings)}";
 
     // Settings claude only reads at startup (V7: attribution / cleanup /
     // auto-compact). Baking them into the key makes a toggle flip respawn the
@@ -665,6 +672,14 @@ The user's IDE selection (if any) is included in the conversation context and ma
         {
             psi.ArgumentList.Add("--effort");
             psi.ArgumentList.Add(_effort);
+        }
+
+        // #14: probed 2026-07-20 — no --print restriction in --help (unlike
+        // #11/#13), spawns and completes cleanly outside it.
+        if (!string.IsNullOrEmpty(_fallbackModel))
+        {
+            psi.ArgumentList.Add("--fallback-model");
+            psi.ArgumentList.Add(_fallbackModel);
         }
 
         // #11: probed 2026-07-20 — works outside --print despite the --help
@@ -943,8 +958,24 @@ The user's IDE selection (if any) is included in the conversation context and ma
                 // single complete assistant message with text content and no preceding
                 // stream_event deltas. Detect by model == "<synthetic>" and emit the
                 // text directly as a chunk.
-                bool isSynthetic = msgObj.TryGetProperty("model", out var modelEl)
-                    && modelEl.GetString() == "<synthetic>";
+                bool hasModel = msgObj.TryGetProperty("model", out var modelEl);
+                bool isSynthetic = hasModel && modelEl.GetString() == "<synthetic>";
+
+                // #14: --fallback-model can silently swap in a different model when
+                // the primary is overloaded. _lastActiveModel starts at the
+                // requested model, so this only fires on an actual deviation
+                // (engaged) or a later match against the pre-deviation value
+                // (recovered) — never on the ordinary, unchanged case.
+                if (hasModel && !isSynthetic)
+                {
+                    var actualModel = modelEl.GetString();
+                    if (!string.IsNullOrEmpty(actualModel) && actualModel != _lastActiveModel)
+                    {
+                        _lastActiveModel = actualModel;
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "model-used", Text = actualModel }));
+                        Console.Out.Flush();
+                    }
+                }
 
                 if (msgObj.TryGetProperty("usage", out var usageLive))
                     EmitTokensLive(usageLive);

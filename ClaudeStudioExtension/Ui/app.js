@@ -1208,30 +1208,20 @@ modelSelect.addEventListener("change", updateCaption);
 window.addEventListener("DOMContentLoaded", updateCaption);
 updateCaption();
 
-// Drops a marker into the transcript when the model changes, so it's clear
-// which model produced the messages above vs below the line. No-op when nothing
-// actually changed, or before the conversation has started (a divider above an
-// empty chat is just noise). Consecutive switches with no message in between
-// collapse into one divider that's updated in place.
-function noteModelSwitch() {
-    const newId = modelSelect.value;
-    if (newId === activeModelId) return;
-    activeModelId = newId;
-    localStorage.setItem("chatModel", newId);
-
-    // Nothing above the line to attribute to the old model yet — skip.
+// Drops (or updates in place, if the previous message is already a divider —
+// consecutive changes with no message in between collapse into one) a marker
+// into the transcript so it's clear which model produced the messages above
+// vs below the line. No-op before the conversation has started (a divider
+// above an empty chat is just noise). Shared by manual picks (noteModelSwitch)
+// and automatic --fallback-model engagement/recovery (noteModelFallback, #14).
+function insertOrUpdateModelDivider(text) {
     if (!messages.querySelector(".message")) return;
-
-    const label = modelSelect.options[modelSelect.selectedIndex]?.text || newId;
-    const text = `🤖 Switched to ${label}`;
-
     const last = messages.lastElementChild;
     if (last && last.classList.contains("model-divider")) {
         last.querySelector(".model-divider-label").textContent = text;
         autoScroll();
         return;
     }
-
     const div = document.createElement("div");
     div.className = "model-divider";
     div.innerHTML = `<span class="model-divider-label"></span>`;
@@ -1239,7 +1229,42 @@ function noteModelSwitch() {
     messages.appendChild(div);
     autoScroll();
 }
+
+function noteModelSwitch() {
+    const newId = modelSelect.value;
+    if (newId === activeModelId) return;
+    activeModelId = newId;
+    localStorage.setItem("chatModel", newId);
+    // A manual pick resets what #14 considers "the primary" — otherwise a
+    // fallback recovery notice could fire against the old selection.
+    _lastReportedActiveModel = newId;
+
+    const label = modelSelect.options[modelSelect.selectedIndex]?.text || newId;
+    insertOrUpdateModelDivider(`🤖 Switched to ${label}`);
+}
 modelSelect.addEventListener("change", noteModelSwitch);
+
+// #14: assistant.message.model can silently differ from what was requested
+// when --fallback-model engages. Server-authoritative signal (Program.cs),
+// so this only reacts to it — it never decides on its own.
+let _lastReportedActiveModel = null;
+
+function noteModelFallback(actualModelId) {
+    if (!actualModelId || actualModelId === _lastReportedActiveModel) return;
+    const requestedId = modelSelect.value;
+    const wasFallback = _lastReportedActiveModel && _lastReportedActiveModel !== requestedId;
+    _lastReportedActiveModel = actualModelId;
+    // Only the recovery case is worth a divider when we land back on the
+    // primary — landing there for the first time (never having deviated) is
+    // just the ordinary case and would be noise.
+    if (actualModelId === requestedId && !wasFallback) return;
+
+    const opt = [...modelSelect.options].find(o => o.value === actualModelId);
+    const label = opt ? opt.text : actualModelId;
+    insertOrUpdateModelDivider(actualModelId === requestedId
+        ? `🔀 Back to ${label}`
+        : `🔀 Fell back to ${label} (primary unavailable)`);
+}
 
 // ── Model picker (titlebar) ──────────────────────────────────
 // Effort-style button + popup replacing the OS-rendered <select> dropdown so
@@ -2132,6 +2157,7 @@ function sendMessage() {
             workingDirectory: getWorkingDirOverride() || null,
             cliPath: getCliPath(),
             maxBudgetUsd: getMaxBudget(),
+            fallbackModel: getFallbackModel(),
             // After clearChat / reset-chat, the next send must NOT resume. Otherwise
             // claude.exe gets --continue and reuses the previous session instead of
             // creating a fresh one (turn count keeps going up in the old row).
@@ -2466,6 +2492,11 @@ window.chrome.webview.addEventListener("message", event => {
                 showToast(`⚠ Rate limit: ${status}${overage}${resetStr ? " · resets " + resetStr : ""}`);
             }
         } catch (e) { /* unexpected shape — skip rather than show garbage */ }
+        return;
+    }
+
+    if (event.data.type === "model-used") {
+        noteModelFallback(event.data.text || "");
         return;
     }
 
@@ -3036,6 +3067,18 @@ function clearCliPath() {
     cliPathInput.focus();
 }
 
+// #14: automatic --fallback-model when the primary model is overloaded.
+const fallbackModelSelect = document.getElementById("fallback-model-select");
+fallbackModelSelect.value = localStorage.getItem("fallbackModel") || "";
+
+function getFallbackModel() {
+    return localStorage.getItem("fallbackModel") || null;
+}
+
+function setFallbackModel(value) {
+    localStorage.setItem("fallbackModel", value);
+}
+
 // #11: hard, CLI-enforced budget cap (--max-budget-usd) — distinct from the
 // Cost limits section above, which is a client-side estimate/warning only.
 const maxBudgetInput = document.getElementById("max-budget-input");
@@ -3160,7 +3203,7 @@ const SETTINGS_KEYS = [
     "showTokens", "showTokenEstimate", "timingMode", "timeUnit", "compactLayout",
     "composerFontSize", "composerTextareaHeight",
     // Claude Code
-    "coAuthoredBy", "autoCompact", "cleanupPeriodDays", "permissionRules", "claudeCliPath",
+    "coAuthoredBy", "autoCompact", "cleanupPeriodDays", "permissionRules", "claudeCliPath", "fallbackModel",
     // Workspace
     "workingDirOverrides", "workingDirectory", "showCwdbar", "statusLineCommand",
     "displayName", "accountInfoSource",
@@ -4301,6 +4344,7 @@ function clearChat() {
     currentSessionId = null;
     _rewindBaseUserIdx = 0;
     _turnUserIdx = 0;
+    _lastReportedActiveModel = modelSelect.value; // #14: fresh chat, fresh fallback tracking
     updateUsageSessionValues();
     // User explicitly asked for a fresh chat — suppress --continue on the next
     // outbound message even if the "Auto-resume" setting is on.

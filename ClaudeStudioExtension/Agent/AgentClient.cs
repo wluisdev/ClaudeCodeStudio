@@ -418,13 +418,13 @@ public class AgentClient
     // (claude is appending to the same file mid-turn).
     public bool IsStreaming { get; private set; }
 
-    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null, decimal? maxBudgetUsd = null)
+    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null, decimal? maxBudgetUsd = null, string? fallbackModel = null)
     {
         await _streamingSemaphore.WaitAsync();
         IsStreaming = true;
         try
         {
-            await AskStreamingCoreAsync(message, model, effort, permissionMode, onChunk, onTiming, onTokens, workingDirectory, autoResume, onSession, onTool, onPermissionRequest, onDiagnosticsRequest, onThinking, maxBudgetUsd);
+            await AskStreamingCoreAsync(message, model, effort, permissionMode, onChunk, onTiming, onTokens, workingDirectory, autoResume, onSession, onTool, onPermissionRequest, onDiagnosticsRequest, onThinking, maxBudgetUsd, fallbackModel);
         }
         finally
         {
@@ -433,7 +433,7 @@ public class AgentClient
         }
     }
 
-    private async Task AskStreamingCoreAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null, decimal? maxBudgetUsd = null)
+    private async Task AskStreamingCoreAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null, decimal? maxBudgetUsd = null, string? fallbackModel = null)
     {
         // A send can queue on the semaphore behind a stuck turn; by the time it
         // runs here, a clear/stop may have nulled the streams (rodada 12: NRE at
@@ -479,6 +479,7 @@ public class AgentClient
             ClaudeSettings = ClaudeSettings,
             CliPath = CliPath,
             MaxBudgetUsd = maxBudgetUsd,
+            FallbackModel = fallbackModel,
             // U2: when resuming a session whose custom title we know, pass it
             // along so the agent spawns claude with --name — the CLI re-appends
             // its native custom-title line and the terminal picker stays in
@@ -596,6 +597,14 @@ public class AgentClient
             if (chunk.Type == "rate-limit")
             {
                 onTool?.Invoke("rate-limit", "", null, chunk.Text, null);
+                continue;
+            }
+
+            // #14: --fallback-model engagement/recovery signal — same onTool
+            // piggyback as user-ack/rate-limit above.
+            if (chunk.Type == "model-used")
+            {
+                onTool?.Invoke("model-used", "", null, chunk.Text, null);
                 continue;
             }
 

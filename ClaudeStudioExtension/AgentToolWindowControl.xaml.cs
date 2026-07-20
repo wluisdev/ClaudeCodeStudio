@@ -1710,7 +1710,8 @@ public partial class AgentToolWindowControl : UserControl
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "permission_request", tool, input, id, cwd }))),
                 onDiagnosticsRequest: (filePath, requestId) => _ = HandleDiagnosticsRequestAsync(filePath, requestId),
-                maxBudgetUsd: request.MaxBudgetUsd);
+                maxBudgetUsd: request.MaxBudgetUsd,
+                fallbackModel: string.IsNullOrWhiteSpace(request.FallbackModel) ? null : request.FallbackModel.Trim());
 
             VsStatusBar.Clear();
 
@@ -3703,6 +3704,10 @@ public partial class AgentToolWindowControl : UserControl
         // #11: hard CLI-enforced budget cap for this send (--max-budget-usd).
         [JsonPropertyName("maxBudgetUsd")]
         public decimal? MaxBudgetUsd { get; set; }
+
+        // #14: automatic --fallback-model when the primary is overloaded.
+        [JsonPropertyName("fallbackModel")]
+        public string? FallbackModel { get; set; }
 
         [JsonPropertyName("autoResume")]
         public bool AutoResume { get; set; }
