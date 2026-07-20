@@ -651,6 +651,14 @@ The user's IDE selection (if any) is included in the conversation context and ma
             psi.ArgumentList.Add(_effort);
         }
 
+        // Pre-generate the id for a brand-new session (not resume/continue,
+        // where the id is already fixed by claude). This lets the extension's
+        // JSONL watcher attach at offset 0 right after spawn instead of
+        // waiting for `system/init` to reveal claude's own generated id — the
+        // race that window left open fed the branch/rewind bugs of rounds
+        // 11-14. The `sid != SessionId` guard at init below stays as a
+        // safety net in case claude ever rejects the pre-set id.
+        string? pregeneratedSessionId = null;
         if (_resumeSessionId != null)
         {
             psi.ArgumentList.Add("--resume");
@@ -660,9 +668,22 @@ The user's IDE selection (if any) is included in the conversation context and ma
         {
             psi.ArgumentList.Add("--continue");
         }
+        else
+        {
+            pregeneratedSessionId = Guid.NewGuid().ToString();
+            psi.ArgumentList.Add("--session-id");
+            psi.ArgumentList.Add(pregeneratedSessionId);
+        }
 
         _proc = Process.Start(psi)
             ?? throw new Exception("Process.Start returned null");
+
+        if (pregeneratedSessionId != null)
+        {
+            SessionId = pregeneratedSessionId;
+            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "session", Text = pregeneratedSessionId }));
+            Console.Out.Flush();
+        }
 
         // Force UTF-8 without BOM on stdin. .NET 10's default is already UTF-8 no BOM,
         // but be explicit so this never regresses (the PoC hit a BOM bug on PS 5.1).
