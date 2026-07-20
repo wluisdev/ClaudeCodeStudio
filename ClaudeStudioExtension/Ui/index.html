@@ -304,6 +304,17 @@
                                 <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
                             </select>
                         </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                Subagent detail
+                                <span class="info-icon" title="How much of a subagent's (Task/Agent tool) work to show live under its chip while it runs. Off: just the chip. Simple: a one-line status. Full: thinking, text, and its own tool calls, nested.">ⓘ</span>
+                            </span>
+                            <select id="subagent-detail-select" class="settings-select" onchange="setSubagentDetail(this.value)">
+                                <option value="off">Off</option>
+                                <option value="simple">Simple</option>
+                                <option value="full">Full</option>
+                            </select>
+                        </div>
                         <div class="cmd-divider"></div>
                         <div class="cmd-section">Workspace</div>
                         <div class="settings-row">

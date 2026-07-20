@@ -2500,6 +2500,13 @@ window.chrome.webview.addEventListener("message", event => {
         return;
     }
 
+    if (event.data.type === "subagent-thinking" || event.data.type === "subagent-text" ||
+        event.data.type === "subagent-tool_use" || event.data.type === "subagent-tool_result" ||
+        event.data.type === "subagent-tool_error") {
+        renderSubagentEvent(event.data);
+        return;
+    }
+
     if (event.data.type === "budget-exceeded") {
         showToast(`💸 ${event.data.detail || "Max budget reached"}`);
         return;
@@ -3079,6 +3086,19 @@ function setFallbackModel(value) {
     localStorage.setItem("fallbackModel", value);
 }
 
+// #13: --forward-subagent-text is always on in the spawn; this only decides
+// how much of it to render (purely client-side, no respawn needed to change).
+const subagentDetailSelect = document.getElementById("subagent-detail-select");
+subagentDetailSelect.value = localStorage.getItem("subagentDetail") || "simple";
+
+function getSubagentDetail() {
+    return localStorage.getItem("subagentDetail") || "simple";
+}
+
+function setSubagentDetail(value) {
+    localStorage.setItem("subagentDetail", value);
+}
+
 // #11: hard, CLI-enforced budget cap (--max-budget-usd) — distinct from the
 // Cost limits section above, which is a client-side estimate/warning only.
 const maxBudgetInput = document.getElementById("max-budget-input");
@@ -3203,7 +3223,7 @@ const SETTINGS_KEYS = [
     "showTokens", "showTokenEstimate", "timingMode", "timeUnit", "compactLayout",
     "composerFontSize", "composerTextareaHeight",
     // Claude Code
-    "coAuthoredBy", "autoCompact", "cleanupPeriodDays", "permissionRules", "claudeCliPath", "fallbackModel",
+    "coAuthoredBy", "autoCompact", "cleanupPeriodDays", "permissionRules", "claudeCliPath", "fallbackModel", "subagentDetail",
     // Workspace
     "workingDirOverrides", "workingDirectory", "showCwdbar", "statusLineCommand",
     "displayName", "accountInfoSource",
@@ -3521,6 +3541,14 @@ function summarizeToolInput(name, inputJson) {
     // generic first-key fallback (which would just print "skill").
     if (name === "Skill" && input.skill) {
         const s = "/" + String(input.skill).replace(/^\//, "") + (input.args ? " " + String(input.args) : "");
+        return s.length > 80 ? s.slice(0, 79) + "…" : s;
+    }
+    // #13: subagent launchers (Agent/Task tool) key off subagent_type being
+    // present rather than a hardcoded tool name — more robust if it's ever
+    // renamed, and this environment already has a *different*, unrelated
+    // "Task" tool (TaskCreate/TaskGet/...) that this must not match.
+    if (input.subagent_type) {
+        const s = String(input.subagent_type) + (input.description ? ": " + input.description : "");
         return s.length > 80 ? s.slice(0, 79) + "…" : s;
     }
     const arg = input.file_path || input.path || input.command || input.pattern || input.url || input.notebook_path || input.query;
@@ -3963,6 +3991,111 @@ function appendToolEvent(kind, name, inputJson, text, id) {
     autoScroll();
 }
 
+// ── Subagent live trace (#13) ────────────────────────────────
+// Program.cs always forwards --forward-subagent-text data; getSubagentDetail()
+// (off/simple/full) purely decides how much of it gets rendered here.
+const subagentTraces = new Map(); // parentToolId -> { el, toolChips: Map<subToolId, chipEl> }
+
+function getOrCreateSubagentTrace(parentId, subagentType, taskDescription) {
+    const existing = subagentTraces.get(parentId);
+    if (existing && document.body.contains(existing.el)) return existing;
+
+    // The parent Task/Agent tool_use chip is rendered first (it's what
+    // launches the subagent) — if it's not in the DOM yet, there's nowhere
+    // to anchor the trace.
+    const parentChip = messages.querySelector(`.tool-chip[data-tool-id="${CSS.escape(parentId)}"]`);
+    if (!parentChip) return null;
+
+    const el = document.createElement("div");
+    el.className = "subagent-trace";
+    const header = document.createElement("div");
+    header.className = "subagent-header";
+    header.textContent = "🤖 " + (subagentType || "subagent") + (taskDescription ? ": " + taskDescription : "");
+    el.appendChild(header);
+    parentChip.insertAdjacentElement("afterend", el);
+
+    const entry = { el, toolChips: new Map() };
+    subagentTraces.set(parentId, entry);
+    return entry;
+}
+
+function renderSubagentEvent(evt) {
+    const level = getSubagentDetail();
+    if (level === "off" || !evt.parentId) return;
+
+    const entry = getOrCreateSubagentTrace(evt.parentId, evt.subagentType, evt.taskDescription);
+    if (!entry) return;
+
+    if (level === "simple") {
+        // Only the narration text is worth a glance in simple mode — thinking
+        // and tool calls stay silent, and the status line replaces itself
+        // rather than growing into a second transcript.
+        if (evt.type !== "subagent-text" || !evt.text) return;
+        let status = entry.el.querySelector(".subagent-status");
+        if (!status) {
+            status = document.createElement("div");
+            status.className = "subagent-status";
+            entry.el.appendChild(status);
+        }
+        const oneLine = evt.text.split(/\r?\n/)[0];
+        status.textContent = oneLine.length > 160 ? oneLine.slice(0, 160) + "…" : oneLine;
+        autoScroll();
+        return;
+    }
+
+    // level === "full"
+    if (evt.type === "subagent-thinking" && evt.text) {
+        const toggle = document.createElement("div");
+        toggle.className = "subagent-thinking-toggle";
+        toggle.textContent = "✳ Thought ▸";
+        const body = document.createElement("div");
+        body.className = "subagent-thinking-body";
+        body.textContent = evt.text;
+        toggle.addEventListener("click", () => {
+            const expanded = toggle.classList.toggle("expanded");
+            toggle.textContent = expanded ? "✳ Thought ▾" : "✳ Thought ▸";
+        });
+        entry.el.appendChild(toggle);
+        entry.el.appendChild(body);
+    } else if (evt.type === "subagent-text" && evt.text) {
+        const p = document.createElement("div");
+        p.className = "subagent-text";
+        p.textContent = evt.text;
+        entry.el.appendChild(p);
+    } else if (evt.type === "subagent-tool_use") {
+        const chip = document.createElement("div");
+        chip.className = "tool-chip";
+        const dot = document.createElement("span");
+        dot.className = "tool-dot";
+        dot.textContent = "●";
+        const nameEl = document.createElement("span");
+        nameEl.className = "tool-name";
+        nameEl.textContent = evt.tool || "tool";
+        chip.appendChild(dot);
+        chip.appendChild(nameEl);
+        const arg = summarizeToolInput(evt.tool || "", evt.input);
+        if (arg) {
+            const argEl = document.createElement("span");
+            argEl.className = "tool-arg";
+            argEl.textContent = `(${arg})`;
+            chip.appendChild(argEl);
+        }
+        entry.el.appendChild(chip);
+        if (evt.id) entry.toolChips.set(evt.id, chip);
+    } else if (evt.type === "subagent-tool_result" || evt.type === "subagent-tool_error") {
+        const chip = evt.id ? entry.toolChips.get(evt.id) : null;
+        if (chip && evt.text && evt.text.trim()) {
+            if (evt.type === "subagent-tool_error") chip.classList.add("tool-error");
+            const firstLine = evt.text.split(/\r?\n/)[0];
+            const summary = document.createElement("div");
+            summary.className = "tool-summary";
+            summary.textContent = "↳ " + (firstLine.length > 160 ? firstLine.slice(0, 160) + "…" : firstLine);
+            chip.appendChild(summary);
+        }
+    }
+    autoScroll();
+}
+
 // Renders (or updates in place) the TodoWrite task list. One card per bubble:
 // each TodoWrite call carries the FULL current list, so the latest call simply
 // replaces the card's contents — the reader sees a live checklist.
@@ -4345,6 +4478,7 @@ function clearChat() {
     _rewindBaseUserIdx = 0;
     _turnUserIdx = 0;
     _lastReportedActiveModel = modelSelect.value; // #14: fresh chat, fresh fallback tracking
+    subagentTraces.clear(); // #13: old entries would point at now-removed DOM nodes
     updateUsageSessionValues();
     // User explicitly asked for a fresh chat — suppress --continue on the next
     // outbound message even if the "Auto-resume" setting is on.

@@ -2374,6 +2374,53 @@ html.light-theme .assistant .bubble .md-table tbody tr:nth-child(even) { backgro
 }
 .tool-chip.tool-error .tool-dot,
 .tool-chip.tool-error .tool-name { color: #d05050; }
+
+/* #13: subagent live trace, nested under the Task/Agent tool_use chip that
+   launched it. Level (off/simple/full) is a client-side setting — this CSS
+   covers both; "simple" only ever populates .subagent-status. */
+.subagent-trace {
+    margin: 2px 0 4px 16px;
+    padding: 2px 0 2px 8px;
+    border-left: 2px solid rgba(128, 128, 128, 0.25);
+}
+.subagent-header {
+    font-size: 10.5px;
+    color: var(--text-dim, #888);
+}
+.subagent-status {
+    font-size: 11px;
+    color: var(--text-dim, #888);
+    font-style: italic;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.subagent-text {
+    font-size: 11.5px;
+    color: #ccc;
+    margin: 3px 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.subagent-thinking-toggle {
+    font-size: 10.5px;
+    color: #777;
+    cursor: pointer;
+    user-select: none;
+    margin: 2px 0;
+}
+.subagent-thinking-toggle:hover { color: #999; }
+.subagent-thinking-body {
+    display: none;
+    font-size: 10.5px;
+    color: #888;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 2px 0 2px 10px;
+}
+.subagent-thinking-toggle.expanded + .subagent-thinking-body { display: block; }
+.subagent-trace .tool-chip { font-size: 10px; opacity: 0.85; margin: 2px 0; }
 .tool-chip.tool-chip-diffable {
     cursor: pointer;
     user-select: none;

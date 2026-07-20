@@ -576,6 +576,14 @@ The user's IDE selection (if any) is included in the conversation context and ma
         // --append-system-prompt (a different flag), which the exclusion
         // doesn't skip.
         psi.ArgumentList.Add("--exclude-dynamic-system-prompt-sections");
+        // #13: probed 2026-07-20 — the --help text says "only works with
+        // --print", but it works fine here (3rd flag with that caveat that
+        // turned out fine outside -p, after --session-id and --max-budget-usd).
+        // Forwards a subagent's thinking/text AND its own tool_use/tool_result
+        // calls, tagged with parent_tool_use_id/subagent_type/task_description.
+        // Always on — how much of it to actually render is a client-side
+        // setting (app.js), not a spawn-time choice.
+        psi.ArgumentList.Add("--forward-subagent-text");
         psi.ArgumentList.Add("--append-system-prompt");
         psi.ArgumentList.Add(VsContextPrompt);
         psi.ArgumentList.Add("--model");
@@ -964,6 +972,20 @@ The user's IDE selection (if any) is included in the conversation context and ma
             {
                 var msgObj = evt.GetProperty("message");
 
+                // #13: a subagent (Task/Agent) message — parent_tool_use_id is only
+                // set on these, never on the main conversation's own assistant
+                // messages. Routed entirely separately and never falls through to
+                // the normal handling below (which would otherwise double-count a
+                // subagent's own tool_use as if the main conversation called it
+                // directly, and would corrupt #14's fallback-model tracking with
+                // whatever model the subagent happened to run on).
+                if (evt.TryGetProperty("parent_tool_use_id", out var parentIdProp) &&
+                    parentIdProp.ValueKind == JsonValueKind.String)
+                {
+                    EmitSubagentAssistantEvent(parentIdProp.GetString() ?? "", evt, msgObj);
+                    continue;
+                }
+
                 // Synthetic responses (slash commands like /cost, /context) come as a
                 // single complete assistant message with text content and no preceding
                 // stream_event deltas. Detect by model == "<synthetic>" and emit the
@@ -1111,6 +1133,40 @@ The user's IDE selection (if any) is included in the conversation context and ma
                     continue;
                 }
 
+                // #13: a subagent's own tool_result, tagged the same way its
+                // tool_use was (see the "assistant" branch above).
+                if (evt.TryGetProperty("parent_tool_use_id", out var userParentIdProp) &&
+                    userParentIdProp.ValueKind == JsonValueKind.String)
+                {
+                    var subParentId = userParentIdProp.GetString() ?? "";
+                    var subagentType = evt.TryGetProperty("subagent_type", out var stEl2) ? stEl2.GetString() : null;
+                    var taskDescription = evt.TryGetProperty("task_description", out var tdEl2) ? tdEl2.GetString() : null;
+
+                    if (evt.TryGetProperty("message", out var subUserMsg) &&
+                        subUserMsg.TryGetProperty("content", out var subUserContent) &&
+                        subUserContent.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in subUserContent.EnumerateArray())
+                        {
+                            if (!item.TryGetProperty("type", out var itemType) || itemType.GetString() != "tool_result") continue;
+
+                            SummarizeToolResultItem(item, out var subId, out var subSummary, out var subIsError);
+
+                            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+                            {
+                                Type = subIsError ? "subagent-tool_error" : "subagent-tool_result",
+                                Text = subSummary ?? "",
+                                ToolId = subId,
+                                ParentToolId = subParentId,
+                                SubagentType = subagentType,
+                                TaskDescription = taskDescription
+                            }));
+                            Console.Out.Flush();
+                        }
+                    }
+                    continue;
+                }
+
                 // tool_result content emitted by claude when a tool finished
                 if (!evt.TryGetProperty("message", out var userMsgObj)) continue;
                 if (!userMsgObj.TryGetProperty("content", out var userContent)) continue;
@@ -1121,35 +1177,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
                     if (!item.TryGetProperty("type", out var itemType)) continue;
                     if (itemType.GetString() != "tool_result") continue;
 
-                    var id = item.TryGetProperty("tool_use_id", out var idProp) ? idProp.GetString() : null;
-                    string? summary = null;
-
-                    if (item.TryGetProperty("content", out var contentProp))
-                    {
-                        if (contentProp.ValueKind == JsonValueKind.String)
-                        {
-                            summary = contentProp.GetString();
-                        }
-                        else if (contentProp.ValueKind == JsonValueKind.Array)
-                        {
-                            var sb = new StringBuilder();
-                            foreach (var c in contentProp.EnumerateArray())
-                            {
-                                if (c.TryGetProperty("type", out var ct) && ct.GetString() == "text" &&
-                                    c.TryGetProperty("text", out var tt))
-                                {
-                                    if (sb.Length > 0) sb.Append('\n');
-                                    sb.Append(tt.GetString());
-                                }
-                            }
-                            summary = sb.ToString();
-                        }
-                    }
-
-                    if (summary != null && summary.Length > 240)
-                        summary = summary.Substring(0, 237) + "...";
-
-                    bool isError = item.TryGetProperty("is_error", out var errProp) && errProp.GetBoolean();
+                    SummarizeToolResultItem(item, out var id, out var summary, out var isError);
 
                     Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
                     {
@@ -1488,6 +1516,108 @@ The user's IDE selection (if any) is included in the conversation context and ma
     {
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = text }));
         Console.Out.Flush();
+    }
+
+    // #13: a subagent's content array can carry thinking/text/tool_use blocks
+    // (never tool_result — that arrives as its own "user"-type event, handled
+    // where the top-level tool_result parsing lives). Mirrors the shape of the
+    // main-conversation "assistant" handling above it, tagged so the UI can
+    // route it to the right nested trace instead of the main chat.
+    private static void EmitSubagentAssistantEvent(string parentId, JsonElement evt, JsonElement msgObj)
+    {
+        var subagentType = evt.TryGetProperty("subagent_type", out var stEl) ? stEl.GetString() : null;
+        var taskDescription = evt.TryGetProperty("task_description", out var tdEl) ? tdEl.GetString() : null;
+
+        if (!msgObj.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
+            return;
+
+        foreach (var item in content.EnumerateArray())
+        {
+            if (!item.TryGetProperty("type", out var itemType)) continue;
+            var itemTypeStr = itemType.GetString();
+
+            if (itemTypeStr == "thinking")
+            {
+                var thinking = item.TryGetProperty("thinking", out var thEl) ? thEl.GetString() : null;
+                if (string.IsNullOrEmpty(thinking)) continue;
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+                {
+                    Type = "subagent-thinking",
+                    Text = thinking,
+                    ParentToolId = parentId,
+                    SubagentType = subagentType,
+                    TaskDescription = taskDescription
+                }));
+                Console.Out.Flush();
+            }
+            else if (itemTypeStr == "text")
+            {
+                var text = item.TryGetProperty("text", out var txEl) ? txEl.GetString() : null;
+                if (string.IsNullOrEmpty(text)) continue;
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+                {
+                    Type = "subagent-text",
+                    Text = text,
+                    ParentToolId = parentId,
+                    SubagentType = subagentType,
+                    TaskDescription = taskDescription
+                }));
+                Console.Out.Flush();
+            }
+            else if (itemTypeStr == "tool_use")
+            {
+                var name = item.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
+                var id = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+                string? inputJson = item.TryGetProperty("input", out var inputProp) ? inputProp.GetRawText() : null;
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
+                {
+                    Type = "subagent-tool_use",
+                    Tool = name,
+                    ToolInput = inputJson,
+                    ToolId = id,
+                    ParentToolId = parentId,
+                    SubagentType = subagentType,
+                    TaskDescription = taskDescription
+                }));
+                Console.Out.Flush();
+            }
+        }
+    }
+
+    // Shared by the main tool_result loop and #13's subagent one — extracts
+    // the tool_use_id, a truncated text summary, and the error flag from a
+    // {"type":"tool_result", ...} content item.
+    private static void SummarizeToolResultItem(JsonElement item, out string? id, out string? summary, out bool isError)
+    {
+        id = item.TryGetProperty("tool_use_id", out var idProp) ? idProp.GetString() : null;
+        summary = null;
+
+        if (item.TryGetProperty("content", out var contentProp))
+        {
+            if (contentProp.ValueKind == JsonValueKind.String)
+            {
+                summary = contentProp.GetString();
+            }
+            else if (contentProp.ValueKind == JsonValueKind.Array)
+            {
+                var sb = new StringBuilder();
+                foreach (var c in contentProp.EnumerateArray())
+                {
+                    if (c.TryGetProperty("type", out var ct) && ct.GetString() == "text" &&
+                        c.TryGetProperty("text", out var tt))
+                    {
+                        if (sb.Length > 0) sb.Append('\n');
+                        sb.Append(tt.GetString());
+                    }
+                }
+                summary = sb.ToString();
+            }
+        }
+
+        if (summary != null && summary.Length > 240)
+            summary = summary.Substring(0, 237) + "...";
+
+        isError = item.TryGetProperty("is_error", out var errProp) && errProp.GetBoolean();
     }
 
     private static void EmitWarn(string text)

@@ -1711,7 +1711,20 @@ public partial class AgentToolWindowControl : UserControl
                         JsonSerializer.Serialize(new { type = "permission_request", tool, input, id, cwd }))),
                 onDiagnosticsRequest: (filePath, requestId) => _ = HandleDiagnosticsRequestAsync(filePath, requestId),
                 maxBudgetUsd: request.MaxBudgetUsd,
-                fallbackModel: string.IsNullOrWhiteSpace(request.FallbackModel) ? null : request.FallbackModel.Trim());
+                fallbackModel: string.IsNullOrWhiteSpace(request.FallbackModel) ? null : request.FallbackModel.Trim(),
+                onSubagentEvent: sc => dispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new
+                        {
+                            type = sc.Type,
+                            text = sc.Text,
+                            tool = sc.Tool,
+                            input = sc.ToolInput,
+                            id = sc.ToolId,
+                            parentId = sc.ParentToolId,
+                            subagentType = sc.SubagentType,
+                            taskDescription = sc.TaskDescription
+                        }))));
 
             VsStatusBar.Clear();
 

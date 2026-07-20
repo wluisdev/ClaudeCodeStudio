@@ -117,6 +117,13 @@ public class ChatChunk
     public string? ToolInput { get; set; }
     public string? ToolId { get; set; }
     public string? Cwd { get; set; }
+    // #13: subagent (Task/Agent) events forwarded via --forward-subagent-text.
+    // ParentToolId correlates back to the tool_use that launched the subagent;
+    // SubagentType/TaskDescription label it (ride along on every event, not
+    // just the first, so the UI never has to special-case "first event").
+    public string? ParentToolId { get; set; }
+    public string? SubagentType { get; set; }
+    public string? TaskDescription { get; set; }
 }
 
 public class PermissionResponse
