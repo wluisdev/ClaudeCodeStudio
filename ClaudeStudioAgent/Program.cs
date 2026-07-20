@@ -694,7 +694,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
         // Which claude.exe actually launched, and its version — a stale install
         // shadowing the expected one on PATH cost a whole validation round to
         // diagnose (2026-07-16: chocolatey 2.1.144 vs ~/.local/bin 2.1.211).
-        var claudeVersion = await GetClaudeVersionAsync(psi.FileName);
+        var claudeVersion = await ProbeClaudeAsync(psi.FileName);
         var exeLabel = claudeVersion != null ? $"{psi.FileName} ({claudeVersion})" : psi.FileName;
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"claude exe: {exeLabel}" }));
         Console.Out.Flush();
@@ -1462,14 +1462,20 @@ The user's IDE selection (if any) is included in the conversation context and ma
             "claude.exe was not found on your PATH or any standard install location.");
     }
 
-    private static async Task<string?> GetClaudeVersionAsync(string exePath)
+    private static async Task<string?> ProbeClaudeAsync(string exePath)
     {
         try
         {
             var psi = new ProcessStartInfo
             {
                 FileName = exePath,
-                ArgumentList = { "--version" },
+                // --permission-prompt-tool stdio dropped out of --help as of
+                // 2.1.215 but still parses (validated 2026-07-19); every inline
+                // permission prompt (AskUserQuestion, ask/plan mode) depends on
+                // it. Tacking it onto the version probe validates both in one
+                // spawn: if the flag were ever actually removed, claude would
+                // reject it before getting to --version.
+                ArgumentList = { "--permission-prompt-tool", "stdio", "--version" },
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -1479,9 +1485,24 @@ The user's IDE selection (if any) is included in the conversation context and ma
             if (proc == null) return null;
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-            var output = await proc.StandardOutput.ReadToEndAsync(cts.Token);
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync(cts.Token);
+            var stderrTask = proc.StandardError.ReadToEndAsync(cts.Token);
+            await Task.WhenAll(stdoutTask, stderrTask);
             await proc.WaitForExitAsync(cts.Token);
-            return string.IsNullOrWhiteSpace(output) ? null : output.Trim();
+
+            var stdout = stdoutTask.Result;
+            var stderr = stderrTask.Result;
+
+            if (proc.ExitCode != 0 || stderr.Contains("unknown option", StringComparison.OrdinalIgnoreCase))
+            {
+                var detail = string.IsNullOrWhiteSpace(stderr) ? $"exit {proc.ExitCode}" : stderr.Trim();
+                EmitWarn(
+                    $"this claude CLI rejected --permission-prompt-tool ({detail}) — " +
+                    "inline permission prompts (AskUserQuestion, ask/plan mode) will stop working; " +
+                    "pin an older CLI version or update the extension");
+            }
+
+            return string.IsNullOrWhiteSpace(stdout) ? null : stdout.Trim();
         }
         catch
         {
