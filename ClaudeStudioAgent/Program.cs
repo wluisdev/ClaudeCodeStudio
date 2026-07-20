@@ -566,6 +566,16 @@ The user's IDE selection (if any) is included in the conversation context and ma
         // on: purely additive (one extra `type:"user"` line per turn) and the
         // agent already ignores unrecognized events.
         psi.ArgumentList.Add("--replay-user-messages");
+        // #16: benchmarked 2026-07-20 against the real CLI — moving cwd/env/git
+        // status out of the system prompt (into the first user message) kept
+        // the big cached prefix stable across git-status changes that would
+        // otherwise force a respawn to recreate it. Measured ~57% less cache
+        // write and roughly half the cost per fresh session in the benchmark
+        // (throwaway repo, cache_creation ~6970 → ~2985 tokens). Always on —
+        // help says "ignored with --system-prompt", but we only ever use
+        // --append-system-prompt (a different flag), which the exclusion
+        // doesn't skip.
+        psi.ArgumentList.Add("--exclude-dynamic-system-prompt-sections");
         psi.ArgumentList.Add("--append-system-prompt");
         psi.ArgumentList.Add(VsContextPrompt);
         psi.ArgumentList.Add("--model");
