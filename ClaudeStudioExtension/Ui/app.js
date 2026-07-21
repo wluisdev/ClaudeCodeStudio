@@ -4561,6 +4561,24 @@ function renderBranchedMessages(newSessionId, msgs) {
             hostBubble = null;
             hostSynthetic = false;
             todoBubble = null;
+        } else if (m.role === "command") {
+            // Slash-command / skill invocation (Bug 2). Styled like an ordinary
+            // user message (user's request) rather than a distinct chip — goes
+            // through addMessage, so it's a decorated, counted .user bubble that
+            // keeps ⎇/⟲ ordinals aligned with SessionOrdinals. The ⌘ prefix is a
+            // subtle "this was a command" marker.
+            addMessage("user", "⌘ " + (m.text || ""));
+            hostBubble = null;
+            hostSynthetic = false;
+            todoBubble = null;
+        } else if (m.role === "compact") {
+            // Rebuild the "🗜️ Compacted: X → Y" divider from the JSONL
+            // compact_boundary line — a divider, not a counted message, so it
+            // doesn't touch ⎇/⟲ ordinals.
+            insertOrUpdateModelDivider(`🗜️ Compacted: ${fmtTokens(m.pre)} → ${fmtTokens(m.post)} tokens`);
+            hostBubble = null;
+            hostSynthetic = false;
+            todoBubble = null;
         } else if (m.role === "assistant") {
             const msg = document.createElement("div");
             msg.className = "message assistant";

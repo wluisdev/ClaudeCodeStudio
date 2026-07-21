@@ -2192,7 +2192,7 @@ public partial class AgentToolWindowControl : UserControl
                     catch { continue; }
                     var type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
                     if (type != "user" && type != "assistant") continue;
-                    if (IsMetaLine(root)) continue;
+                    if (ClaudeStudioShared.SessionOrdinals.IsHiddenReplayLine(root)) continue;
                     if (!root.TryGetProperty("message", out var msg)) continue;
                     if (!msg.TryGetProperty("content", out var content)) continue;
 
@@ -2220,7 +2220,11 @@ public partial class AgentToolWindowControl : UserControl
                         }
                     }
 
-                    var body = text.ToString().Trim();
+                    // A slash-command invocation shows as its clean name
+                    // (/compact) in the transcript; caveat/stdout echoes were
+                    // already dropped by IsHiddenReplayLine above.
+                    var raw = text.ToString();
+                    var body = (ExtractCommandInvocation(raw) ?? StripLocalCommandCaveat(raw)).Trim();
                     if (body.Length == 0) continue;
                     sb.AppendLine();
                     sb.AppendLine("---");
@@ -2937,8 +2941,15 @@ public partial class AgentToolWindowControl : UserControl
                     var root = doc.RootElement;
                     if (!root.TryGetProperty("type", out var tEl)) continue;
                     var entryType = tEl.GetString();
+                    if (TryExtractCompactBoundary(root, out var preTok, out var postTok))
+                    {
+                        // Rebuild the live "🗜️ Compacted" divider so the replay
+                        // matches what was shown when the compaction happened.
+                        msgs.Add(new { role = "compact", pre = preTok, post = postTok });
+                        continue;
+                    }
                     if (entryType != "user" && entryType != "assistant") continue;
-                    if (IsMetaLine(root)) continue;
+                    if (ClaudeStudioShared.SessionOrdinals.IsHiddenReplayLine(root)) continue;
                     if (!root.TryGetProperty("message", out var msg)) continue;
                     if (!msg.TryGetProperty("content", out var content)) continue;
 
@@ -2959,7 +2970,17 @@ public partial class AgentToolWindowControl : UserControl
                         text = content.GetString();
                     }
 
-                    if (!string.IsNullOrEmpty(text))
+                    // Slash-command / skill invocations (<command-name>/… —
+                    // type:"user" without isMeta) render as a clean chip instead
+                    // of raw tags, so the response that follows still has a
+                    // visible trigger (Bug 2, rodada #22a). The chip is a counted
+                    // user bubble, matching SessionOrdinals, so ⎇/⟲ stay aligned.
+                    // (isCompactSummary and stdout/caveat echoes were already
+                    // dropped by IsHiddenReplayLine above.)
+                    var cmd = ExtractCommandInvocation(text);
+                    if (cmd != null)
+                        msgs.Add(new { role = "command", text = cmd });
+                    else if (!string.IsNullOrEmpty(text))
                         msgs.Add(new { role = entryType, text });
 
                     // Question cards and tool chips ride along with the text
@@ -3166,8 +3187,14 @@ public partial class AgentToolWindowControl : UserControl
                 var root = doc.RootElement;
                 if (!root.TryGetProperty("type", out var tEl)) { keptLines.Add(line); continue; }
                 var entryType = tEl.GetString();
+                if (TryExtractCompactBoundary(root, out var preTok, out var postTok))
+                {
+                    msgs.Add(new { role = "compact", pre = preTok, post = postTok });
+                    keptLines.Add(line);
+                    continue;
+                }
                 if (entryType != "user" && entryType != "assistant") { keptLines.Add(line); continue; }
-                if (ClaudeStudioShared.SessionOrdinals.IsMetaLine(root)) { keptLines.Add(line); continue; }
+                if (ClaudeStudioShared.SessionOrdinals.IsHiddenReplayLine(root)) { keptLines.Add(line); continue; }
                 if (!root.TryGetProperty("message", out var msg)) { keptLines.Add(line); continue; }
                 if (!msg.TryGetProperty("content", out var content)) { keptLines.Add(line); continue; }
 
@@ -3185,7 +3212,13 @@ public partial class AgentToolWindowControl : UserControl
                 }
 
                 keptLines.Add(RewriteSessionIdInLine(line, newSessionId));
-                msgs.Add(new { role = entryType, text });
+                // /command or /skill invocations render as a chip (Bug 2) — still
+                // a counted user bubble so the boundary math stays aligned.
+                var cmd = ExtractCommandInvocation(text);
+                if (cmd != null)
+                    msgs.Add(new { role = "command", text = cmd });
+                else
+                    msgs.Add(new { role = entryType, text });
                 CollectToolReplay(root, content, msgs, pendingTools);
             }
             catch { keptLines.Add(line); continue; }
@@ -3295,6 +3328,55 @@ public partial class AgentToolWindowControl : UserControl
                 msgIndex,
                 result = JsonSerializer.Deserialize<JsonElement>(resultJson)
             })));
+    }
+
+    // A compact_boundary is a type:"system" line that /compact (or auto-compact)
+    // writes with the before/after token counts. The live stream renders a
+    // "🗜️ Compacted: X → Y tokens" divider from it (app.js compact-boundary);
+    // this rebuilds the same on History replay, where system lines are otherwise
+    // skipped. It's a divider, not a counted bubble — no ⎇/⟲ ordinal impact.
+    private static bool TryExtractCompactBoundary(JsonElement root, out long preTokens, out long postTokens)
+    {
+        preTokens = 0;
+        postTokens = 0;
+        if (!root.TryGetProperty("subtype", out var stEl) || stEl.GetString() != "compact_boundary")
+            return false;
+        // The persisted transcript uses camelCase (compactMetadata/preTokens/
+        // postTokens); the live stream-json event uses snake_case. We read the
+        // transcript here, so prefer camelCase and fall back to snake_case so a
+        // future CLI shape change (either direction) still renders the divider.
+        JsonElement meta;
+        if (root.TryGetProperty("compactMetadata", out var m1) && m1.ValueKind == JsonValueKind.Object)
+            meta = m1;
+        else if (root.TryGetProperty("compact_metadata", out var m2) && m2.ValueKind == JsonValueKind.Object)
+            meta = m2;
+        else
+            return false;
+        if ((meta.TryGetProperty("preTokens", out var preEl) || meta.TryGetProperty("pre_tokens", out preEl)) && preEl.TryGetInt64(out var p))
+            preTokens = p;
+        if ((meta.TryGetProperty("postTokens", out var postEl) || meta.TryGetProperty("post_tokens", out postEl)) && postEl.TryGetInt64(out var q))
+            postTokens = q;
+        return true;
+    }
+
+    // A slash-command / skill invocation is a type:"user" line whose content is
+    // <command-name>/foo</command-name> (+ optional <command-args>). Returns the
+    // clean "/foo" (or "/foo args") for the replay chip, or null when the text
+    // is not a command invocation.
+    private static string? ExtractCommandInvocation(string? content)
+    {
+        if (string.IsNullOrEmpty(content)) return null;
+        var name = System.Text.RegularExpressions.Regex.Match(content,
+            @"<command-name>\s*(.*?)\s*</command-name>",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+        if (!name.Success) return null;
+        var cmd = name.Groups[1].Value.Trim();
+        if (cmd.Length == 0) return null;
+        var args = System.Text.RegularExpressions.Regex.Match(content,
+            @"<command-args>\s*(.*?)\s*</command-args>",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+        var a = args.Success ? args.Groups[1].Value.Trim() : "";
+        return a.Length > 0 ? $"{cmd} {a}" : cmd;
     }
 
     private static string StripLocalCommandCaveat(string text)
