@@ -378,11 +378,6 @@ static void EmitDone()
     Console.Out.Flush();
 }
 
-// Thrown by FindClaudeExe when claude.exe is on neither PATH nor any known
-// install location. The main loop turns it into a dedicated "claude-not-found"
-// chunk so the UI can show an install card instead of a generic error.
-sealed class ClaudeNotFoundException(string message) : Exception(message);
-
 /// <summary>
 /// Holds a single persistent claude.exe instance running with --input-format stream-json
 /// --output-format stream-json. Messages are written to its stdin as NDJSON; output is
@@ -550,7 +545,7 @@ The user's IDE selection (if any) is included in the conversation context and ma
 
         var psi = new ProcessStartInfo
         {
-            FileName = FindClaudeExe(_cliPath),
+            FileName = ClaudeExeLocator.FindClaudeExe(_cliPath, EmitWarn),
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -1817,64 +1812,6 @@ The user's IDE selection (if any) is included in the conversation context and ma
             settingsPath,
             JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
         return settingsPath;
-    }
-
-    private static string FindClaudeExe(string? configured)
-    {
-        // Explicit path from the UI (D7) wins; a bad value fails loudly (with
-        // the value in the message) instead of silently falling back to PATH.
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            var p = configured!.Trim();
-            if (File.Exists(p))
-                return p;
-            var inDir = Path.Combine(p, "claude.exe");
-            if (Directory.Exists(p) && File.Exists(inDir))
-                return inDir;
-            throw new ClaudeNotFoundException(
-                $"The configured CLI path was not found: {p} — fix or clear it in settings (Claude Code → CLI path).");
-        }
-
-        // Native installer / `claude update` target. Checked before the PATH scan:
-        // a stale shim earlier on PATH (e.g. chocolatey) would otherwise shadow
-        // this with an older version (drift found 2026-07-19 — choco stuck at
-        // 2.1.205 while ~\.local\bin had already moved to 2.1.215).
-        var nativeInstall = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".local\bin\claude.exe");
-        var nativeExists = File.Exists(nativeInstall);
-
-        var pathDirs = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
-        string? pathMatch = null;
-        foreach (var dir in pathDirs)
-        {
-            var candidate = Path.Combine(dir, "claude.exe");
-            if (File.Exists(candidate)) { pathMatch = candidate; break; }
-        }
-
-        if (nativeExists)
-        {
-            if (pathMatch != null && !string.Equals(pathMatch, nativeInstall, StringComparison.OrdinalIgnoreCase))
-                EmitWarn($"another claude.exe found on PATH at {pathMatch} — using {nativeInstall} instead");
-            return nativeInstall;
-        }
-
-        if (pathMatch != null)
-            return pathMatch;
-
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var fallbacks = new[]
-        {
-            Path.Combine(appData, @"npm\claude.exe"),
-            Path.Combine(appData, @"npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"nodejs\claude.exe"),
-        };
-
-        foreach (var path in fallbacks)
-            if (File.Exists(path))
-                return path;
-
-        throw new ClaudeNotFoundException(
-            "claude.exe was not found on your PATH or any standard install location.");
     }
 
     private static async Task<string?> ProbeClaudeAsync(string exePath)
