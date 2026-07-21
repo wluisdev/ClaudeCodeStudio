@@ -5,7 +5,7 @@ A native **Claude Code** chat client for **Visual Studio 2022** — a WebView2 c
 Unlike terminal-embedding extensions, Claude Code Studio does **not** host a console window. It runs the `claude` CLI as a long-lived subprocess and speaks its streaming JSON protocol directly, so the whole conversation — text, tool calls, diffs, permission requests — is rendered as first-class UI instead of scraped terminal text.
 
 <p align="center">
-  <img src="docs/preview.jpg" alt="Claude Code Studio chat panel in Visual Studio 2022" width="480" />
+  <img src="docs/preview.png" alt="Claude Code Studio chat panel in Visual Studio 2022" width="480" />
 </p>
 
 ## Features
