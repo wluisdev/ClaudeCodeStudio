@@ -153,6 +153,16 @@
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
+                                Auto-include attachments
+                                <span class="info-icon" title="When on, attached files are sent to Claude automatically, skipping the per-file 'read this file?' confirmation. You can still drop one with its × chip before sending.">ⓘ</span>
+                            </span>
+                            <label class="toggle">
+                                <input type="checkbox" id="auto-attach-toggle" onchange="setAutoIncludeAttachments(this.checked)" />
+                                <span class="toggle-track"></span>
+                            </label>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
                                 Sound when input needed
                                 <span class="info-icon" title="Plays a sound whenever claude is blocked waiting on you — a permission prompt or a question.">ⓘ</span>
                             </span>

@@ -1050,15 +1050,42 @@ function renderCwd(vsPath) {
 // Probed 2026-07-18 (2.1.205 and 2.1.214): the sdk-cli entrypoint never
 // stamps status/waitingFor — the file watcher stays as future-proofing, and
 // the waiting states are synthesized by the UI itself (modal/question open).
+// Rotating verbs for the "thinking" indicator (mostly sober, plus a couple of
+// in-jokes). The CLI emits only a start/stop signal (no summary text), so the
+// word is ours; cycling it makes a long pause read as active work, not a freeze.
+const THINKING_WORDS = [
+    "Thinking", "Reasoning", "Analyzing", "Considering",
+    "Working", "Processing", "Evaluating", "Reviewing",
+    "Megabraining", "Skyneting",
+];
+let _thinkingTimer = null;
+let _thinkingIdx = -1;
+
 function renderPresence(status, waitingFor) {
     const el = document.getElementById("cwdbar-presence");
     if (!el) return;
+
+    // #cwdbar-presence is shared with the compacting/waiting states, so any
+    // non-thinking status must stop the word cycle or it would overwrite them.
+    if (status !== "thinking" && _thinkingTimer) {
+        clearInterval(_thinkingTimer);
+        _thinkingTimer = null;
+    }
+
     if (status === "waiting" && waitingFor) {
         el.textContent = "⏸ " + waitingFor;
         el.hidden = false;
     } else if (status === "thinking") {
-        el.textContent = "✳ thinking…";
+        const tick = () => {
+            let i;
+            do { i = Math.floor(Math.random() * THINKING_WORDS.length); }
+            while (i === _thinkingIdx && THINKING_WORDS.length > 1);
+            _thinkingIdx = i;
+            el.textContent = "✳ " + THINKING_WORDS[i] + "…";
+        };
+        tick(); // show a word immediately, don't wait for the first interval
         el.hidden = false;
+        if (!_thinkingTimer) _thinkingTimer = setInterval(tick, 2500);
     } else if (status === "compacting") {
         el.textContent = "🗜️ compacting context…";
         el.hidden = false;
@@ -2858,6 +2885,15 @@ function setAutoResume(checked) {
     localStorage.setItem("autoResume", checked);
 }
 
+// Auto-include attachments: skip the per-file "read this file?" card and send
+// attached files straight through (opt-in — the user attached them).
+const autoAttachToggle = document.getElementById("auto-attach-toggle");
+if (autoAttachToggle) autoAttachToggle.checked = localStorage.getItem("autoIncludeAttachments") === "true";
+
+function setAutoIncludeAttachments(checked) {
+    localStorage.setItem("autoIncludeAttachments", checked);
+}
+
 // ── V17 status line ────────────────────────────────────────────
 // User-configured command whose output shows in a slim bar under the header.
 // Runs in the working directory; refreshed on boot, setting change, and after
@@ -3236,7 +3272,7 @@ const SETTINGS_KEYS = [
     // Appearance
     "themeOverride", "accentCustom",
     // Chat
-    "sendWithEnter", "autoResume", "autoSaveLevel", "soundOnInput", "soundOnDone",
+    "sendWithEnter", "autoResume", "autoSaveLevel", "soundOnInput", "soundOnDone", "autoIncludeAttachments",
     // Display / layout
     "showTokens", "showTokenEstimate", "timingMode", "timeUnit", "compactLayout",
     "composerFontSize", "composerTextareaHeight",
@@ -4808,7 +4844,14 @@ function addAttachment(filename, content, isBinary, filePath) {
     });
     attachmentsEl.appendChild(chip);
 
-    showFileQuestion(id, displayName);
+    // Opt-in: skip the per-file confirmation and include it straight away — the
+    // user explicitly attached it. confirmFile clears the pending chip styling;
+    // they can still remove it via the × before sending.
+    if (localStorage.getItem("autoIncludeAttachments") === "true") {
+        confirmFile(id, true);
+    } else {
+        showFileQuestion(id, displayName);
+    }
 }
 
 function showNoWorkspaceCard(path) {
