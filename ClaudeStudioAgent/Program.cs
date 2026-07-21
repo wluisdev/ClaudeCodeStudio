@@ -973,11 +973,11 @@ The user's IDE selection (if any) is included in the conversation context and ma
             {
                 // `system/init` is the first event claude emits after receiving the
                 // first stdin line (no `-p` mode). Capture session_id, emit a session
-                // chunk on first sighting, and record timing. Other system subtypes
-                // (status, rate_limit_event) are intentionally ignored — except
-                // `informational` (e.g. "Unknown command: /teste"), which the UI
-                // must show or the turn looks like a silent 0-token no-op
-                // (validation round 2026-07-16).
+                // chunk on first sighting, and record timing. `informational` (e.g.
+                // "Unknown command: /teste") must reach the UI or the turn looks
+                // like a silent 0-token no-op (validation round 2026-07-16); `status`
+                // and `compact_boundary` (#21, probed 2026-07-20) surface auto-compact
+                // — otherwise-silent multi-second pauses in long sessions.
                 if (!evt.TryGetProperty("subtype", out var subProp)) continue;
                 var subtypeStr = subProp.GetString();
                 if (subtypeStr == "informational")
@@ -987,6 +987,39 @@ The user's IDE selection (if any) is included in the conversation context and ma
                     if (!string.IsNullOrEmpty(infoText))
                     {
                         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "system-info", Text = infoText! }));
+                        Console.Out.Flush();
+                    }
+                    continue;
+                }
+                if (subtypeStr == "status")
+                {
+                    // This subtype is not exclusively about compaction — probed
+                    // 2026-07-20 and found a "requesting" status firing on every
+                    // ordinary turn (unrelated, presumably "calling the API now").
+                    // Only react to the two compaction-specific transitions:
+                    // status:"compacting" (start) and a payload carrying
+                    // compact_result (end, regardless of the outcome value) —
+                    // anything else (including "requesting") is silently ignored
+                    // rather than mistaken for "compaction just stopped".
+                    var statusVal = evt.TryGetProperty("status", out var stEl) && stEl.ValueKind == JsonValueKind.String
+                        ? stEl.GetString() : null;
+                    if (statusVal == "compacting")
+                    {
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "compacting", Text = "start" }));
+                        Console.Out.Flush();
+                    }
+                    else if (evt.TryGetProperty("compact_result", out _))
+                    {
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "compacting", Text = "stop" }));
+                        Console.Out.Flush();
+                    }
+                    continue;
+                }
+                if (subtypeStr == "compact_boundary")
+                {
+                    if (evt.TryGetProperty("compact_metadata", out var compactMetaEl))
+                    {
+                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "compact-boundary", Text = compactMetaEl.GetRawText() }));
                         Console.Out.Flush();
                     }
                     continue;

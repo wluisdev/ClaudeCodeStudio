@@ -1059,6 +1059,9 @@ function renderPresence(status, waitingFor) {
     } else if (status === "thinking") {
         el.textContent = "✳ thinking…";
         el.hidden = false;
+    } else if (status === "compacting") {
+        el.textContent = "🗜️ compacting context…";
+        el.hidden = false;
     } else {
         el.textContent = "";
         el.hidden = true;
@@ -2497,6 +2500,21 @@ window.chrome.webview.addEventListener("message", event => {
 
     if (event.data.type === "model-used") {
         noteModelFallback(event.data.text || "");
+        return;
+    }
+
+    if (event.data.type === "compacting") {
+        renderPresence(event.data.text === "start" ? "compacting" : "", "");
+        return;
+    }
+
+    if (event.data.type === "compact-boundary") {
+        try {
+            const meta = JSON.parse(event.data.text || "{}");
+            const pre = fmtTokens(meta.pre_tokens || 0);
+            const post = fmtTokens(meta.post_tokens || 0);
+            insertOrUpdateModelDivider(`🗜️ Compacted: ${pre} → ${post} tokens`);
+        } catch (e) { /* unexpected shape — skip rather than show garbage */ }
         return;
     }
 

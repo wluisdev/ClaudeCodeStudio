@@ -600,6 +600,15 @@ public class AgentClient
                 continue;
             }
 
+            // #21: same onTool piggyback as user-ack/rate-limit/model-used —
+            // "compacting" is a start/stop presence signal, "compact-boundary"
+            // carries the pre/post token metadata as a raw JSON blob in text.
+            if (chunk.Type == "compacting" || chunk.Type == "compact-boundary")
+            {
+                onTool?.Invoke(chunk.Type, "", null, chunk.Text, null);
+                continue;
+            }
+
             // #14: --fallback-model engagement/recovery signal — same onTool
             // piggyback as user-ack/rate-limit above.
             if (chunk.Type == "model-used")
