@@ -961,442 +961,52 @@ The user's IDE selection (if any) is included in the conversation context and ma
             try { evt = JsonSerializer.Deserialize<JsonElement>(line); }
             catch { continue; }
 
-            if (!evt.TryGetProperty("type", out var typeProp)) continue;
-            var type = typeProp.GetString();
+            // #22a: the type/subtype classification that used to live inline
+            // here now lives in ClaudeStudioShared.StreamEventParser, unit
+            // tested there. This loop body is orchestration only: apply the
+            // returned state deltas, write the chunks it built, perform the
+            // side effects it can't (pending-ask registration, the stdin
+            // auto-allow write, the perf log) and stop on Done.
+            var state = new StreamEventState { SessionId = SessionId, LastActiveModel = _lastActiveModel, ThinkingActive = thinkingActive };
+            var lineElapsedMs = sw.ElapsedMilliseconds;
+            var result = StreamEventParser.Process(evt, state, lineElapsedMs, _workingDirectory, ExpectedCliPermissionMode(), _permissionMode);
 
-            if (type == "system")
+            SessionId = state.SessionId;
+            _lastActiveModel = state.LastActiveModel;
+            thinkingActive = state.ThinkingActive;
+
+            foreach (var chunk in result.Chunks)
             {
-                // `system/init` is the first event claude emits after receiving the
-                // first stdin line (no `-p` mode). Capture session_id, emit a session
-                // chunk on first sighting, and record timing. `informational` (e.g.
-                // "Unknown command: /teste") must reach the UI or the turn looks
-                // like a silent 0-token no-op (validation round 2026-07-16); `status`
-                // and `compact_boundary` (#21, probed 2026-07-20) surface auto-compact
-                // — otherwise-silent multi-second pauses in long sessions.
-                if (!evt.TryGetProperty("subtype", out var subProp)) continue;
-                var subtypeStr = subProp.GetString();
-                if (subtypeStr == "informational")
+                if (firstChunk && chunk.Type == "chunk")
                 {
-                    var infoText = evt.TryGetProperty("content", out var infoProp) && infoProp.ValueKind == JsonValueKind.String
-                        ? infoProp.GetString() : null;
-                    if (!string.IsNullOrEmpty(infoText))
-                    {
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "system-info", Text = infoText! }));
-                        Console.Out.Flush();
-                    }
-                    continue;
+                    firstChunkMs = sw.ElapsedMilliseconds;
+                    EmitTiming("first chunk", firstChunkMs);
+                    firstChunk = false;
                 }
-                if (subtypeStr == "status")
-                {
-                    // This subtype is not exclusively about compaction — probed
-                    // 2026-07-20 and found a "requesting" status firing on every
-                    // ordinary turn (unrelated, presumably "calling the API now").
-                    // Only react to the two compaction-specific transitions:
-                    // status:"compacting" (start) and a payload carrying
-                    // compact_result (end, regardless of the outcome value) —
-                    // anything else (including "requesting") is silently ignored
-                    // rather than mistaken for "compaction just stopped".
-                    var statusVal = evt.TryGetProperty("status", out var stEl) && stEl.ValueKind == JsonValueKind.String
-                        ? stEl.GetString() : null;
-                    if (statusVal == "compacting")
-                    {
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "compacting", Text = "start" }));
-                        Console.Out.Flush();
-                    }
-                    else if (evt.TryGetProperty("compact_result", out _))
-                    {
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "compacting", Text = "stop" }));
-                        Console.Out.Flush();
-                    }
-                    continue;
-                }
-                if (subtypeStr == "compact_boundary")
-                {
-                    if (evt.TryGetProperty("compact_metadata", out var compactMetaEl))
-                    {
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "compact-boundary", Text = compactMetaEl.GetRawText() }));
-                        Console.Out.Flush();
-                    }
-                    continue;
-                }
-                if (subtypeStr != "init") continue;
-
-                if (evt.TryGetProperty("session_id", out var sidProp))
-                {
-                    var sid = sidProp.GetString();
-                    if (!string.IsNullOrEmpty(sid) && sid != SessionId)
-                    {
-                        SessionId = sid;
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "session", Text = sid! }));
-                        Console.Out.Flush();
-                    }
-                }
-
-                // #19: init also carries the CLI's own view of the permission
-                // mode — worth checking after #8 found that unsupported
-                // --permission-mode values (auto, manual) get silently
-                // dropped to "default" instead of erroring. If a future CLI
-                // build does the same to a mode we DO rely on, this catches
-                // it instead of the user finding out the hard way.
-                if (evt.TryGetProperty("permissionMode", out var pmEl) && pmEl.ValueKind == JsonValueKind.String)
-                {
-                    var actualPm = pmEl.GetString();
-                    var expectedPm = ExpectedCliPermissionMode();
-                    if (!string.IsNullOrEmpty(actualPm) && actualPm != expectedPm)
-                    {
-                        EmitWarn($"permission mode mismatch: requested \"{_permissionMode}\" (expected claude to report \"{expectedPm}\") but it reports \"{actualPm}\" — permissions may not behave as expected");
-                    }
-                }
-
-                EmitTiming("claude init", sw.ElapsedMilliseconds);
+                Console.WriteLine(JsonSerializer.Serialize(chunk));
+                Console.Out.Flush();
             }
-            else if (type == "assistant")
+
+            if (result.PendingAsk is { } ask)
+                _pendingAsks[ask.ToolUseId] = new PendingAsk(ask.RequestId, ask.InputJson);
+            if (result.PendingControlPerm is { } perm)
+                _pendingControlPerms[perm.ToolUseId] = new PendingAsk(perm.RequestId, perm.InputJson);
+            if (result.ControlAllowRequest is { } allow)
             {
-                var msgObj = evt.GetProperty("message");
-
-                // #13: a subagent (Task/Agent) message — parent_tool_use_id is only
-                // set on these, never on the main conversation's own assistant
-                // messages. Routed entirely separately and never falls through to
-                // the normal handling below (which would otherwise double-count a
-                // subagent's own tool_use as if the main conversation called it
-                // directly, and would corrupt #14's fallback-model tracking with
-                // whatever model the subagent happened to run on).
-                if (evt.TryGetProperty("parent_tool_use_id", out var parentIdProp) &&
-                    parentIdProp.ValueKind == JsonValueKind.String)
-                {
-                    EmitSubagentAssistantEvent(parentIdProp.GetString() ?? "", evt, msgObj);
-                    continue;
-                }
-
-                // Synthetic responses (slash commands like /cost, /context) come as a
-                // single complete assistant message with text content and no preceding
-                // stream_event deltas. Detect by model == "<synthetic>" and emit the
-                // text directly as a chunk.
-                bool hasModel = msgObj.TryGetProperty("model", out var modelEl);
-                bool isSynthetic = hasModel && modelEl.GetString() == "<synthetic>";
-
-                // #14: --fallback-model can silently swap in a different model when
-                // the primary is overloaded. _lastActiveModel starts at the
-                // requested model, so this only fires on an actual deviation
-                // (engaged) or a later match against the pre-deviation value
-                // (recovered) — never on the ordinary, unchanged case.
-                if (hasModel && !isSynthetic)
-                {
-                    var actualModel = modelEl.GetString();
-                    if (!string.IsNullOrEmpty(actualModel) && actualModel != _lastActiveModel)
-                    {
-                        _lastActiveModel = actualModel;
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "model-used", Text = actualModel }));
-                        Console.Out.Flush();
-                    }
-                }
-
-                if (msgObj.TryGetProperty("usage", out var usageLive))
-                    EmitTokensLive(usageLive);
-
-                var content = msgObj.GetProperty("content");
-                if (content.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var item in content.EnumerateArray())
-                    {
-                        if (!item.TryGetProperty("type", out var itemType)) continue;
-                        var itemTypeStr = itemType.GetString();
-
-                        if (itemTypeStr == "tool_use")
-                        {
-                            var name = item.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
-                            var id = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
-                            string? inputJson = null;
-                            if (item.TryGetProperty("input", out var inputProp))
-                                inputJson = inputProp.GetRawText();
-
-                            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
-                            {
-                                Type = "tool_use",
-                                Tool = name,
-                                ToolInput = inputJson,
-                                ToolId = id
-                            }));
-                            Console.Out.Flush();
-                        }
-                        else if (itemTypeStr == "text" && isSynthetic)
-                        {
-                            var text = item.TryGetProperty("text", out var tp) ? tp.GetString() : null;
-                            if (!string.IsNullOrEmpty(text))
-                            {
-                                if (firstChunk)
-                                {
-                                    firstChunkMs = sw.ElapsedMilliseconds;
-                                    EmitTiming("first chunk", firstChunkMs);
-                                    firstChunk = false;
-                                }
-                                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "chunk", Text = text }));
-                                Console.Out.Flush();
-                            }
-                        }
-                    }
-                }
+                try { await WriteControlAllowAsync(allow.RequestId, allow.InputJson); }
+                catch (Exception ex) { EmitError($"control auto-allow write failed: {ex.Message}"); }
             }
-            else if (type == "stream_event")
+
+            if (result.Outcome == StreamEventOutcome.Done)
             {
-                if (!evt.TryGetProperty("event", out var streamEvt)) continue;
-                if (!streamEvt.TryGetProperty("type", out var evtType)) continue;
-                var evtTypeStr = evtType.GetString();
-
-                if (evtTypeStr == "content_block_start")
+                if (result.FinalTokens is { } t)
                 {
-                    if (thinkingActive) continue; // already showing, nothing new to signal
-                    if (streamEvt.TryGetProperty("content_block", out var cb)
-                        && cb.TryGetProperty("type", out var cbType)
-                        && cbType.GetString() == "thinking")
-                    {
-                        thinkingActive = true;
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "thinking", Text = "start" }));
-                        Console.Out.Flush();
-                    }
+                    finalInputTok = t.Input;
+                    finalOutputTok = t.Output;
+                    finalCacheCreate = t.CacheCreate;
+                    finalCacheRead = t.CacheRead;
                 }
-                else if (evtTypeStr == "content_block_stop")
-                {
-                    // Fires for every block (thinking, text, tool_use) — only acts
-                    // when a thinking block was left open (e.g. followed directly
-                    // by a tool_use with no text in between).
-                    if (thinkingActive)
-                    {
-                        thinkingActive = false;
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "thinking", Text = "stop" }));
-                        Console.Out.Flush();
-                    }
-                }
-                else if (evtTypeStr == "content_block_delta")
-                {
-                    if (!streamEvt.TryGetProperty("delta", out var delta)) continue;
-                    if (!delta.TryGetProperty("type", out var deltaType)) continue;
-                    if (deltaType.GetString() != "text_delta") continue;
-                    if (!delta.TryGetProperty("text", out var deltaText)) continue;
-
-                    var text = deltaText.GetString();
-                    if (string.IsNullOrEmpty(text)) continue;
-
-                    if (thinkingActive)
-                    {
-                        thinkingActive = false;
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "thinking", Text = "stop" }));
-                        Console.Out.Flush();
-                    }
-
-                    if (firstChunk)
-                    {
-                        firstChunkMs = sw.ElapsedMilliseconds;
-                        EmitTiming("first chunk", firstChunkMs);
-                        firstChunk = false;
-                    }
-                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "chunk", Text = text }));
-                    Console.Out.Flush();
-                }
-                else if (evtTypeStr == "message_delta" && streamEvt.TryGetProperty("usage", out var deltaUsage))
-                {
-                    EmitTokensLive(deltaUsage);
-                }
-                else if (evtTypeStr == "message_start"
-                    && streamEvt.TryGetProperty("message", out var startMsg)
-                    && startMsg.TryGetProperty("usage", out var startUsage))
-                {
-                    EmitTokensLive(startUsage);
-                }
-            }
-            else if (type == "user")
-            {
-                // #7: --replay-user-messages echoes our own message back with
-                // isReplay:true — a delivery ack, not a tool_result carrier.
-                if (evt.TryGetProperty("isReplay", out var replayProp) && replayProp.ValueKind == JsonValueKind.True)
-                {
-                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "user-ack" }));
-                    Console.Out.Flush();
-                    continue;
-                }
-
-                // #13: a subagent's own tool_result, tagged the same way its
-                // tool_use was (see the "assistant" branch above).
-                if (evt.TryGetProperty("parent_tool_use_id", out var userParentIdProp) &&
-                    userParentIdProp.ValueKind == JsonValueKind.String)
-                {
-                    var subParentId = userParentIdProp.GetString() ?? "";
-                    var subagentType = evt.TryGetProperty("subagent_type", out var stEl2) ? stEl2.GetString() : null;
-                    var taskDescription = evt.TryGetProperty("task_description", out var tdEl2) ? tdEl2.GetString() : null;
-
-                    if (evt.TryGetProperty("message", out var subUserMsg) &&
-                        subUserMsg.TryGetProperty("content", out var subUserContent) &&
-                        subUserContent.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var item in subUserContent.EnumerateArray())
-                        {
-                            if (!item.TryGetProperty("type", out var itemType) || itemType.GetString() != "tool_result") continue;
-
-                            SummarizeToolResultItem(item, out var subId, out var subSummary, out var subIsError);
-
-                            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
-                            {
-                                Type = subIsError ? "subagent-tool_error" : "subagent-tool_result",
-                                Text = subSummary ?? "",
-                                ToolId = subId,
-                                ParentToolId = subParentId,
-                                SubagentType = subagentType,
-                                TaskDescription = taskDescription
-                            }));
-                            Console.Out.Flush();
-                        }
-                    }
-                    continue;
-                }
-
-                // tool_result content emitted by claude when a tool finished
-                if (!evt.TryGetProperty("message", out var userMsgObj)) continue;
-                if (!userMsgObj.TryGetProperty("content", out var userContent)) continue;
-                if (userContent.ValueKind != JsonValueKind.Array) continue;
-
-                foreach (var item in userContent.EnumerateArray())
-                {
-                    if (!item.TryGetProperty("type", out var itemType)) continue;
-                    if (itemType.GetString() != "tool_result") continue;
-
-                    SummarizeToolResultItem(item, out var id, out var summary, out var isError);
-
-                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
-                    {
-                        Type = isError ? "tool_error" : "tool_result",
-                        Text = summary ?? "",
-                        ToolId = id
-                    }));
-                    Console.Out.Flush();
-                }
-            }
-            else if (type == "control_request")
-            {
-                // Bidirectional control channel (--permission-prompt-tool stdio).
-                // claude blocks waiting for our control_response, so every one MUST
-                // be answered or the turn hangs.
-                var reqId = evt.TryGetProperty("request_id", out var ridProp) ? ridProp.GetString() : null;
-                if (reqId != null && evt.TryGetProperty("request", out var reqObj)
-                    && reqObj.TryGetProperty("subtype", out var subEl) && subEl.GetString() == "can_use_tool")
-                {
-                    var toolName = reqObj.TryGetProperty("tool_name", out var tnEl) ? tnEl.GetString() : null;
-                    var toolUseId = reqObj.TryGetProperty("tool_use_id", out var tuEl) ? tuEl.GetString() : null;
-                    var inputRaw = reqObj.TryGetProperty("input", out var inEl) ? inEl.GetRawText() : "{}";
-
-                    if (toolName == "AskUserQuestion" && toolUseId != null)
-                    {
-                        // The card is already rendered from the preceding tool_use
-                        // chunk. Just remember the request_id so SendControlResponseAsync
-                        // can answer it when the user picks. claude waits on stdin.
-                        _pendingAsks[toolUseId] = new PendingAsk(reqId, inputRaw);
-                    }
-                    else if (toolName == "ExitPlanMode" && toolUseId != null)
-                    {
-                        // Plan approval gate. Auto-allowing here meant plans executed
-                        // without anyone reviewing them (validation 2026-07-16) —
-                        // surface the request as a permission modal instead. The
-                        // response comes back through the PermissionResponse path,
-                        // which tries the hook pipe first and then this registry.
-                        _pendingControlPerms[toolUseId] = new PendingAsk(reqId, inputRaw);
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
-                        {
-                            Type = "permission_request",
-                            Tool = "ExitPlanMode",
-                            ToolInput = inputRaw,
-                            ToolId = toolUseId,
-                            Cwd = _workingDirectory
-                        }));
-                        Console.Out.Flush();
-                    }
-                    else
-                    {
-                        // Non-interactive tool routed through the prompt tool. Happens
-                        // legitimately (2.1.2xx consults can_use_tool for e.g. compound
-                        // Bash even after the hook allowed it) — auto-allow so claude
-                        // never hangs. Timing channel: OutputLog only, not a red error
-                        // bubble in the chat (rodada 3 noise).
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"auto-allowing control_request for tool '{toolName}'" }));
-                        Console.Out.Flush();
-                        try { await WriteControlAllowAsync(reqId, inputRaw); }
-                        catch (Exception ex) { EmitError($"control auto-allow write failed: {ex.Message}"); }
-                    }
-                }
-            }
-            else if (type == "rate_limit_event")
-            {
-                // #9: probed 2026-07-20 — fires on every turn (not just near the
-                // limit), always carrying the current status. Only forward when
-                // there's something to actually tell the user; the UI-side
-                // throttle then collapses repeats of the same status.
-                if (evt.TryGetProperty("rate_limit_info", out var rlInfo))
-                {
-                    var rlStatus = rlInfo.TryGetProperty("status", out var rlStatusEl) ? rlStatusEl.GetString() : null;
-                    var rlOverage = rlInfo.TryGetProperty("isUsingOverage", out var rlOverageEl) && rlOverageEl.ValueKind == JsonValueKind.True;
-                    if (rlOverage || !string.Equals(rlStatus, "allowed", StringComparison.OrdinalIgnoreCase))
-                    {
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "rate-limit", Text = rlInfo.GetRawText() }));
-                        Console.Out.Flush();
-                    }
-                }
-            }
-            else if (type == "result")
-            {
-                resultMs = sw.ElapsedMilliseconds;
-                EmitTiming("result received", resultMs);
-
-                // session id is stable across turns once set, but the result event
-                // re-emits it — refresh + re-broadcast in case the extension missed it
-                if (evt.TryGetProperty("session_id", out var sidProp))
-                {
-                    var newSid = sidProp.GetString();
-                    if (!string.IsNullOrEmpty(newSid) && newSid != SessionId)
-                    {
-                        SessionId = newSid;
-                        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "session", Text = newSid! }));
-                        Console.Out.Flush();
-                    }
-                }
-
-                if (evt.TryGetProperty("usage", out var usage))
-                {
-                    var inputTok = usage.TryGetProperty("input_tokens", out var inp) ? inp.GetInt32() : 0;
-                    var outputTok = usage.TryGetProperty("output_tokens", out var out_) ? out_.GetInt32() : 0;
-                    var cacheCreate = usage.TryGetProperty("cache_creation_input_tokens", out var cc) ? cc.GetInt32() : 0;
-                    var cacheRead = usage.TryGetProperty("cache_read_input_tokens", out var cr) ? cr.GetInt32() : 0;
-                    finalInputTok = inputTok + cacheCreate;
-                    finalOutputTok = outputTok;
-                    finalCacheCreate = cacheCreate;
-                    finalCacheRead = cacheRead;
-                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "tokens", Text = $"{finalInputTok}/{outputTok}/{cacheRead}" }));
-                    Console.Out.Flush();
-                }
-
-                // #11: probed 2026-07-20 — this terminal subtype carries no
-                // "result" string (unlike a normal error), so it needs its own
-                // check rather than falling into the generic is_error branch
-                // below. The turn's own text already streamed normally before
-                // this arrived; claude.exe exits right after (respawns like
-                // any other dead-process case on the next send).
-                if (evt.TryGetProperty("subtype", out var resultSubtype) && resultSubtype.GetString() == "error_max_budget_usd")
-                {
-                    string? budgetMsg = null;
-                    if (evt.TryGetProperty("errors", out var errsEl) && errsEl.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var e in errsEl.EnumerateArray())
-                        {
-                            if (e.ValueKind == JsonValueKind.String) { budgetMsg = e.GetString(); break; }
-                        }
-                    }
-                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "budget-exceeded", Text = budgetMsg ?? "Max budget reached" }));
-                    Console.Out.Flush();
-                }
-                else if (evt.TryGetProperty("is_error", out var isErrProp) && isErrProp.GetBoolean() &&
-                    evt.TryGetProperty("result", out var resultProp))
-                {
-                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = resultProp.GetString() ?? "" }));
-                    Console.Out.Flush();
-                }
-
+                resultMs = lineElapsedMs;
                 var totalMs = sw.ElapsedMilliseconds;
                 EmitTiming("total", totalMs);
                 AppendPerfLog(new
@@ -1427,7 +1037,6 @@ The user's IDE selection (if any) is included in the conversation context and ma
                 Console.Out.Flush();
                 return;
             }
-            // Other event types (status, rate_limit_event, etc.) are intentionally ignored.
         }
 
         // stdout closed mid-turn — claude died
@@ -1574,20 +1183,6 @@ The user's IDE selection (if any) is included in the conversation context and ma
         lock (_stderrBuffer) return _stderrBuffer.ToString();
     }
 
-    private static void EmitTokensLive(JsonElement usage)
-    {
-        var inTok = usage.TryGetProperty("input_tokens", out var i) ? i.GetInt32() : 0;
-        var outTok = usage.TryGetProperty("output_tokens", out var o) ? o.GetInt32() : 0;
-        var cacheRead = usage.TryGetProperty("cache_read_input_tokens", out var cr) ? cr.GetInt32() : 0;
-        var cacheCreate = usage.TryGetProperty("cache_creation_input_tokens", out var cc) ? cc.GetInt32() : 0;
-        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
-        {
-            Type = "tokens-live",
-            Text = $"{inTok + cacheCreate}/{outTok}/{cacheRead}"
-        }));
-        Console.Out.Flush();
-    }
-
     private static void EmitTiming(string label, long ms)
     {
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"{label}: {ms}ms" }));
@@ -1598,108 +1193,6 @@ The user's IDE selection (if any) is included in the conversation context and ma
     {
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = text }));
         Console.Out.Flush();
-    }
-
-    // #13: a subagent's content array can carry thinking/text/tool_use blocks
-    // (never tool_result — that arrives as its own "user"-type event, handled
-    // where the top-level tool_result parsing lives). Mirrors the shape of the
-    // main-conversation "assistant" handling above it, tagged so the UI can
-    // route it to the right nested trace instead of the main chat.
-    private static void EmitSubagentAssistantEvent(string parentId, JsonElement evt, JsonElement msgObj)
-    {
-        var subagentType = evt.TryGetProperty("subagent_type", out var stEl) ? stEl.GetString() : null;
-        var taskDescription = evt.TryGetProperty("task_description", out var tdEl) ? tdEl.GetString() : null;
-
-        if (!msgObj.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
-            return;
-
-        foreach (var item in content.EnumerateArray())
-        {
-            if (!item.TryGetProperty("type", out var itemType)) continue;
-            var itemTypeStr = itemType.GetString();
-
-            if (itemTypeStr == "thinking")
-            {
-                var thinking = item.TryGetProperty("thinking", out var thEl) ? thEl.GetString() : null;
-                if (string.IsNullOrEmpty(thinking)) continue;
-                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
-                {
-                    Type = "subagent-thinking",
-                    Text = thinking,
-                    ParentToolId = parentId,
-                    SubagentType = subagentType,
-                    TaskDescription = taskDescription
-                }));
-                Console.Out.Flush();
-            }
-            else if (itemTypeStr == "text")
-            {
-                var text = item.TryGetProperty("text", out var txEl) ? txEl.GetString() : null;
-                if (string.IsNullOrEmpty(text)) continue;
-                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
-                {
-                    Type = "subagent-text",
-                    Text = text,
-                    ParentToolId = parentId,
-                    SubagentType = subagentType,
-                    TaskDescription = taskDescription
-                }));
-                Console.Out.Flush();
-            }
-            else if (itemTypeStr == "tool_use")
-            {
-                var name = item.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
-                var id = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
-                string? inputJson = item.TryGetProperty("input", out var inputProp) ? inputProp.GetRawText() : null;
-                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk
-                {
-                    Type = "subagent-tool_use",
-                    Tool = name,
-                    ToolInput = inputJson,
-                    ToolId = id,
-                    ParentToolId = parentId,
-                    SubagentType = subagentType,
-                    TaskDescription = taskDescription
-                }));
-                Console.Out.Flush();
-            }
-        }
-    }
-
-    // Shared by the main tool_result loop and #13's subagent one — extracts
-    // the tool_use_id, a truncated text summary, and the error flag from a
-    // {"type":"tool_result", ...} content item.
-    private static void SummarizeToolResultItem(JsonElement item, out string? id, out string? summary, out bool isError)
-    {
-        id = item.TryGetProperty("tool_use_id", out var idProp) ? idProp.GetString() : null;
-        summary = null;
-
-        if (item.TryGetProperty("content", out var contentProp))
-        {
-            if (contentProp.ValueKind == JsonValueKind.String)
-            {
-                summary = contentProp.GetString();
-            }
-            else if (contentProp.ValueKind == JsonValueKind.Array)
-            {
-                var sb = new StringBuilder();
-                foreach (var c in contentProp.EnumerateArray())
-                {
-                    if (c.TryGetProperty("type", out var ct) && ct.GetString() == "text" &&
-                        c.TryGetProperty("text", out var tt))
-                    {
-                        if (sb.Length > 0) sb.Append('\n');
-                        sb.Append(tt.GetString());
-                    }
-                }
-                summary = sb.ToString();
-            }
-        }
-
-        if (summary != null && summary.Length > 240)
-            summary = summary.Substring(0, 237) + "...";
-
-        isError = item.TryGetProperty("is_error", out var errProp) && errProp.GetBoolean();
     }
 
     private static void EmitWarn(string text)
