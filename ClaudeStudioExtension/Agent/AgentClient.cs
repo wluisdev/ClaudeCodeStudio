@@ -504,11 +504,29 @@ public class AgentClient
 
         while (true)
         {
-            var readTask = _reader!.ReadLineAsync();
-            var winner = await Task.WhenAny(readTask, _cancelTcs.Task);
-            if (winner == _cancelTcs.Task) cancelled = true;
+            // The agent can be torn down mid-turn: a cancel puts this loop into
+            // drain mode (see `if (cancelled) continue` below), and a following
+            // clear/reset runs StopAsync, which nulls _reader AND disposes the
+            // stream. The rodada-12 guard (~442) only revalidates at turn START,
+            // so the drain loop would re-read a now-null _reader here and NRE
+            // (rodada 15). Snapshot the field and bail if it's already gone; the
+            // try/catch covers the reader being disposed while a read is pending.
+            var reader = _reader;
+            if (reader == null) break;
 
-            var responseJson = await readTask;
+            string? responseJson;
+            try
+            {
+                var readTask = reader.ReadLineAsync();
+                var winner = await Task.WhenAny(readTask, _cancelTcs.Task);
+                if (winner == _cancelTcs.Task) cancelled = true;
+                responseJson = await readTask;
+            }
+            catch (Exception ex) when (ex is ObjectDisposedException || ex is IOException)
+            {
+                OutputLog.Info("read loop ended: agent stream closed mid-turn");
+                break;
+            }
 
             if (responseJson == null) break;
 
