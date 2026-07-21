@@ -500,9 +500,14 @@ sealed class ClaudeSession : IAsyncDisposable
     // flip between each other live via set_permission_mode — so the key must
     // not change between them. yolo spawns with --dangerously-skip-permissions
     // (a flag, not a mode) and keeps its own profile (mode changes to/from
-    // yolo still respawn).
+    // yolo still respawn). #8: dontAsk is a genuine CLI-native mode (probed
+    // 2026-07-20) — the CLI blocks all writes itself before a PreToolUse hook
+    // would ever see them, so it needs neither hooks nor bypassPermissions;
+    // its own profile means switching to/from it always respawns too, same as
+    // yolo (no attempt to live-switch into/out of a mode with a different
+    // spawn shape — set_permission_mode is only PoC-confirmed for plan<->ask).
     private static string PermissionProfile(string? mode) =>
-        mode == "yolo" ? "yolo" : "hooked";
+        mode == "yolo" ? "yolo" : mode == "dontAsk" ? "dontAsk" : "hooked";
 
     // Appended to claude's system prompt (--append-system-prompt). Mirrors the
     // official VS Code extension's append (v2.1.145): markdown-link file
@@ -617,6 +622,26 @@ The user's IDE selection (if any) is included in the conversation context and ma
         if (_permissionMode == "yolo")
         {
             psi.ArgumentList.Add("--dangerously-skip-permissions");
+        }
+        else if (_permissionMode == "dontAsk")
+        {
+            // #8: probed 2026-07-20 — real, CLI-enforced deny-by-default for
+            // writes (Edit/Write/file-modifying Bash all get refused with a
+            // clear message, no prompt); reads/searches run freely. No hooks,
+            // no bypass — the CLI itself is the sole gatekeeper here.
+            psi.ArgumentList.Add("--permission-mode");
+            psi.ArgumentList.Add("dontAsk");
+
+            // Same as the hook-pipe branch below: pasted images (Ctrl+V) land
+            // in %TEMP%/ClaudeStudio — allow Read there even though writes
+            // are blocked everywhere in this mode.
+            var dontAskTempDir = Path.Combine(Path.GetTempPath(), "ClaudeStudio");
+            if (!Directory.Exists(dontAskTempDir))
+            {
+                try { Directory.CreateDirectory(dontAskTempDir); } catch { }
+            }
+            psi.ArgumentList.Add("--add-dir");
+            psi.ArgumentList.Add(dontAskTempDir);
         }
         else // "ask" / "plan" — one spawn profile, live-switchable via set_permission_mode
         {

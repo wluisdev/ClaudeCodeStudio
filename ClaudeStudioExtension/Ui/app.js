@@ -1403,7 +1403,7 @@ autoSaveSlider.addEventListener("input", () => {
 // slider), so the popup is a list of clickable items. The send code reads
 // `permissionSelect.value` — keep a shim so the existing call site doesn't
 // have to change.
-const PERMISSION_ICONS = { ask: "🔒", plan: "📋", yolo: "⚡" };
+const PERMISSION_ICONS = { ask: "🔒", plan: "📋", dontAsk: "🔕", yolo: "⚡" };
 let _permissionValue = "ask";
 const permissionSelect = {
     get value() { return _permissionValue; },
