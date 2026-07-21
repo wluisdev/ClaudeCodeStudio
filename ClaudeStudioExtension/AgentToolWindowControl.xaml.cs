@@ -3130,74 +3130,65 @@ public partial class AgentToolWindowControl : UserControl
         var keptLines = new System.Collections.Generic.List<string>();
         var msgs = new System.Collections.Generic.List<object>();
         var pendingTools = new Dictionary<string, Dictionary<string, object?>>();
-        int visibleCount = 0;
 
+        System.Collections.Generic.List<string> allLines;
         try
         {
             using var fs = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using var sr = new StreamReader(fs);
+            allLines = new System.Collections.Generic.List<string>();
             string? line;
             while ((line = await sr.ReadLineAsync()) != null)
-            {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-
-                try
-                {
-                    using var doc = JsonDocument.Parse(line);
-                    var root = doc.RootElement;
-                    if (!root.TryGetProperty("type", out var tEl)) { keptLines.Add(line); continue; }
-                    var entryType = tEl.GetString();
-                    if (entryType != "user" && entryType != "assistant") { keptLines.Add(line); continue; }
-                    // isMeta lines stay in the copy (CLI context) but render no
-                    // bubble and consume no visibleCount ordinal — the UI never
-                    // shows them, and msgIndex counts DOM text bubbles.
-                    if (IsMetaLine(root)) { keptLines.Add(line); continue; }
-                    if (!root.TryGetProperty("message", out var msg)) { keptLines.Add(line); continue; }
-                    if (!msg.TryGetProperty("content", out var content)) { keptLines.Add(line); continue; }
-
-                    string? text = null;
-                    if (content.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var item in content.EnumerateArray())
-                        {
-                            if (item.TryGetProperty("type", out var itEl) && itEl.GetString() == "text" &&
-                                item.TryGetProperty("text", out var txEl))
-                            {
-                                text = (text ?? "") + (txEl.GetString() ?? "");
-                            }
-                        }
-                    }
-                    else if (content.ValueKind == JsonValueKind.String)
-                    {
-                        text = content.GetString();
-                    }
-
-                    if (string.IsNullOrEmpty(text))
-                    {
-                        // No visible bubble, but the line may carry tool_use/
-                        // tool_result content — replayed as cards/chips without
-                        // consuming a visible-message ordinal (branch/rewind
-                        // ordinals index text bubbles only).
-                        CollectToolReplay(root, content, msgs, pendingTools);
-                        keptLines.Add(line);
-                        continue;
-                    }
-
-                    keptLines.Add(RewriteSessionIdInLine(line, newSessionId));
-                    msgs.Add(new { role = entryType, text });
-                    CollectToolReplay(root, content, msgs, pendingTools);
-                }
-                catch { keptLines.Add(line); continue; }
-
-                if (visibleCount == msgIndex)
-                    break;
-                visibleCount++;
-            }
+                allLines.Add(line);
         }
         catch (Exception ex)
         {
             OutputLog.Error($"branch read failed: {ex.Message}");
             return;
+        }
+
+        // #22a: ordinal math extracted to ClaudeStudioShared.SessionOrdinals,
+        // unit-tested there (the class of bug behind the rounds-11/12 ⎇/⟲
+        // desyncs). No bounds check today for an out-of-range msgIndex — the
+        // whole file gets kept/copied — so the fallback reproduces that
+        // exactly instead of erroring.
+        var boundary = ClaudeStudioShared.SessionOrdinals.FindBranchBoundaryLineIndex(allLines, msgIndex)
+                       ?? allLines.Count - 1;
+
+        for (int i = 0; i <= boundary; i++)
+        {
+            var line = allLines[i];
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var root = doc.RootElement;
+                if (!root.TryGetProperty("type", out var tEl)) { keptLines.Add(line); continue; }
+                var entryType = tEl.GetString();
+                if (entryType != "user" && entryType != "assistant") { keptLines.Add(line); continue; }
+                if (ClaudeStudioShared.SessionOrdinals.IsMetaLine(root)) { keptLines.Add(line); continue; }
+                if (!root.TryGetProperty("message", out var msg)) { keptLines.Add(line); continue; }
+                if (!msg.TryGetProperty("content", out var content)) { keptLines.Add(line); continue; }
+
+                var text = ClaudeStudioShared.SessionOrdinals.ExtractText(content);
+
+                if (string.IsNullOrEmpty(text))
+                {
+                    // No visible bubble, but the line may carry tool_use/
+                    // tool_result content — replayed as cards/chips without
+                    // consuming a visible-message ordinal (branch/rewind
+                    // ordinals index text bubbles only).
+                    CollectToolReplay(root, content, msgs, pendingTools);
+                    keptLines.Add(line);
+                    continue;
+                }
+
+                keptLines.Add(RewriteSessionIdInLine(line, newSessionId));
+                msgs.Add(new { role = entryType, text });
+                CollectToolReplay(root, content, msgs, pendingTools);
+            }
+            catch { keptLines.Add(line); continue; }
         }
 
         try
@@ -3261,47 +3252,15 @@ public partial class AgentToolWindowControl : UserControl
             : null;
         if (sourceFile == null) { PostRewindError("Session transcript not found."); return; }
 
-        var userUuids = new System.Collections.Generic.List<string>();
+        System.Collections.Generic.List<string> lines;
         try
         {
             using var fs = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using var sr = new StreamReader(fs);
+            lines = new System.Collections.Generic.List<string>();
             string? line;
             while ((line = await sr.ReadLineAsync()) != null)
-            {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                try
-                {
-                    using var doc = JsonDocument.Parse(line);
-                    var root = doc.RootElement;
-                    if (!root.TryGetProperty("type", out var tEl) || tEl.GetString() != "user") continue;
-                    // isMeta lines carry text but never render as bubbles — counting
-                    // them here would shift ⟲ ordinals after a skill runs.
-                    if (IsMetaLine(root)) continue;
-                    if (!root.TryGetProperty("message", out var msg)) continue;
-                    if (!msg.TryGetProperty("content", out var content)) continue;
-
-                    // Real user messages carry text; tool_result entries (also
-                    // type:"user") carry a tool_result block with no text → skip.
-                    string? text = null;
-                    if (content.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var item in content.EnumerateArray())
-                            if (item.TryGetProperty("type", out var itEl) && itEl.GetString() == "text" &&
-                                item.TryGetProperty("text", out var txEl))
-                                text = (text ?? "") + (txEl.GetString() ?? "");
-                    }
-                    else if (content.ValueKind == JsonValueKind.String)
-                    {
-                        text = content.GetString();
-                    }
-                    if (string.IsNullOrEmpty(text)) continue;
-
-                    if (root.TryGetProperty("uuid", out var uEl) && uEl.GetString() is { } u)
-                        userUuids.Add(u);
-                }
-                catch { continue; }
-            }
+                lines.Add(line);
         }
         catch (Exception ex)
         {
@@ -3310,13 +3269,16 @@ public partial class AgentToolWindowControl : UserControl
             return;
         }
 
-        if (msgIndex < 0 || msgIndex >= userUuids.Count)
+        // #22a: ordinal math (isMeta/text-emptiness/tool_result-echo rules)
+        // lives in ClaudeStudioShared.SessionOrdinals now, unit-tested there —
+        // this is the class of bug the rounds-11/12 desyncs came from.
+        var (uuid, totalUserMessages) = ClaudeStudioShared.SessionOrdinals.FindRewindUserUuid(lines, msgIndex);
+        if (uuid == null)
         {
-            OutputLog.Warn($"rewind: user ordinal {msgIndex} out of range (found {userUuids.Count} user messages)");
+            OutputLog.Warn($"rewind: user ordinal {msgIndex} out of range (found {totalUserMessages} user messages)");
             PostRewindError("Could not locate that message in the transcript.");
             return;
         }
-        var uuid = userUuids[msgIndex];
 
         var (resultJson, error) = await _agentClient.RewindAsync(uuid!, dryRun);
         if (error != null || resultJson == null)

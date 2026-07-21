@@ -7,4 +7,11 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Pinned to match what ClaudeStudioExtension already resolves transitively
+         (via Microsoft.VisualStudio.SDK) so this explicit reference can't bump
+         the version actually shipped inside the VSIX. -->
+    <PackageReference Include="System.Text.Json" Version="9.0.0" />
+  </ItemGroup>
+
 </Project>

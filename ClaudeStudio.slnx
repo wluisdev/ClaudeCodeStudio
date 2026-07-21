@@ -4,4 +4,5 @@
     <Deploy />
   </Project>
   <Project Path="ClaudeStudioShared/ClaudeStudioShared.csproj" />
+  <Project Path="ClaudeStudioTests/ClaudeStudioTests.csproj" />
 </Solution>
