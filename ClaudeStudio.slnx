@@ -1,4 +1,9 @@
 <Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".gitignore" />
+    <File Path="LICENSE.txt" />
+    <File Path="README.md" />
+  </Folder>
   <Project Path="ClaudeStudioAgent/ClaudeStudioAgent.csproj" />
   <Project Path="ClaudeStudioExtension/ClaudeStudioExtension.csproj" Id="1d0644b2-0126-43c6-be49-e9fc3a424a57">
     <Deploy />
