@@ -509,6 +509,18 @@ sealed class ClaudeSession : IAsyncDisposable
     private static string PermissionProfile(string? mode) =>
         mode == "yolo" ? "yolo" : mode == "dontAsk" ? "dontAsk" : "hooked";
 
+    // #19: what claude's own init.permissionMode should read back as, given
+    // how each UI mode actually spawns (mirrors the branches ~line 622+).
+    // "ask" reports "bypassPermissions" too when a hook pipe is gatekeeping —
+    // that's the expected, correct case, not a mismatch.
+    private string ExpectedCliPermissionMode() => _permissionMode switch
+    {
+        "yolo" => "bypassPermissions",
+        "dontAsk" => "dontAsk",
+        "plan" => "plan",
+        _ => _pipeName != null ? "bypassPermissions" : "default", // "ask"
+    };
+
     // Appended to claude's system prompt (--append-system-prompt). Mirrors the
     // official VS Code extension's append (v2.1.145): markdown-link file
     // references make them clickable in the webview (the UI turns non-http
@@ -991,6 +1003,23 @@ The user's IDE selection (if any) is included in the conversation context and ma
                         Console.Out.Flush();
                     }
                 }
+
+                // #19: init also carries the CLI's own view of the permission
+                // mode — worth checking after #8 found that unsupported
+                // --permission-mode values (auto, manual) get silently
+                // dropped to "default" instead of erroring. If a future CLI
+                // build does the same to a mode we DO rely on, this catches
+                // it instead of the user finding out the hard way.
+                if (evt.TryGetProperty("permissionMode", out var pmEl) && pmEl.ValueKind == JsonValueKind.String)
+                {
+                    var actualPm = pmEl.GetString();
+                    var expectedPm = ExpectedCliPermissionMode();
+                    if (!string.IsNullOrEmpty(actualPm) && actualPm != expectedPm)
+                    {
+                        EmitWarn($"permission mode mismatch: requested \"{_permissionMode}\" (expected claude to report \"{expectedPm}\") but it reports \"{actualPm}\" — permissions may not behave as expected");
+                    }
+                }
+
                 EmitTiming("claude init", sw.ElapsedMilliseconds);
             }
             else if (type == "assistant")
