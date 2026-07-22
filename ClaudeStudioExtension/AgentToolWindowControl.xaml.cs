@@ -1757,9 +1757,11 @@ public partial class AgentToolWindowControl : UserControl
                             SessionTitlesStore.SetGenerated(titleSessionId!, title!);
                         else if (error != null &&
                                  (error.Contains("no active session") || error.Contains("disposed") ||
-                                  error.Contains("exited") || error.Contains("ended unexpectedly")))
+                                  error.Contains("exited") || error.Contains("ended unexpectedly") ||
+                                  error.Contains("agent not running")))
                             // Expected race, not a failure: cancel/clear right after
-                            // the turn kills claude before the title request lands.
+                            // the turn kills claude before the title request lands
+                            // ("agent not running" is the stopped-agent guard).
                             OutputLog.Info("session title skipped: session ended before generation");
                         else if (error != null)
                             OutputLog.Warn($"session title generation failed: {error}");
@@ -2184,6 +2186,11 @@ public partial class AgentToolWindowControl : UserControl
                 sb.AppendLine();
                 sb.AppendLine($"_Session {sessionId}_");
 
+                // Mirror the chat replay: a compact_boundary (type:"system") becomes
+                // a divider, deferred so it sits after the /compact section (or before
+                // the next turn, for an auto-compact) to match the chat order.
+                (long pre, long post)? pendingCompact = null;
+
                 foreach (var line in File.ReadLines(sourceFile))
                 {
                     if (string.IsNullOrWhiteSpace(line)) continue;
@@ -2191,6 +2198,13 @@ public partial class AgentToolWindowControl : UserControl
                     try { root = JsonSerializer.Deserialize<JsonElement>(line); }
                     catch { continue; }
                     var type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
+
+                    if (TryExtractCompactBoundary(root, out var preTok, out var postTok))
+                    {
+                        pendingCompact = (preTok, postTok);
+                        continue;
+                    }
+
                     if (type != "user" && type != "assistant") continue;
                     if (ClaudeStudioShared.SessionOrdinals.IsHiddenReplayLine(root)) continue;
                     if (!root.TryGetProperty("message", out var msg)) continue;
@@ -2224,14 +2238,38 @@ public partial class AgentToolWindowControl : UserControl
                     // (/compact) in the transcript; caveat/stdout echoes were
                     // already dropped by IsHiddenReplayLine above.
                     var raw = text.ToString();
-                    var body = (ExtractCommandInvocation(raw) ?? StripLocalCommandCaveat(raw)).Trim();
+                    var cmdName = ExtractCommandInvocation(raw);
+                    var body = (cmdName ?? StripLocalCommandCaveat(raw)).Trim();
                     if (body.Length == 0) continue;
+
+                    // Auto-compact: the held divider sits before this turn.
+                    if (pendingCompact != null && cmdName == null)
+                    {
+                        sb.AppendLine();
+                        sb.AppendLine($"_🗜️ Compacted: {FmtTokensShort(pendingCompact.Value.pre)} → {FmtTokensShort(pendingCompact.Value.post)} tokens_");
+                        pendingCompact = null;
+                    }
+
                     sb.AppendLine();
                     sb.AppendLine("---");
                     sb.AppendLine();
                     sb.AppendLine(type == "user" ? "## You" : "## Claude");
                     sb.AppendLine();
                     sb.AppendLine(body);
+
+                    // Manual /compact: the held divider sits below the /compact section.
+                    if (pendingCompact != null && cmdName != null)
+                    {
+                        sb.AppendLine();
+                        sb.AppendLine($"_🗜️ Compacted: {FmtTokensShort(pendingCompact.Value.pre)} → {FmtTokensShort(pendingCompact.Value.post)} tokens_");
+                        pendingCompact = null;
+                    }
+                }
+
+                if (pendingCompact != null)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine($"_🗜️ Compacted: {FmtTokensShort(pendingCompact.Value.pre)} → {FmtTokensShort(pendingCompact.Value.post)} tokens_");
                 }
 
                 Directory.CreateDirectory(_tempDir);
@@ -2925,6 +2963,11 @@ public partial class AgentToolWindowControl : UserControl
 
         var msgs = new System.Collections.Generic.List<object>();
         var pendingTools = new Dictionary<string, Dictionary<string, object?>>();
+        // A /compact writes its compact_boundary line BEFORE the command echo, so
+        // emitting the divider at the boundary would put it ABOVE the /compact
+        // chip. Hold it here and flush it after the chip (manual compact) or
+        // before the next message (auto-compact) to match the live order.
+        (long pre, long post)? pendingCompact = null;
 
         try
         {
@@ -2943,9 +2986,7 @@ public partial class AgentToolWindowControl : UserControl
                     var entryType = tEl.GetString();
                     if (TryExtractCompactBoundary(root, out var preTok, out var postTok))
                     {
-                        // Rebuild the live "🗜️ Compacted" divider so the replay
-                        // matches what was shown when the compaction happened.
-                        msgs.Add(new { role = "compact", pre = preTok, post = postTok });
+                        pendingCompact = (preTok, postTok);
                         continue;
                     }
                     if (entryType != "user" && entryType != "assistant") continue;
@@ -2979,9 +3020,28 @@ public partial class AgentToolWindowControl : UserControl
                     // dropped by IsHiddenReplayLine above.)
                     var cmd = ExtractCommandInvocation(text);
                     if (cmd != null)
+                    {
                         msgs.Add(new { role = "command", text = cmd });
-                    else if (!string.IsNullOrEmpty(text))
-                        msgs.Add(new { role = entryType, text });
+                        // The /compact chip's divider was held back — flush it
+                        // below the chip now (live order: command, then result).
+                        if (pendingCompact != null)
+                        {
+                            msgs.Add(new { role = "compact", pre = pendingCompact.Value.pre, post = pendingCompact.Value.post });
+                            pendingCompact = null;
+                        }
+                    }
+                    else
+                    {
+                        // Auto-compact (no command chip): flush the held divider
+                        // at its natural spot, before this message.
+                        if (pendingCompact != null)
+                        {
+                            msgs.Add(new { role = "compact", pre = pendingCompact.Value.pre, post = pendingCompact.Value.post });
+                            pendingCompact = null;
+                        }
+                        if (!string.IsNullOrEmpty(text))
+                            msgs.Add(new { role = entryType, text });
+                    }
 
                     // Question cards and tool chips ride along with the text
                     // bubbles — the replay used to be text-only, so answered
@@ -2997,6 +3057,10 @@ public partial class AgentToolWindowControl : UserControl
             OutputLog.Error($"resume read failed: {ex.Message}");
             return;
         }
+
+        // A compact_boundary with nothing visible after it (rare) still shows.
+        if (pendingCompact != null)
+            msgs.Add(new { role = "compact", pre = pendingCompact.Value.pre, post = pendingCompact.Value.post });
 
         OutputLog.Info($"resume: loaded {msgs.Count} messages from {sessionId}");
 
@@ -3176,6 +3240,10 @@ public partial class AgentToolWindowControl : UserControl
         var boundary = ClaudeStudioShared.SessionOrdinals.FindBranchBoundaryLineIndex(allLines, msgIndex)
                        ?? allLines.Count - 1;
 
+        // Hold a compact divider until after the /compact chip (or before the
+        // next message) — the JSONL writes the boundary before the command echo.
+        (long pre, long post)? pendingCompact = null;
+
         for (int i = 0; i <= boundary; i++)
         {
             var line = allLines[i];
@@ -3189,7 +3257,7 @@ public partial class AgentToolWindowControl : UserControl
                 var entryType = tEl.GetString();
                 if (TryExtractCompactBoundary(root, out var preTok, out var postTok))
                 {
-                    msgs.Add(new { role = "compact", pre = preTok, post = postTok });
+                    pendingCompact = (preTok, postTok);
                     keptLines.Add(line);
                     continue;
                 }
@@ -3206,6 +3274,11 @@ public partial class AgentToolWindowControl : UserControl
                     // tool_result content — replayed as cards/chips without
                     // consuming a visible-message ordinal (branch/rewind
                     // ordinals index text bubbles only).
+                    if (pendingCompact != null)
+                    {
+                        msgs.Add(new { role = "compact", pre = pendingCompact.Value.pre, post = pendingCompact.Value.post });
+                        pendingCompact = null;
+                    }
                     CollectToolReplay(root, content, msgs, pendingTools);
                     keptLines.Add(line);
                     continue;
@@ -3216,13 +3289,31 @@ public partial class AgentToolWindowControl : UserControl
                 // a counted user bubble so the boundary math stays aligned.
                 var cmd = ExtractCommandInvocation(text);
                 if (cmd != null)
+                {
                     msgs.Add(new { role = "command", text = cmd });
+                    if (pendingCompact != null) // divider goes below the /compact chip
+                    {
+                        msgs.Add(new { role = "compact", pre = pendingCompact.Value.pre, post = pendingCompact.Value.post });
+                        pendingCompact = null;
+                    }
+                }
                 else
+                {
+                    if (pendingCompact != null) // auto-compact: divider before this message
+                    {
+                        msgs.Add(new { role = "compact", pre = pendingCompact.Value.pre, post = pendingCompact.Value.post });
+                        pendingCompact = null;
+                    }
                     msgs.Add(new { role = entryType, text });
+                }
                 CollectToolReplay(root, content, msgs, pendingTools);
             }
             catch { keptLines.Add(line); continue; }
         }
+
+        // A compact_boundary with nothing visible after it (rare) still shows.
+        if (pendingCompact != null)
+            msgs.Add(new { role = "compact", pre = pendingCompact.Value.pre, post = pendingCompact.Value.post });
 
         try
         {
@@ -3328,6 +3419,16 @@ public partial class AgentToolWindowControl : UserControl
                 msgIndex,
                 result = JsonSerializer.Deserialize<JsonElement>(resultJson)
             })));
+    }
+
+    // Mirrors app.js fmtTokens: 33403 → "33.4k". Used by the transcript export's
+    // compact divider so it reads the same as the chat.
+    private static string FmtTokensShort(long n)
+    {
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        if (n >= 1_000_000) return (n / 1_000_000.0).ToString("0.0", ci) + "M";
+        if (n >= 1_000) return (n / 1_000.0).ToString("0.0", ci) + "k";
+        return n.ToString(ci);
     }
 
     // A compact_boundary is a type:"system" line that /compact (or auto-compact)
