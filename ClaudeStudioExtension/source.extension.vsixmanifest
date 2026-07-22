@@ -4,6 +4,12 @@
     <Identity Id="ClaudeStudioExtension.8a6dcdda-70c0-43d0-af04-1e6a25bca67f" Version="1.0" Language="en-US" Publisher="wluisdev" />
     <DisplayName>Claude Code Studio</DisplayName>
     <Description>Claude Code integration for Visual Studio 2022 — chat interface powered by WebView2 with streaming responses, session history, and file attachments.</Description>
+    <MoreInfo>https://github.com/wluisdev/ClaudeCodeStudio</MoreInfo>
+    <License>LICENSE.txt</License>
+    <GettingStartedGuide>https://github.com/wluisdev/ClaudeCodeStudio#readme</GettingStartedGuide>
+    <ReleaseNotes>https://github.com/wluisdev/ClaudeCodeStudio/releases</ReleaseNotes>
+    <PreviewImage>preview.png</PreviewImage>
+    <Tags>Claude, Claude Code, AI, coding assistant, chat, agent, Anthropic, LLM, WebView2</Tags>
   </Metadata>
   <Installation>
     <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.14, )">

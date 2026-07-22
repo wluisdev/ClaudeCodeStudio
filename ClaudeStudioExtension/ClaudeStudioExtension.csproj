@@ -39,6 +39,19 @@
     <ProjectCapability Include="CreateVsixContainer" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Marketplace assets referenced by source.extension.vsixmanifest
+         (<License> / <PreviewImage>). Linked from the repo root so they pack at
+         the VSIX root, matching the manifest's relative paths. -->
+    <Content Include="..\LICENSE.txt">
+      <Link>LICENSE.txt</Link>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+    <Content Include="..\docs\preview.png">
+      <Link>preview.png</Link>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\ClaudeStudioShared\ClaudeStudioShared.csproj" />
     <!-- Build-order only: the agent (net10.0) must be built before this project packs it into the VSIX. -->
     <ProjectReference Include="..\ClaudeStudioAgent\ClaudeStudioAgent.csproj">
