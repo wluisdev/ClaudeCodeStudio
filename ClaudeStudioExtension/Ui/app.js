@@ -361,9 +361,9 @@ function requestContextUsage() {
     const card = document.createElement("div");
     card.className = "question-card ctx-usage-card";
     card.innerHTML = `<div class="question-text">◔ Context usage` +
-        `<button type="button" class="pinned-close" title="Close — moves the card into the chat history">✕</button></div>` +
+        `<button type="button" class="pinned-close" title="Close">✕</button></div>` +
         `<div class="ctx-usage-body">Loading…</div>`;
-    card.querySelector(".pinned-close").onclick = () => unpinCard(card);
+    card.querySelector(".pinned-close").onclick = () => dismissPinnedCard(card);
     pinCard(card, messages, "manual");
     _pendingCtxUsageCard = card;
 
@@ -382,15 +382,15 @@ function openSideQuestionCard() {
 
     const card = document.createElement("div");
     card.className = "question-card side-question-card";
-    card.innerHTML = `<div class="question-text">💬 Side question <span class="side-question-note">answered with the session's context — not added to the transcript</span></div>
+    card.innerHTML = `<div class="question-text">💬 Side question <span class="side-question-note">answered with the session's context — not added to the transcript</span><button type="button" class="pinned-close" title="Close">✕</button></div>
         <div class="side-question-ask">
             <input type="text" placeholder="e.g. what did that error mean?"
                 onkeydown="if(event.key==='Enter'){event.preventDefault();sendSideQuestion(this.closest('.side-question-card'));}" />
             <button type="button" onclick="sendSideQuestion(this.closest('.side-question-card'))">Ask</button>
         </div>
         <div class="side-question-answer" style="display:none"></div>`;
-    messages.appendChild(card);
-    autoScroll();
+    card.querySelector(".pinned-close").onclick = () => dismissPinnedCard(card);
+    pinCard(card, messages, "manual");
     card.querySelector("input").focus();
 }
 
@@ -444,9 +444,11 @@ function requestMcpStatus() {
     if (!card) {
         card = document.createElement("div");
         card.className = "question-card mcp-status-card";
-        card.innerHTML = `<div class="question-text">🔌 MCP status</div><div class="mcp-status-body">Loading…</div>`;
-        messages.appendChild(card);
-        autoScroll();
+        card.innerHTML = `<div class="question-text">🔌 MCP status` +
+            `<button type="button" class="pinned-close" title="Close">✕</button></div>` +
+            `<div class="mcp-status-body">Loading…</div>`;
+        card.querySelector(".pinned-close").onclick = () => dismissPinnedCard(card);
+        pinCard(card, messages, "manual");
     }
     _pendingMcpCard = card;
 
@@ -506,9 +508,11 @@ function requestDoctor() {
 
     const card = document.createElement("div");
     card.className = "question-card doctor-card";
-    card.innerHTML = `<div class="question-text">🩺 Doctor</div><div class="doctor-body">Running claude doctor…</div>`;
-    messages.appendChild(card);
-    autoScroll();
+    card.innerHTML = `<div class="question-text">🩺 Doctor` +
+        `<button type="button" class="pinned-close" title="Close">✕</button></div>` +
+        `<div class="doctor-body">Running claude doctor…</div>`;
+    card.querySelector(".pinned-close").onclick = () => dismissPinnedCard(card);
+    pinCard(card, messages, "manual");
     _pendingDoctorCard = card;
 
     try { window.chrome.webview.postMessage({ type: "run-doctor" }); }
@@ -1524,6 +1528,18 @@ function unpinCard(card) {
     else if (!messages.contains(card)) messages.appendChild(card);
     if (!pinnedDock.firstElementChild) pinnedDock.hidden = true;
     autoScroll();
+}
+
+// Ephemeral info panels (context usage, MCP status, Doctor, side question) are
+// point-in-time snapshots — the ✕ discards them entirely instead of dropping
+// them into the transcript like unpinCard, which would just clutter the chat
+// (and, for the side question, contradict its "not added to the transcript" note).
+function dismissPinnedCard(card) {
+    const ph = card._pinPlaceholder;
+    if (ph && ph.parentNode) ph.parentNode.removeChild(ph);
+    card._pinPlaceholder = null;
+    card.remove();
+    if (!pinnedDock.firstElementChild) pinnedDock.hidden = true;
 }
 
 // Turn-scoped cards still docked when the turn ends (cancel, error — the pick
