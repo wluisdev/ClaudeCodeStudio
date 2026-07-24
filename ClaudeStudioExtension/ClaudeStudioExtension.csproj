@@ -107,9 +107,12 @@
     </ItemGroup>
   </Target>
 
+  <!-- Stamp $(Version) into the FINAL generated manifest (the one packed into the
+       VSIX). Poking merged.source.extension.vsixmanifest is too late: extension.vsixmanifest
+       is generated from it before this runs, so the packed copy kept the placeholder. -->
   <Target Name="SyncVsixVersion" BeforeTargets="CreateVsixContainer">
     <XmlPoke
-      XmlInputPath="$(IntermediateOutputPath)merged.source.extension.vsixmanifest"
+      XmlInputPath="$(IntermediateOutputPath)extension.vsixmanifest"
       Query="//*[local-name()='Identity']/@Version"
       Value="$(Version)" />
   </Target>
