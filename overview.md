@@ -4,10 +4,6 @@ A native **Claude Code** chat client for **Visual Studio 2022** — a WebView2 c
 
 Unlike terminal-embedding extensions, Claude Code Studio does **not** host a console window. It runs the `claude` CLI as a long-lived subprocess and speaks its streaming JSON protocol directly, so the whole conversation — text, tool calls, diffs, permission requests — is rendered as first-class UI instead of scraped terminal text.
 
-<p align="center">
-  <img src="docs/preview.png" alt="Claude Code Studio chat panel in Visual Studio 2022" width="480" />
-</p>
-
 ## Features
 
 ### Chat & streaming
@@ -78,7 +74,7 @@ ClaudeStudioAgent (subprocess, .NET 10)
    claude  (Claude Code CLI)
 ```
 
-The extension hosts the chat UI in WebView2 and launches `ClaudeStudioAgent` as a persistent subprocess. The agent spawns and talks to the `claude` CLI in streaming JSON mode, translating its event stream into chat chunks and relaying permission requests back through a `PreToolUse` hook. Pure, testable logic (event parsing, pricing, session-ordinal mapping, CLI discovery) lives in `ClaudeStudioShared` and is covered by the `ClaudeStudioTests` xUnit suite.
+The extension hosts the chat UI in WebView2 and launches `ClaudeStudioAgent` as a persistent subprocess. The agent spawns and talks to the `claude` CLI in streaming JSON mode, translating its event stream into chat chunks and relaying permission requests back through a `PreToolUse` hook.
 
 ## Requirements
 
@@ -87,30 +83,18 @@ The extension hosts the chat UI in WebView2 and launches `ClaudeStudioAgent` as 
 - **[Claude Code CLI](https://docs.claude.com/en/docs/claude-code/setup)** installed and on `PATH` (or configured via the CLI-path setting)
 - A **Claude** subscription (Pro or higher) or API access, signed in through the CLI
 
-## Installation
+## Quick start
 
-1. Build the solution (`ClaudeStudio.slnx`) in Visual Studio, or install the packaged VSIX by double-clicking it.
-2. Restart Visual Studio.
-3. Open the chat panel via **Extensions → Claude Code Studio → Chat**.
-4. If you aren't signed in yet, use the in-panel sign-in to run `claude login`.
+1. Install the extension and restart Visual Studio.
+2. Open the chat panel via **Extensions → Claude Code Studio → Chat**.
+3. If you aren't signed in yet, use the in-panel sign-in to run `claude login`.
+4. Open a solution or folder so the extension has a working directory.
+5. Pick a model (and effort level) from the model button, type a prompt, and send it — replies stream into the panel.
+6. Attach context with `@` (files), Ctrl+V (images), or the editor-selection button; approve edits inline, and review them via the diff chips.
 
-## Quick Start
+## License & data
 
-1. Open a solution or folder so the extension has a working directory.
-2. Pick a model (and effort level) from the model button.
-3. Type a prompt and send it — replies stream into the panel.
-4. Attach context with `@` (files), Ctrl+V (images), or the editor selection button.
-5. When Claude wants to edit or run something, approve it inline (or switch permission mode to suit how hands-on you want to be).
-6. Review edits via the diff chips; browse or resume past work from the session history.
-
-## Building & testing
-
-- **Solution:** `ClaudeStudio.slnx` (extension, agent, shared library, tests).
-- **Run the tests:** `dotnet test ClaudeStudioTests/ClaudeStudioTests.csproj` (xUnit; covers the shared parsing/pricing/ordinal logic).
-
-## License
-
-Released under the [MIT License](LICENSE.txt) — free to use for personal, educational, and commercial purposes, including modification and redistribution.
+Released under the **MIT License** — free for personal, educational, and commercial use, including modification and redistribution.
 
 **A note on data:** your prompts, attachments, and the code Claude reads are sent to the Claude Code CLI, which forwards them to Anthropic under [Anthropic's data-usage policy](https://docs.claude.com/en/docs/claude-code/data-usage). This extension stores only local state (settings, session titles, usage/perf logs) under `%LocalAppData%\ClaudeStudio\` and Claude's own `~/.claude` data; it sends nothing to any third party of its own.
 
@@ -118,4 +102,4 @@ Released under the [MIT License](LICENSE.txt) — free to use for personal, educ
 
 ## Acknowledgments
 
-Claude Code Studio was inspired by [**ClaudeCodeExtension**](https://github.com/dliedke/ClaudeCodeExtension) by **Daniel Carvalho (dliedke)** — several UX ideas here (session rename/view, the `@` file picker, the build-errors-to-agent flow) were adopted from that project, which is likewise MIT-licensed. It takes a different architectural path — an embedded terminal supporting many agents — and is well worth checking out. Thanks, Daniel.
+Claude Code Studio was inspired by [**ClaudeCodeExtension**](https://github.com/dliedke/ClaudeCodeExtension) by **Daniel Carvalho (dliedke)** — several UX ideas here (session rename/view, the `@` file picker, the build-errors-to-agent flow) were adopted from that project, which is likewise MIT-licensed. Thanks, Daniel.

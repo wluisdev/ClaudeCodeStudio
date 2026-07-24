@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json.schemastore.org/vsix-publish",
+  "categories": [ "coding", "other" ],
+  "identity": {
+    "internalName": "ClaudeCodeStudio"
+  },
+  "overview": "overview.md",
+  "priceCategory": "free",
+  "publisher": "wluisdev",
+  "private": false,
+  "qna": "marketplace",
+  "repo": "https://github.com/wluisdev/ClaudeCodeStudio"
+}
