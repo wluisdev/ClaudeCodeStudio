@@ -8,6 +8,7 @@
     <License>LICENSE.txt</License>
     <GettingStartedGuide>https://github.com/wluisdev/ClaudeCodeStudio#readme</GettingStartedGuide>
     <ReleaseNotes>https://github.com/wluisdev/ClaudeCodeStudio/releases</ReleaseNotes>
+    <Icon>Resources\ExtensionLogo.png</Icon>
     <PreviewImage>preview.png</PreviewImage>
     <Tags>Claude, Claude Code, AI, coding assistant, chat, agent, Anthropic, LLM, WebView2</Tags>
   </Metadata>

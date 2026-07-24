@@ -40,14 +40,18 @@
   </ItemGroup>
   <ItemGroup>
     <!-- Marketplace assets referenced by source.extension.vsixmanifest
-         (<License> / <PreviewImage>). Linked from the repo root so they pack at
-         the VSIX root, matching the manifest's relative paths. -->
+         (<License> / <Icon> / <PreviewImage>). LICENSE/preview are linked from the
+         repo root so they pack at the VSIX root; the icon lives under Resources and
+         packs at Resources\ExtensionLogo.png, matching the manifest's relative paths. -->
     <Content Include="..\LICENSE.txt">
       <Link>LICENSE.txt</Link>
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
     <Content Include="..\docs\preview.png">
       <Link>preview.png</Link>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+    <Content Include="Resources\ExtensionLogo.png">
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
   </ItemGroup>
