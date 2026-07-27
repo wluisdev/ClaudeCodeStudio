@@ -2052,6 +2052,7 @@ textarea.addEventListener("keydown", (e) => {
 const modelList = [
     { id: "claude-sonnet-5",           label: "Sonnet 5" },
     { id: "claude-sonnet-4-6",         label: "Sonnet 4.6" },
+    { id: "claude-opus-5",             label: "Opus 5" },
     { id: "claude-opus-4-8",           label: "Opus 4.8" },
     { id: "opusplan",                  label: "Opus Plan" },
     { id: "claude-fable-5",            label: "Fable 5" },
@@ -2757,6 +2758,9 @@ function openPermissionModal(tool, input, id, cwd) {
 
     document.getElementById("perm-modal-overlay").classList.add("open");
     renderPresence("waiting", "permission prompt");
+    // claude is blocked on our PreToolUse hook response — same as an
+    // AskUserQuestion card, this shouldn't count as "working" time.
+    pauseLiveTimer();
 }
 
 function closePermissionModal() {
@@ -2770,7 +2774,13 @@ function closePermissionModal() {
     pendingPermissionToolId = null;
     pendingPermissionToolName = null;
     const next = permissionQueue.shift();
-    if (next) openPermissionModal(next.tool, next.input, next.id, next.cwd);
+    if (next) {
+        // Another request is already queued — still blocked, so re-pause
+        // immediately instead of letting the timer tick between modals.
+        openPermissionModal(next.tool, next.input, next.id, next.cwd);
+    } else {
+        resumeLiveTimer();
+    }
 }
 
 function permissionAllow() {
@@ -4471,9 +4481,9 @@ function ensureLiveTimer() {
     autoScroll();
 }
 
-// Freeze the live timer while an AskUserQuestion card is pending. No claude
-// events arrive during the wait (it's blocked on our reply), so simply stopping
-// the interval freezes the display at its last value.
+// Freeze the live timer while an AskUserQuestion card or the permission modal
+// is pending. No claude events arrive during the wait (it's blocked on our
+// reply), so simply stopping the interval freezes the display at its last value.
 function pauseLiveTimer() {
     if (_liveTimerPausedAt) return;
     _liveTimerPausedAt = Date.now();

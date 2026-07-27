@@ -55,7 +55,7 @@ A single palette gathers on-demand tools that render as inline cards:
 
 ### Configuration
 - **Settings panel** — a searchable settings UI (search matches label, tooltip, and section) that passes through the full Claude Code settings surface, with info tooltips on individual controls.
-- **Model picker** — Sonnet 5 / Sonnet 4.6, Opus 4.8, Opus Plan, Fable 5, Haiku 4.5, plus an effort level (low → max; "max" is session-only).
+- **Model picker** — Sonnet 5 / Sonnet 4.6, Opus 5, Opus 4.8, Opus Plan, Fable 5, Haiku 4.5, plus an effort level (low → max; "max" is session-only).
 - **Fallback model** — an optional `--fallback-model` used when the primary model is overloaded, with a divider marking when it engages.
 - **Configurable CLI path** — point at a specific `claude` executable, or let detection pick it (it prefers `~/.local/bin/claude.exe` — the native installer's target — over a possibly-stale copy on `PATH`, and warns when the two diverge).
 - **Status line** — an optional configurable status command rendered under the path bar.

@@ -8,6 +8,29 @@ Unlike terminal-embedding extensions, Claude Code Studio does **not** host a con
   <img src="docs/preview.png" alt="Claude Code Studio chat panel in Visual Studio 2022" width="480" />
 </p>
 
+## Requirements
+
+- **Visual Studio 2022** 17.14 or newer (amd64)
+- **Windows**
+- **[Claude Code CLI](https://docs.claude.com/en/docs/claude-code/setup)** installed and on `PATH` (or configured via the CLI-path setting)
+- A **Claude** subscription (Pro or higher) or API access, signed in through the CLI
+
+## Installation
+
+1. Build the solution (`ClaudeStudio.slnx`) in Visual Studio, or install the packaged VSIX by double-clicking it.
+2. Restart Visual Studio.
+3. Open the chat panel via **Extensions → Claude Code Studio → Chat**.
+4. If you aren't signed in yet, use the in-panel sign-in to run `claude login`.
+
+## Quick Start
+
+1. Open a solution or folder so the extension has a working directory.
+2. Pick a model (and effort level) from the model button.
+3. Type a prompt and send it — replies stream into the panel.
+4. Attach context with `@` (files), Ctrl+V (images), or the editor selection button.
+5. When Claude wants to edit or run something, approve it inline (or switch permission mode to suit how hands-on you want to be).
+6. Review edits via the diff chips; browse or resume past work from the session history.
+
 ## Features
 
 ### Chat & streaming
@@ -59,7 +82,7 @@ A single palette gathers on-demand tools that render as inline cards:
 
 ### Configuration
 - **Settings panel** — a searchable settings UI (search matches label, tooltip, and section) that passes through the full Claude Code settings surface, with info tooltips on individual controls.
-- **Model picker** — Sonnet 5 / Sonnet 4.6, Opus 4.8, Opus Plan, Fable 5, Haiku 4.5, plus an effort level (low → max; "max" is session-only).
+- **Model picker** — Sonnet 5 / Sonnet 4.6, Opus 5, Opus 4.8, Opus Plan, Fable 5, Haiku 4.5, plus an effort level (low → max; "max" is session-only).
 - **Fallback model** — an optional `--fallback-model` used when the primary model is overloaded, with a divider marking when it engages.
 - **Configurable CLI path** — point at a specific `claude` executable, or let detection pick it (it prefers `~/.local/bin/claude.exe` — the native installer's target — over a possibly-stale copy on `PATH`, and warns when the two diverge).
 - **Status line** — an optional configurable status command rendered under the path bar.
@@ -79,29 +102,6 @@ ClaudeStudioAgent (subprocess, .NET 10)
 ```
 
 The extension hosts the chat UI in WebView2 and launches `ClaudeStudioAgent` as a persistent subprocess. The agent spawns and talks to the `claude` CLI in streaming JSON mode, translating its event stream into chat chunks and relaying permission requests back through a `PreToolUse` hook. Pure, testable logic (event parsing, pricing, session-ordinal mapping, CLI discovery) lives in `ClaudeStudioShared` and is covered by the `ClaudeStudioTests` xUnit suite.
-
-## Requirements
-
-- **Visual Studio 2022** 17.14 or newer (amd64)
-- **Windows**
-- **[Claude Code CLI](https://docs.claude.com/en/docs/claude-code/setup)** installed and on `PATH` (or configured via the CLI-path setting)
-- A **Claude** subscription (Pro or higher) or API access, signed in through the CLI
-
-## Installation
-
-1. Build the solution (`ClaudeStudio.slnx`) in Visual Studio, or install the packaged VSIX by double-clicking it.
-2. Restart Visual Studio.
-3. Open the chat panel via **Extensions → Claude Code Studio → Chat**.
-4. If you aren't signed in yet, use the in-panel sign-in to run `claude login`.
-
-## Quick Start
-
-1. Open a solution or folder so the extension has a working directory.
-2. Pick a model (and effort level) from the model button.
-3. Type a prompt and send it — replies stream into the panel.
-4. Attach context with `@` (files), Ctrl+V (images), or the editor selection button.
-5. When Claude wants to edit or run something, approve it inline (or switch permission mode to suit how hands-on you want to be).
-6. Review edits via the diff chips; browse or resume past work from the session history.
 
 ## Building & testing
 

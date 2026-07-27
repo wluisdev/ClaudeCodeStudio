@@ -13,6 +13,7 @@ public static class Pricing
     {
         ["claude-sonnet-5"]   = (3m, 15m), // sticker price; intro $2/$10 runs through 2026-08-31
         ["claude-sonnet-4-6"] = (3m, 15m),
+        ["claude-opus-5"]     = (5m, 25m), // same rate as Opus 4.8
         ["claude-opus-4-8"]   = (5m, 25m),
         ["claude-fable-5"]    = (10m, 50m),
         ["claude-mythos-5"]   = (10m, 50m),
