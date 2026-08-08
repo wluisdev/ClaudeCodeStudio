@@ -2218,7 +2218,10 @@ function sendMessage() {
             // written to the generated settings.json for new sessions.
             permissionAllow: getPermRules().allow,
             permissionAsk: getPermRules().ask,
-            permissionDeny: getPermRules().deny
+            permissionDeny: getPermRules().deny,
+            // 0 = wait for the answer (default). A stored value only exists once
+            // the user picks a finite timeout in ⚙ → Permissions.
+            permissionTimeoutMinutes: (() => { const v = parseInt(localStorage.getItem("permissionTimeoutMinutes") || "0", 10); return Number.isNaN(v) || v < 0 ? 0 : v; })()
         });
         _suppressNextAutoResume = false;
     }
@@ -2319,7 +2322,7 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "auth-required") {
-        showAuthRequiredCard();
+        showAuthRequiredCard(event.data.detail || "");
         return;
     }
 
@@ -2584,6 +2587,11 @@ window.chrome.webview.addEventListener("message", event => {
         return;
     }
 
+    if (event.data.type === "permission_resolved") {
+        retractPermissionRequest(event.data.id || "", event.data.reason || "");
+        return;
+    }
+
     if (event.data.type === "visibility-changed") {
         _toolWindowVisible = !!event.data.visible;
         if (_toolWindowVisible && _captionAttention === "done") setCaptionAttention(null);
@@ -2763,6 +2771,37 @@ function openPermissionModal(tool, input, id, cwd) {
     pauseLiveTimer();
 }
 
+// The agent decided without us — timeout, cancel or shutdown. The request is
+// already closed on its side, so answering it now would only earn a "no pending
+// permission request for tool_use_id" on the next send (rodada 15, item 43.5).
+// Take the modal down (or drop the queued entry) and say what happened.
+function retractPermissionRequest(id, reason) {
+    if (!id) return;
+
+    if (pendingPermissionToolId === id) {
+        closePermissionModal();
+    } else {
+        const i = permissionQueue.findIndex(p => p.id === id);
+        if (i >= 0) permissionQueue.splice(i, 1);
+    }
+
+    const chip = messages.querySelector(`.tool-chip[data-tool-id="${CSS.escape(id)}"]`);
+    if (chip) { chip.classList.remove("tool-pending"); chip.classList.add("tool-error"); }
+
+    const div = document.createElement("div");
+    div.className = "model-divider";
+    div.innerHTML = `<span class="model-divider-label"></span>`;
+    div.querySelector(".model-divider-label").textContent = "🔒 Permission closed — " + (reason || "resolved without an answer");
+    messages.appendChild(div);
+    autoScroll();
+}
+
+// Leaving a turn from an open permission modal is Deny + Cancel, deliberately:
+// denying executes nothing and closes the overlay, which puts the composer's
+// Cancel back within reach. A dedicated "stop the turn" button was tried and
+// removed (rodada 17) — it had to clear the queue, abandon a pending request
+// and lean on FailPending to clean up, all to save one click on paths that were
+// already proven.
 function closePermissionModal() {
     if (_captionAttention === "pending") setCaptionAttention(null);
     renderPresence("", "");
@@ -2966,6 +3005,9 @@ function savePermRules(rules) {
 
 function openPermRulesModal() {
     document.getElementById("settings-menu")?.classList.remove("open");
+    const ex = document.getElementById("perm-rules-examples");
+    if (ex) ex.open = localStorage.getItem("permRulesExamplesOpen") !== "false";
+    for (const b of ["allow", "ask", "deny"]) showPermRuleError(b, null);
     renderPermRules();
     document.getElementById("perm-rules-overlay").classList.add("open");
 }
@@ -2988,10 +3030,56 @@ function renderPermRules() {
     }
 }
 
+// Examples fill the box instead of adding straight away: the interesting part of
+// a rule is usually the specifier, and the user almost always wants to edit the
+// command before committing it.
+function fillPermRule(bucket, rule) {
+    const input = document.getElementById(`perm-rules-input-${bucket}`);
+    if (!input) return;
+    showPermRuleError(bucket, null);
+    input.value = rule;
+    input.focus();
+    input.select();
+}
+
+// Collapsed once the format is known — the examples are onboarding, not
+// something to scroll past every visit. Kept open by default so a first-timer
+// sees them without hunting.
+function togglePermExamples(open) {
+    localStorage.setItem("permRulesExamplesOpen", open ? "true" : "false");
+}
+
+// Mirrors the parser in PermissionPipeServer.SetRules. That parser only keeps
+// rules whose regex matches, so anything malformed used to be accepted here,
+// shown as a chip, and then silently dropped by the agent — a rule that looks
+// active and does nothing. `PowerShell *` is the trap that surfaced it (rodada
+// 18): the bare `*` is neither a specifier nor the end of the string.
+const PERM_RULE_RE = /^[A-Za-z_][A-Za-z0-9_]*\s*(\(.*\))?$/;
+
+function permRuleError(rule) {
+    if (PERM_RULE_RE.test(rule)) return null;
+    if (/^[A-Za-z_][A-Za-z0-9_]*\s+\S/.test(rule)) {
+        const tool = rule.split(/\s+/)[0];
+        return `Put the specifier in parentheses — ${tool}(${rule.slice(tool.length).trim()}) — or use just ${tool} to match every call.`;
+    }
+    return "Expected Tool or Tool(specifier), e.g. PowerShell(git *).";
+}
+
+function showPermRuleError(bucket, message) {
+    const el = document.getElementById(`perm-rules-error-${bucket}`);
+    if (!el) return;
+    el.textContent = message || "";
+    el.hidden = !message;
+}
+
 function addPermRule(bucket) {
     const input = document.getElementById(`perm-rules-input-${bucket}`);
     const rule = (input.value || "").trim();
     if (!rule) return;
+
+    const problem = permRuleError(rule);
+    if (problem) { showPermRuleError(bucket, problem); input.focus(); return; }
+    showPermRuleError(bucket, null);
     const rules = getPermRules();
     if (!rules[bucket].includes(rule)) rules[bucket].push(rule);
     savePermRules(rules);
@@ -3061,6 +3149,17 @@ function setCleanupDays(value) {
     const v = parseInt(value, 10);
     if (Number.isNaN(v) || v < 1) localStorage.removeItem("cleanupPeriodDays");
     else localStorage.setItem("cleanupPeriodDays", String(v));
+}
+
+// Minutes before an unanswered permission modal is denied on the user's behalf;
+// "0" waits for the answer and is the default, so nothing is stored until a
+// finite timeout is picked.
+const permTimeoutSelect = document.getElementById("perm-timeout-select");
+if (permTimeoutSelect) permTimeoutSelect.value = localStorage.getItem("permissionTimeoutMinutes") || "0";
+function setPermissionTimeout(value) {
+    const v = parseInt(value, 10);
+    if (Number.isNaN(v) || v <= 0) localStorage.removeItem("permissionTimeoutMinutes");
+    else localStorage.setItem("permissionTimeoutMinutes", String(v));
 }
 
 // Theme override: "auto" follows VS (default), "dark" / "light" force regardless
@@ -4890,14 +4989,26 @@ function showNoWorkspaceCard(path) {
     autoScroll();
 }
 
-function showAuthRequiredCard() {
+// detail is set only when the CLI rejected a turn already in flight (expired
+// session): the pre-flight check can't see that coming, because ~/.claude.json
+// keeps the account object with no token and no expiry in it. Showing the CLI's
+// own wording matters — if the match in IsAuthFailure ever catches something
+// that isn't an expiry, the real message is still on screen.
+function showAuthRequiredCard(detail) {
     if (welcome) { welcome.remove(); welcome = null; }
+    // Avoid stacking duplicate cards when several sends fail in a row.
+    const last = messages.lastElementChild;
+    if (last && last.classList && last.classList.contains("auth-required-card")) return;
+    const expired = !!(detail && detail.trim());
     const card = document.createElement("div");
-    card.className = "question-card";
+    card.className = "question-card auth-required-card";
     card.innerHTML = `
-<div class="question-text">🔑 <strong>Not signed in.</strong> Claude can't run without an account — sign in to continue.</div>
+<div class="question-text">🔑 <strong>${expired ? "Session expired." : "Not signed in."}</strong> ${expired
+        ? "Claude Code could not refresh your credentials — sign in again to continue this conversation."
+        : "Claude can't run without an account — sign in to continue."}</div>
+${expired ? `<div class="claude-install-hint">${escapeHtml(detail.trim())}</div>` : ""}
 <div class="question-buttons">
-<button class="q-btn q-yes" onclick="startClaudeLogin(this.closest('.question-card'))">Sign in</button>
+<button class="q-btn q-yes" onclick="startClaudeLogin(this.closest('.question-card'))">${expired ? "Sign in again" : "Sign in"}</button>
 </div>`;
     messages.appendChild(card);
     autoScroll();
@@ -4906,6 +5017,15 @@ function showAuthRequiredCard() {
 function startClaudeLogin(card) {
     try { window.chrome.webview.postMessage({ type: "start-claude-login", cliPath: getCliPath() }); } catch (e) {}
     if (card && card.classList) card.classList.add("question-answered");
+}
+
+// The manual counterpart to the card above, for when nothing has failed yet:
+// switching accounts, or recovering from an expiry whose wording slipped past
+// IsAuthFailure. This is what `/login` would do in the CLI — that slash command
+// is interactive-only and never reaches us, so the menu is the way in.
+function reauthenticate() {
+    document.getElementById("cmd-menu").classList.remove("open");
+    startClaudeLogin(null);
 }
 
 function showClaudeNotFoundCard(detail) {

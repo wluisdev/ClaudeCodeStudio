@@ -9,8 +9,12 @@ namespace ClaudeStudioAgent;
 
 internal sealed class PermissionPipeServer : IAsyncDisposable
 {
-    // TODO: surface as setting in v2
-    private static readonly TimeSpan ResponseTimeout = TimeSpan.FromMinutes(3);
+    // 0 = wait for the answer however long it takes (the default, and what the
+    // CLI's own terminal prompt does). Swapped per chat request like _rules, so
+    // changing it in the UI takes effect on the next send without a respawn.
+    private volatile int _timeoutMinutes;
+
+    public void SetPermissionTimeout(int minutes) => _timeoutMinutes = minutes > 0 ? minutes : 0;
 
     public string PipeName { get; }
 
@@ -56,7 +60,7 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
     public void FailPending(string reason)
     {
         foreach (var kvp in _pending)
-            kvp.Value.TrySetResult(new Decision(false, reason));
+            kvp.Value.TrySetResult(new Decision(false, reason, Auto: true));
         foreach (var kvp in _pendingDiag)
             kvp.Value.TrySetResult("");
     }
@@ -254,6 +258,17 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
             // when the tool was session-allowed or has an allow rule.
             var (verdict, matchedRule) = EvaluateRules(toolName!, toolInput);
 
+            // A decision taken here never reaches the UI, so without a line in the
+            // log an auto-approval is indistinguishable from "the tool just ran"
+            // — which is exactly why 44.5 took a whole round to pin down
+            // (rodada 16, 48.3).
+            void LogAuto(string what) => EmitChunk(new ChatChunk
+            {
+                Type = "permission_auto",
+                Tool = toolName,
+                Text = what
+            });
+
             Decision decision;
             if (IsPlanFileWrite(toolName!, toolInput))
             {
@@ -262,21 +277,27 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
                 // Without this bypass every plan-mode turn pops a scary Write
                 // modal for the plan file (validation round 2026-07-16).
                 decision = new Decision(true, null);
+                LogAuto("allowed: plan-file write");
             }
             else if (verdict == RuleVerdict.Deny)
             {
                 decision = new Decision(false, $"Denied by permission rule: {matchedRule}");
+                LogAuto($"denied by rule: {matchedRule}");
             }
             else if (verdict == RuleVerdict.Allow)
             {
                 decision = new Decision(true, null);
+                LogAuto($"allowed by rule: {matchedRule}");
             }
             else if (verdict != RuleVerdict.Ask && IsSessionAllowed(toolName!))
             {
                 decision = new Decision(true, null);
+                LogAuto("allowed for session");
             }
             else
             {
+                if (verdict == RuleVerdict.Ask)
+                    LogAuto($"prompting: forced by ask rule: {matchedRule}");
                 tcs = new TaskCompletionSource<Decision>(TaskCreationOptions.RunContinuationsAsynchronously);
                 if (!_pending.TryAdd(toolUseId!, tcs))
                 {
@@ -293,7 +314,14 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
                     Cwd = cwd
                 });
 
-                var timeoutTask = Task.Delay(ResponseTimeout, ct);
+                // Infinite.Delay still completes on ct, so cancel and shutdown
+                // keep releasing the hook exactly as before — only the clock is
+                // gone. FailPending covers the cancel path on top of that.
+                int minutes = _timeoutMinutes;
+                var timeoutTask = minutes > 0
+                    ? Task.Delay(TimeSpan.FromMinutes(minutes), ct)
+                    : Task.Delay(Timeout.Infinite, ct);
+
                 var completed = await Task.WhenAny(tcs.Task, timeoutTask);
                 if (completed == tcs.Task)
                 {
@@ -301,12 +329,24 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
                 }
                 else if (ct.IsCancellationRequested)
                 {
-                    decision = new Decision(false, "Agent shutting down");
+                    decision = new Decision(false, "Agent shutting down", Auto: true);
                 }
                 else
                 {
-                    decision = new Decision(false, $"Permission timed out ({ResponseTimeout.TotalMinutes:F0}min)");
+                    decision = new Decision(false, $"Permission timed out ({minutes}min)", Auto: true);
                 }
+            }
+
+            // Nobody clicked: retract the card before claude moves on, so it can
+            // never be answered into a tool_use_id that no longer exists.
+            if (decision.Auto)
+            {
+                EmitChunk(new ChatChunk
+                {
+                    Type = "permission_resolved",
+                    ToolId = toolUseId,
+                    Text = decision.Reason ?? "Resolved without an answer"
+                });
             }
 
             var responseObj = new
@@ -402,5 +442,9 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
         _cts.Dispose();
     }
 
-    internal readonly record struct Decision(bool Allow, string? Reason);
+    // Auto marks a decision nobody clicked — timeout, cancel, shutdown. The card
+    // is still on screen at that point, so the UI has to be told, or the user
+    // answers a request the agent already closed and gets "no pending permission
+    // request for tool_use_id" on their next message (rodada 15, item 43.5).
+    internal readonly record struct Decision(bool Allow, string? Reason, bool Auto = false);
 }
