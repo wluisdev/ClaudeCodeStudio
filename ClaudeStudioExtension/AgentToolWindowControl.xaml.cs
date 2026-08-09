@@ -32,9 +32,34 @@ public partial class AgentToolWindowControl : UserControl
     // without a field the OnBuildDone subscription silently dies after a GC.
     private EnvDTE.BuildEvents? _buildEvents;
 
+    /// <summary>
+    /// Every chat panel currently on screen, so <see cref="TabControlHomeEndPatch"/>
+    /// can tell whether the focused window belongs to one of them.
+    /// </summary>
+    /// <remarks>
+    /// WPF focus stops at the <c>HwndHost</c> boundary: the browser owns real focus
+    /// through child windows of its own, so <c>Keyboard.FocusedElement</c> reports
+    /// something in the shell's tree and the panel looks unfocused
+    /// (github.com/wluisdev/ClaudeCodeStudio/issues/2).
+    /// </remarks>
+    internal static readonly List<AgentToolWindowControl> Live = new();
+
+    /// <summary>Native handle of this panel's browser, or zero before it is realized.</summary>
+    internal IntPtr BrowserHandle
+    {
+        get
+        {
+            try { return Browser?.Handle ?? IntPtr.Zero; }
+            catch (InvalidOperationException) { return IntPtr.Zero; }
+        }
+    }
+
     public AgentToolWindowControl()
     {
         InitializeComponent();
+
+        Loaded += (_, _) => { if (!Live.Contains(this)) Live.Add(this); };
+        Unloaded += (_, _) => Live.Remove(this);
 
         Loaded += AgentToolWindowControl_Loaded;
         Unloaded += AgentToolWindowControl_Unloaded;

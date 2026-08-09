@@ -65,6 +65,11 @@ namespace ClaudeStudioExtension
                 _solutionEventsHandler = new SolutionEventsHandler();
                 solution.AdviseSolutionEvents(_solutionEventsHandler, out _solutionEventsCookie);
             }
+
+            // issues/2: keeps the docking tab well from stealing Home/End while the
+            // chat panel has focus. See TabControlHomeEndPatch for why this is a
+            // Harmony patch rather than a WPF event handler.
+            TabControlHomeEndPatch.Install();
         }
 
         protected override void Dispose(bool disposing)
@@ -79,6 +84,12 @@ namespace ClaudeStudioExtension
                 });
                 _solutionEventsCookie = 0;
             }
+
+            if (disposing)
+            {
+                TabControlHomeEndPatch.Uninstall();
+            }
+
             base.Dispose(disposing);
         }
 

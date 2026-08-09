@@ -2,6 +2,12 @@
 
 All notable changes to Claude Code Studio are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.1] - 2026-08-09
+
+### Fixed
+
+- **Home and End navigated the tab group instead of moving the caret** ([#2](https://github.com/wluisdev/ClaudeCodeStudio/issues/2)) whenever the panel was docked alongside other windows. WPF's `TabControl`, which Visual Studio's docking wells are built on, claims both keys inside its own `OnKeyDown`; floating the panel was the only workaround, since a floating window has no `TabControl` above it. Both keys now reach the panel normally while it has focus, without touching tab navigation anywhere else in the IDE. Ctrl+Home / Ctrl+End still switch tabs.
+
 ## [1.1.0] - 2026-08-08
 
 ### Security
