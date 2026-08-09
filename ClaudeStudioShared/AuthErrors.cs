@@ -19,37 +19,60 @@ namespace ClaudeStudioShared;
 /// </remarks>
 public static class AuthErrors
 {
-    private static readonly string[] Phrases =
+    /// <summary>
+    /// Specific enough to stand alone: both name Claude Code's own credentials rather
+    /// than any service a tool might have called.
+    /// </summary>
+    private static readonly string[] Decisive = { "run /login", "invalid api key" };
+
+    /// <summary>Words that say a credential went stale.</summary>
+    private static readonly string[] Stale = { "expired", "could not be refreshed" };
+
+    /// <summary>Words that say the failure is about signing in.</summary>
+    private static readonly string[] Credential =
     {
-        "run /login",
-        "please log in",
-        "invalid api key",
-        "authentication failed",
-        "failed to authenticate",
-        "unauthorized",
+        "oauth", "credential", "authenticate", "sign in", "log in", "login",
     };
 
     /// <summary>
-    /// True when <paramref name="text"/> reads like an authentication failure rather
-    /// than an ordinary turn error.
+    /// True when <paramref name="text"/> reads like the user's own session failing,
+    /// rather than an ordinary turn error.
     /// </summary>
+    /// <remarks>
+    /// Deliberately narrow, because this runs over every error chunk and two of those
+    /// carry arbitrary third-party text: the CLI's result string when a turn fails,
+    /// and claude's raw stderr on an unexpected exit. Bare <c>unauthorized</c> and
+    /// <c>authentication failed</c> used to match on their own, so an MCP server
+    /// answering <c>401 Unauthorized</c>, or a curl inside a Bash turn, raised a
+    /// "Session expired — sign in again" card for a failure that had nothing to do
+    /// with the user's credentials, and demoted the real error to a hint line.
+    /// <para>
+    /// The asymmetry justifies the strictness: a miss costs nothing much — the error
+    /// shows normally and ⌘ → Re-authenticate is still one click away — while a false
+    /// positive sends the user to fix the wrong thing.
+    /// </para>
+    /// </remarks>
     public static bool IsAuthFailure(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
 
         string t = text!.ToLowerInvariant();
 
-        // "expired" alone is far too common (rate limits, caches, temp files), so it
-        // only counts next to something that names the credential itself.
-        if (t.Contains("expired") &&
-            (t.Contains("oauth") || t.Contains("authenticate") || t.Contains("session") || t.Contains("token")))
-        {
-            return true;
-        }
-
-        foreach (string phrase in Phrases)
+        foreach (string phrase in Decisive)
         {
             if (t.Contains(phrase)) return true;
+        }
+
+        // Neither half is safe alone: "expired" shows up in caches and rate limits,
+        // and "authenticate" shows up in any tool that talks to an API.
+        return Any(t, Stale) && Any(t, Credential);
+    }
+
+    private static bool Any(string text, string[] needles)
+    {
+        foreach (string n in needles)
+        {
+            if (text.Contains(n)) return true;
         }
 
         return false;

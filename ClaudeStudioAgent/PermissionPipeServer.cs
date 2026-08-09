@@ -14,6 +14,21 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
     // changing it in the UI takes effect on the next send without a respawn.
     private volatile int _timeoutMinutes;
 
+    /// <summary>
+    /// Outer bound that applies even when the user asked to wait indefinitely.
+    /// </summary>
+    /// <remarks>
+    /// "Wait for answer" is about the user taking their time; it is not a promise to
+    /// block forever on a prompt nobody can see. If the card never renders — the
+    /// webview reloaded, the tool window was closed without cancelling, the dispatcher
+    /// call threw — claude stays parked inside PreToolUse and both it and the resident
+    /// hook process leak for the rest of the session. The old three-minute clock
+    /// papered over all of those; this restores a floor without touching what the
+    /// setting means. Deliberately not configurable and deliberately long: it must
+    /// never fire for someone who simply went to lunch.
+    /// </remarks>
+    private static readonly TimeSpan HardCeiling = TimeSpan.FromHours(1);
+
     public void SetPermissionTimeout(int minutes) => _timeoutMinutes = minutes > 0 ? minutes : 0;
 
     public string PipeName { get; }
@@ -85,30 +100,46 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
 
     private enum RuleVerdict { None, Allow, Ask, Deny }
 
-    public void SetRules(ClaudeSettings? settings)
+    public void SetRules(MergedPermissionRules? settings)
     {
         if (settings == null ||
-            ((settings.PermissionAllow?.Count ?? 0) == 0 &&
-             (settings.PermissionAsk?.Count ?? 0) == 0 &&
-             (settings.PermissionDeny?.Count ?? 0) == 0))
+            ((settings.Allow?.Count ?? 0) == 0 &&
+             (settings.Ask?.Count ?? 0) == 0 &&
+             (settings.Deny?.Count ?? 0) == 0))
         {
             _rules = null;
             return;
         }
 
-        static List<PermRule> Parse(List<string>? raw)
+        static List<PermRule> Parse(List<string>? raw, string bucket)
         {
             var list = new List<PermRule>();
             foreach (var r in raw ?? [])
             {
-                var m = Regex.Match(r.Trim(), @"^([A-Za-z_][A-Za-z0-9_]*)\s*(?:\((.*)\))?$", RegexOptions.Singleline);
+                // Hyphens are legal in MCP server names, so `mcp__github-tools__search`
+                // has to parse — the stricter pattern dropped exactly the rules the
+                // settings-file merge was written to honour, and dropped them silently.
+                var m = Regex.Match(r.Trim(), @"^([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:\((.*)\))?$", RegexOptions.Singleline);
                 if (m.Success)
+                {
                     list.Add(new PermRule(m.Groups[1].Value, m.Groups[2].Success ? m.Groups[2].Value.Trim() : null, r.Trim()));
+                }
+                else
+                {
+                    // A rule that cannot be parsed does nothing, and a `deny` the user
+                    // believes is protecting them doing nothing is worth a line. The UI
+                    // rejects malformed rules as they are typed; rules coming from a
+                    // settings file have no such gate, so this is their only feedback.
+                    EmitWarn($"ignoring malformed permission rule in {bucket}: {r.Trim()}");
+                }
             }
             return list;
         }
 
-        _rules = new RuleSet(Parse(settings.PermissionAllow), Parse(settings.PermissionAsk), Parse(settings.PermissionDeny));
+        _rules = new RuleSet(
+            Parse(settings.Allow, "allow"),
+            Parse(settings.Ask, "ask"),
+            Parse(settings.Deny, "deny"));
     }
 
     private (RuleVerdict verdict, string? rule) EvaluateRules(string toolName, string? toolInputJson)
@@ -121,7 +152,7 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
         {
             foreach (var r in bucket)
             {
-                if (!string.Equals(r.Tool, toolName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!SettingsPermissions.ToolMatches(r.Tool, toolName)) continue;
                 if (r.Spec is null || r.Spec.Length == 0 || SpecMatches(r.Spec, input)) return r.Raw;
             }
             return null;
@@ -152,11 +183,8 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
     }
 
     // True when the tool call is claude writing/updating its own plan document
-    // (plan mode keeps them under <config>/plans/). Honors CLAUDE_CONFIG_DIR.
-    private static readonly string PlansDir = Path.Combine(
-        Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR")
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"),
-        "plans");
+    // (plan mode keeps them under <config>/plans/).
+    private static readonly string PlansDir = ClaudeConfig.PlansDir;
 
     private static bool IsPlanFileWrite(string toolName, string? toolInputJson)
     {
@@ -314,15 +342,21 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
                     Cwd = cwd
                 });
 
-                // Infinite.Delay still completes on ct, so cancel and shutdown
-                // keep releasing the hook exactly as before — only the clock is
-                // gone. FailPending covers the cancel path on top of that.
+                // The user's setting, bounded by the ceiling. Cancel and shutdown still
+                // release the wait through ct, exactly as before.
                 int minutes = _timeoutMinutes;
-                var timeoutTask = minutes > 0
-                    ? Task.Delay(TimeSpan.FromMinutes(minutes), ct)
-                    : Task.Delay(Timeout.Infinite, ct);
+                var wait = minutes > 0 ? TimeSpan.FromMinutes(minutes) : HardCeiling;
+
+                // Linked source so the timer is disposed the moment the user answers:
+                // a bare Task.Delay(…, ct) leaves its registration on the token until
+                // the server shuts down, and at one per prompt a long session
+                // accumulates them.
+                using var timer = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                var timeoutTask = Task.Delay(wait, timer.Token);
 
                 var completed = await Task.WhenAny(tcs.Task, timeoutTask);
+                timer.Cancel();
+
                 if (completed == tcs.Task)
                 {
                     decision = await tcs.Task;
@@ -330,6 +364,15 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
                 else if (ct.IsCancellationRequested)
                 {
                     decision = new Decision(false, "Agent shutting down", Auto: true);
+                }
+                else if (minutes <= 0)
+                {
+                    // Only reachable through the ceiling, so say so rather than
+                    // reporting a timeout the user never configured.
+                    decision = new Decision(
+                        false,
+                        $"No answer after {HardCeiling.TotalHours:F0}h — the prompt may never have appeared",
+                        Auto: true);
                 }
                 else
                 {
@@ -423,6 +466,13 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
     private static void EmitError(string text)
     {
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "error", Text = text }));
+        Console.Out.Flush();
+    }
+
+    /// <summary>Goes to the Output window only — never into the chat.</summary>
+    private static void EmitWarn(string text)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "warn", Text = text }));
         Console.Out.Flush();
     }
 

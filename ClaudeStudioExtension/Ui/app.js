@@ -3054,11 +3054,15 @@ function togglePermExamples(open) {
 // shown as a chip, and then silently dropped by the agent — a rule that looks
 // active and does nothing. `PowerShell *` is the trap that surfaced it (rodada
 // 18): the bare `*` is neither a specifier nor the end of the string.
-const PERM_RULE_RE = /^[A-Za-z_][A-Za-z0-9_]*\s*(\(.*\))?$/;
+// Hyphens and dots are legal in MCP server names (mcp__github-tools__search), so
+// the tool part accepts them. Must stay in step with the parser in
+// PermissionPipeServer.SetRules — a rule this accepts and that one rejects is a
+// chip in the list that decides nothing.
+const PERM_RULE_RE = /^[A-Za-z_][A-Za-z0-9_.-]*\s*(\(.*\))?$/;
 
 function permRuleError(rule) {
     if (PERM_RULE_RE.test(rule)) return null;
-    if (/^[A-Za-z_][A-Za-z0-9_]*\s+\S/.test(rule)) {
+    if (/^[A-Za-z_][A-Za-z0-9_.-]*\s+\S/.test(rule)) {
         const tool = rule.split(/\s+/)[0];
         return `Put the specifier in parentheses — ${tool}(${rule.slice(tool.length).trim()}) — or use just ${tool} to match every call.`;
     }

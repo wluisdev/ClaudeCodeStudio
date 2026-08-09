@@ -540,8 +540,16 @@ public class AgentClient
                 break;
             }
 
-            // Drain silently after cancel — don't forward any callbacks
-            if (cancelled) continue;
+            // Drain silently after cancel — don't forward any callbacks.
+            //
+            // Retractions are the exception, and they are the whole reason the cancel
+            // path exists: FailPending answers every waiting hook when the user
+            // cancels, and those answers arrive here as permission_resolved. Dropping
+            // them leaves the modal on screen for a request the agent already closed,
+            // which is the failure this chunk was introduced to remove. The timeout
+            // path is the only other producer and it is opt-in, so without this the
+            // feature is dead under stock settings.
+            if (cancelled && chunk.Type != "permission_resolved") continue;
 
             if (chunk.Type == "timing")
             {
@@ -553,6 +561,14 @@ public class AgentClient
             if (chunk.Type == "warn")
             {
                 OutputLog.Warn(chunk.Text);
+                continue;
+            }
+
+            // Agent-side notes that belong in the log but never in the chat —
+            // e.g. how many permission rules came from claude's settings files.
+            if (chunk.Type == "info")
+            {
+                OutputLog.Info(chunk.Text);
                 continue;
             }
 

@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -280,7 +280,7 @@ try
         // Permission rules ride along with every chat request; refreshing them
         // here (not at spawn) means edits in the UI apply on the next send
         // without restarting the session.
-        pipeServer?.SetRules(request.ClaudeSettings);
+        pipeServer?.SetRules(PermissionRuleMerge.Merge(request.ClaudeSettings, request.WorkingDirectory));
         pipeServer?.SetPermissionTimeout(request.ClaudeSettings?.PermissionTimeoutMinutes ?? 0);
 
         var wantKey = ClaudeSession.MakeKey(request);
@@ -378,6 +378,7 @@ static void EmitDone()
     Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "done" }));
     Console.Out.Flush();
 }
+
 
 /// <summary>
 /// Holds a single persistent claude.exe instance running with --input-format stream-json
@@ -1260,7 +1261,13 @@ The user's IDE selection (if any) is included in the conversation context and ma
                     // the hook fires for a shell command and does not fire for Read.
                     // If a future CLI stops honouring it the regex matches nothing
                     // and NOTHING is gated, so re-run that probe when bumping the CLI.
-                    matcher = "^(?!Read$|Glob$|Grep$|NotebookRead$|ToolSearch$|TodoWrite$|BashOutput$|WebSearch$).*",
+                    //
+                    // AskUserQuestion and ExitPlanMode are excluded because they are already
+                    // gated on the control channel — the question card and the "Approve plan?"
+                    // modal. The old name list left them out by omission; inverting the rule
+                    // swept them in, which surfaces as the same plan being approved twice, once
+                    // per gate. Neither executes anything, so this hook has nothing to protect.
+                    matcher = "^(?!Read$|Glob$|Grep$|NotebookRead$|ToolSearch$|TodoWrite$|BashOutput$|WebSearch$|AskUserQuestion$|ExitPlanMode$).*",
                     hooks = new[]
                     {
                         new { type = "command", command = $"\"{agentPathFwd}\" --hook {_pipeName}" }
