@@ -1558,6 +1558,33 @@ messages.addEventListener("scroll", () => {
 });
 
 messages.addEventListener("click", e => {
+    const copyBtn = e.target.closest(".copy-btn");
+    if (copyBtn) {
+        const pre = copyBtn.closest("pre");
+        const codeEl = pre?.querySelector("code");
+        if (!codeEl) return;
+        const code = codeEl.innerText.replace(/\r\n/g, "\n");
+        const flash = () => {
+            copyBtn.textContent = "Copied";
+            copyBtn.classList.add("copied");
+            setTimeout(() => { copyBtn.textContent = "Copy"; copyBtn.classList.remove("copied"); }, 1200);
+        };
+        try {
+            navigator.clipboard.writeText(code).then(flash, flash);
+        } catch (err) {
+            // Fallback for older WebView2 builds without async clipboard,
+            // same approach as the cwdbar copy above.
+            const ta = document.createElement("textarea");
+            ta.value = code;
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand("copy"); } catch (_) {}
+            document.body.removeChild(ta);
+            flash();
+        }
+        return;
+    }
+
     const btn = e.target.closest(".apply-btn");
     if (!btn) return;
     const pre = btn.closest("pre");
@@ -2245,8 +2272,9 @@ function addMessage(role, text) {
     // block instead of raw backticks. Plain text falls back to escapeHtml.
     if (text && text.includes("```")) {
         applyMarkdown(bubble, text);
-        // Apply button is meaningful for assistant suggestions, not for the
-        // user's own message — strip it on the user side.
+        // Apply only makes sense for the assistant's own suggestion, so it's
+        // stripped on the user side. Copy stays on both: a snippet the user
+        // pasted into their own message is just as often what they want back.
         if (role === "user") {
             bubble.querySelectorAll(".apply-btn").forEach(b => b.remove());
         }
@@ -3546,13 +3574,28 @@ function applyMarkdown(bubble, raw) {
         if (!el.classList.contains("hljs")) el.classList.add("hljs");
     });
     bubble.querySelectorAll("pre").forEach(pre => {
-        if (pre.querySelector(".apply-btn")) return;
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "apply-btn";
-        btn.textContent = "Apply";
-        btn.title = "Insert this code at the cursor in the active editor";
-        pre.appendChild(btn);
+        if (pre.querySelector(".code-actions")) return;
+        const actions = document.createElement("div");
+        actions.className = "code-actions";
+
+        // Copy stays on both sides (a pasted snippet in the user's own message
+        // is just as often what someone wants back out); Apply is stripped for
+        // user bubbles right after this by the role === "user" check below.
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "copy-btn";
+        copyBtn.textContent = "Copy";
+        copyBtn.title = "Copy this code block";
+        actions.appendChild(copyBtn);
+
+        const applyBtn = document.createElement("button");
+        applyBtn.type = "button";
+        applyBtn.className = "apply-btn";
+        applyBtn.textContent = "Apply";
+        applyBtn.title = "Insert this code at the cursor in the active editor";
+        actions.appendChild(applyBtn);
+
+        pre.appendChild(actions);
     });
 }
 

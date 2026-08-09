@@ -2144,10 +2144,24 @@ html.light-theme .model-divider::after { background: #d8d8d8; }
     font-size: calc(var(--chat-font-size, 13px) - 1px);
     white-space: pre;
 }
-.assistant .bubble pre .apply-btn {
+/* Wrapper so Copy and Apply lay out side by side without a hand-tuned offset
+   between them; both fade in together on hover. Copy shows on any code block
+   (assistant or the user's own pasted snippet), Apply is assistant-only
+   (stripped in JS for user bubbles), so the wrapper still renders correctly
+   with just one child. */
+.message .bubble pre .code-actions {
     position: absolute;
     top: 4px;
     right: 4px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    z-index: 2;
+}
+.message .bubble pre:hover .code-actions { opacity: 1; }
+
+.message .bubble pre .code-actions button {
     padding: 2px 8px;
     font-size: 10px;
     font-family: inherit;
@@ -2156,15 +2170,13 @@ html.light-theme .model-divider::after { background: #d8d8d8; }
     border: 1px solid #555;
     border-radius: 4px;
     cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.12s ease, background 0.12s ease;
-    z-index: 2;
+    transition: background 0.12s ease;
 }
-.assistant .bubble pre:hover .apply-btn { opacity: 1; }
-.assistant .bubble pre .apply-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
-.assistant .bubble pre .apply-btn.applied { opacity: 1; background: #2d7a2d; color: #fff; border-color: #2d7a2d; }
-html.light-theme .assistant .bubble pre .apply-btn { background: rgba(255,255,255,0.9); color: var(--accent); border-color: #ccc; }
-html.light-theme .assistant .bubble pre .apply-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.message .bubble pre .code-actions button:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.message .bubble pre .apply-btn.applied,
+.message .bubble pre .copy-btn.copied { background: #2d7a2d; color: #fff; border-color: #2d7a2d; }
+html.light-theme .message .bubble pre .code-actions button { background: rgba(255,255,255,0.9); color: var(--accent); border-color: #ccc; }
+html.light-theme .message .bubble pre .code-actions button:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 .toast {
     position: fixed;
