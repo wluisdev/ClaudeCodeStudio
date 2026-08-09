@@ -2269,6 +2269,36 @@ html.light-theme .todo-completed { color: #999; }
 .perm-rules-body { max-height: 60vh; overflow-y: auto; padding: 4px 2px; }
 .perm-rules-hint { font-size: 11px; color: #999; margin-bottom: 10px; line-height: 1.5; }
 .perm-rules-hint code { font-size: 10px; background: rgba(128,128,128,0.15); padding: 1px 4px; border-radius: 3px; }
+/* Examples sit between the hint and the buckets: the format is easy to get
+   subtly wrong (exact tool name, prefix vs glob), and a wrong rule fails
+   silently — it just never matches. */
+/* Stays display:block — a <details> with display:flex keeps rendering its
+   contents when closed in Chromium, so the flex row lives in an inner div. */
+.perm-rules-examples {
+    margin: 0 0 12px; padding: 8px;
+    background: rgba(128,128,128,0.07);
+    border: 1px solid rgba(128,128,128,0.18);
+    border-radius: 6px;
+}
+.perm-rules-examples-grid { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.perm-rules-examples-title { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #888; cursor: pointer; user-select: none; }
+.perm-rules-examples-title:hover { color: var(--accent); }
+.perm-rules-examples:not([open]) { padding-bottom: 6px; }
+.perm-rules-examples:not([open]) .perm-rules-examples-title { margin-bottom: 0; }
+.perm-rules-error { font-size: 11px; color: #e07a7a; margin-top: 4px; line-height: 1.4; }
+html.light-theme .perm-rules-error { color: #b03030; }
+.perm-rules-example {
+    display: flex; align-items: baseline; gap: 6px;
+    font: inherit; text-align: left; cursor: pointer;
+    padding: 3px 7px; border-radius: 4px;
+    background: rgba(128,128,128,0.10);
+    border: 1px solid rgba(128,128,128,0.20);
+    color: inherit;
+}
+.perm-rules-example:hover { border-color: var(--accent); }
+.perm-rules-example code { font-size: 11px; background: none; padding: 0; }
+.perm-rules-example span { font-size: 10px; color: #888; }
+
 .perm-rules-group { margin-bottom: 12px; }
 .perm-rules-group-title { font-size: 11px; font-weight: 600; margin-bottom: 4px; }
 .perm-rules-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }

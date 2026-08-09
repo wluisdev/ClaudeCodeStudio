@@ -418,13 +418,13 @@ public class AgentClient
     // (claude is appending to the same file mid-turn).
     public bool IsStreaming { get; private set; }
 
-    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null, decimal? maxBudgetUsd = null, string? fallbackModel = null, Action<ChatChunk>? onSubagentEvent = null)
+    public async Task AskStreamingAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null, decimal? maxBudgetUsd = null, string? fallbackModel = null, Action<ChatChunk>? onSubagentEvent = null, Action<string, string>? onPermissionResolved = null)
     {
         await _streamingSemaphore.WaitAsync();
         IsStreaming = true;
         try
         {
-            await AskStreamingCoreAsync(message, model, effort, permissionMode, onChunk, onTiming, onTokens, workingDirectory, autoResume, onSession, onTool, onPermissionRequest, onDiagnosticsRequest, onThinking, maxBudgetUsd, fallbackModel, onSubagentEvent);
+            await AskStreamingCoreAsync(message, model, effort, permissionMode, onChunk, onTiming, onTokens, workingDirectory, autoResume, onSession, onTool, onPermissionRequest, onDiagnosticsRequest, onThinking, maxBudgetUsd, fallbackModel, onSubagentEvent, onPermissionResolved);
         }
         finally
         {
@@ -433,7 +433,7 @@ public class AgentClient
         }
     }
 
-    private async Task AskStreamingCoreAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null, decimal? maxBudgetUsd = null, string? fallbackModel = null, Action<ChatChunk>? onSubagentEvent = null)
+    private async Task AskStreamingCoreAsync(string message, string model, string? effort, string permissionMode, Action<string> onChunk, Action<string>? onTiming = null, Action<string>? onTokens = null, string? workingDirectory = null, bool autoResume = false, Action<string>? onSession = null, Action<string, string, string?, string?, string?>? onTool = null, Action<string, string?, string, string?>? onPermissionRequest = null, Action<string, string>? onDiagnosticsRequest = null, Action<string>? onThinking = null, decimal? maxBudgetUsd = null, string? fallbackModel = null, Action<ChatChunk>? onSubagentEvent = null, Action<string, string>? onPermissionResolved = null)
     {
         // A send can queue on the semaphore behind a stuck turn; by the time it
         // runs here, a clear/stop may have nulled the streams (rodada 12: NRE at
@@ -540,8 +540,16 @@ public class AgentClient
                 break;
             }
 
-            // Drain silently after cancel — don't forward any callbacks
-            if (cancelled) continue;
+            // Drain silently after cancel — don't forward any callbacks.
+            //
+            // Retractions are the exception, and they are the whole reason the cancel
+            // path exists: FailPending answers every waiting hook when the user
+            // cancels, and those answers arrive here as permission_resolved. Dropping
+            // them leaves the modal on screen for a request the agent already closed,
+            // which is the failure this chunk was introduced to remove. The timeout
+            // path is the only other producer and it is opt-in, so without this the
+            // feature is dead under stock settings.
+            if (cancelled && chunk.Type != "permission_resolved") continue;
 
             if (chunk.Type == "timing")
             {
@@ -553,6 +561,14 @@ public class AgentClient
             if (chunk.Type == "warn")
             {
                 OutputLog.Warn(chunk.Text);
+                continue;
+            }
+
+            // Agent-side notes that belong in the log but never in the chat —
+            // e.g. how many permission rules came from claude's settings files.
+            if (chunk.Type == "info")
+            {
+                OutputLog.Info(chunk.Text);
                 continue;
             }
 
@@ -663,7 +679,16 @@ public class AgentClient
             {
                 OutputLog.Error($"agent error: {chunk.Text}");
                 if (!string.IsNullOrEmpty(chunk.Text))
-                    onChunk(chunk.Text);
+                {
+                    // An expired session survives the pre-flight IsSignedIn() check
+                    // (oauthAccount stays in ~/.claude.json — it holds profile fields
+                    // only, no token and no expiry), so the CLI is the first thing to
+                    // notice. Same sentinel trick as CLAUDE_NOT_FOUND:: below, routing
+                    // it to the sign-in card instead of a dead-end error bubble.
+                    onChunk(ClaudeStudioShared.AuthErrors.IsAuthFailure(chunk.Text)
+                        ? "AUTH_REQUIRED::" + chunk.Text
+                        : chunk.Text);
+                }
                 continue;
             }
 
@@ -685,10 +710,28 @@ public class AgentClient
                 onTool?.Invoke(chunk.Type, chunk.Tool ?? "", chunk.ToolInput, chunk.Text, chunk.ToolId);
             }
 
+            // Decided by a rule / session allowlist, so no modal and no UI trace —
+            // the log line is the only way to tell it apart from a tool that
+            // simply never needed permission.
+            if (chunk.Type == "permission_auto")
+            {
+                OutputLog.Info($"permission auto: {chunk.Tool ?? "-"} — {chunk.Text}");
+                continue;
+            }
+
             if (chunk.Type == "permission_request")
             {
                 OutputLog.Info($"permission_request: {chunk.Tool ?? "-"} id={chunk.ToolId ?? "-"} cwd={chunk.Cwd ?? "-"}");
                 onPermissionRequest?.Invoke(chunk.Tool ?? "", chunk.ToolInput, chunk.ToolId ?? "", chunk.Cwd);
+            }
+
+            // Timeout/cancel/shutdown resolved it without the user, so the card
+            // has to come down before claude moves on — otherwise it is answered
+            // into a tool_use_id the agent already closed.
+            if (chunk.Type == "permission_resolved")
+            {
+                OutputLog.Info($"permission_resolved: id={chunk.ToolId ?? "-"} ({chunk.Text})");
+                onPermissionResolved?.Invoke(chunk.ToolId ?? "", chunk.Text ?? "");
             }
 
             if (chunk.Type == "diagnostics_request")

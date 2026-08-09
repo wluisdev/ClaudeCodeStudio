@@ -14,6 +14,16 @@ namespace ClaudeStudioExtension
     /// This class derives from the ToolWindowPane class provided from the MPF in order to use its
     /// implementation of the IVsUIElementPane interface.
     /// </para>
+    /// <para>
+    /// Do not try to fix issues/2 (Home/End navigating the tab group) from here. WPF's
+    /// <c>TabControl</c> claims those keys inside its own <c>OnKeyDown</c> and the shell's docking
+    /// wells derive from it, so this pane never sees them — a <c>PreProcessMessage</c> override was
+    /// tried, instrumented, and never called once. Marking the routed event handled from a
+    /// <c>TabControl</c> class handler does stop the tab switch, but WPF then reports the input as
+    /// consumed and the WebView2 never gets the key, which also breaks the floating panel that used
+    /// to work. Both were measured and reverted; the remaining known option is patching
+    /// <c>TabControl.OnKeyDown</c> itself, which skips the navigation without consuming the event.
+    /// </para>
     /// </remarks>
     [Guid("ecbedd02-1fe6-4af5-8053-cd3a911f7bb5")]
     public class AgentToolWindow : ToolWindowPane

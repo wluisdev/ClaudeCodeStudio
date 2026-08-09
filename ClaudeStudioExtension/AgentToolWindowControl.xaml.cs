@@ -942,11 +942,45 @@ public partial class AgentToolWindowControl : UserControl
         catch { }
     }
 
-    // Opens a visible cmd window running `claude login` so the user can complete
+    // Opens a visible cmd window running the CLI's sign-in so the user can complete
     // the OAuth flow. cmd /K keeps the window open after the command exits so
     // any error message is readable. The watcher picks up the ~/.claude.json
     // update and posts claude-login-completed when oauthAccount appears.
     // cliPath (D7): explicit claude.exe to use instead of whatever PATH finds.
+    // Held in a field so the Exited subscription survives GC while the user is
+    // still typing in the terminal.
+    private Process? _loginProcess;
+
+    private void OnClaudeLoginExited(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (sender is Process p) { p.Exited -= OnClaudeLoginExited; p.Dispose(); }
+            _loginProcess = null;
+
+            // Process.Exited runs on a threadpool thread, and Browser is a WPF
+            // control: even *reading* Browser.CoreWebView2 from here throws
+            // "the calling thread cannot access this object" (rodada 16, 47.1).
+            // Every touch has to happen inside the Invoke, null-check included.
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher == null) return;
+
+            dispatcher.Invoke(() =>
+            {
+                if (Browser?.CoreWebView2 == null) return;
+                // Refresh the titlebar too: a successful login (or an account
+                // switch) changes who we show as signed in.
+                try { SendAccountInfo(); } catch { }
+                Browser.CoreWebView2.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new { type = "claude-login-completed" }));
+            });
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Warn($"claude login exit handler failed: {ex.Message}");
+        }
+    }
+
     private void StartClaudeLogin(string? cliPath = null)
     {
         try
@@ -957,11 +991,39 @@ public partial class AgentToolWindowControl : UserControl
                 FileName = "cmd.exe",
                 // /S: with the whole command re-quoted, cmd strips only the
                 // outer quotes — required once exe can be a path with spaces.
-                Arguments = $"/S /K \"\"{exe}\" login\"",
+                //
+                // `auth login` with `login` as fallback: 2.1.226 moved sign-in
+                // under an `auth` subcommand and dropped the bare `login`, which
+                // then parses as a *prompt* — the CLI opens a session and asks
+                // the user what they meant by "login" (rodada 16, 47.1). Older
+                // CLIs reject `auth` with a non-zero exit, so `||` picks the old
+                // spelling for them. (If the user aborts a working `auth login`,
+                // the fallback also fires and starts a session; harmless, the
+                // window is already theirs to close.)
+                Arguments = $"/S /K \"\"{exe}\" auth login || \"{exe}\" login\"",
                 UseShellExecute = true,
                 WindowStyle = ProcessWindowStyle.Normal,
             };
-            Process.Start(psi);
+            var loginProc = Process.Start(psi);
+
+            // The watcher only fires when oauthAccount *appears*, so re-running
+            // login while already signed in never changes the file and the overlay
+            // waits forever (rodada 15, item 42.2). Closing the terminal is the
+            // other end of that flow, so treat it as "done" too — whichever comes
+            // first wins, and closeSigninOverlay is idempotent.
+            if (loginProc != null)
+            {
+                try
+                {
+                    _loginProcess = loginProc;
+                    loginProc.EnableRaisingEvents = true;
+                    loginProc.Exited += OnClaudeLoginExited;
+                }
+                catch (Exception ex)
+                {
+                    OutputLog.Warn($"claude login exit watch failed: {ex.Message}");
+                }
+            }
 
             if (Browser?.CoreWebView2 != null)
             {
@@ -1663,7 +1725,9 @@ public partial class AgentToolWindowControl : UserControl
                 AutoCompact = request.AutoCompact ?? true,
                 PermissionAllow = request.PermissionAllow,
                 PermissionAsk = request.PermissionAsk,
-                PermissionDeny = request.PermissionDeny
+                PermissionDeny = request.PermissionDeny,
+                // Omitted by older payloads → 0 → wait for the answer.
+                PermissionTimeoutMinutes = request.PermissionTimeoutMinutes ?? 0
             };
 
             // IDE selection context (V11): when the user has text highlighted in
@@ -1679,12 +1743,18 @@ public partial class AgentToolWindowControl : UserControl
                 {
                     const string notFound = "CLAUDE_NOT_FOUND::";
                     const string budgetExceeded = "BUDGET_EXCEEDED::";
+                    const string authRequired = "AUTH_REQUIRED::";
                     if (chunk != null && chunk.StartsWith(notFound, StringComparison.Ordinal))
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "claude-not-found", detail = chunk.Substring(notFound.Length) }));
                     else if (chunk != null && chunk.StartsWith(budgetExceeded, StringComparison.Ordinal))
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "budget-exceeded", detail = chunk.Substring(budgetExceeded.Length) }));
+                    // Session died mid-flight: reuse the very card the pre-flight check
+                    // shows, with the CLI's own wording attached so the user sees why.
+                    else if (chunk != null && chunk.StartsWith(authRequired, StringComparison.Ordinal))
+                        Browser.CoreWebView2.PostWebMessageAsJson(
+                            JsonSerializer.Serialize(new { type = "auth-required", detail = chunk.Substring(authRequired.Length) }));
                     else
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "chunk", text = chunk }));
@@ -1709,6 +1779,9 @@ public partial class AgentToolWindowControl : UserControl
                 onPermissionRequest: (tool, input, id, cwd) => dispatcher.Invoke(() =>
                     Browser.CoreWebView2.PostWebMessageAsJson(
                         JsonSerializer.Serialize(new { type = "permission_request", tool, input, id, cwd }))),
+                onPermissionResolved: (id, reason) => dispatcher.Invoke(() =>
+                    Browser.CoreWebView2.PostWebMessageAsJson(
+                        JsonSerializer.Serialize(new { type = "permission_resolved", id, reason }))),
                 onDiagnosticsRequest: (filePath, requestId) => _ = HandleDiagnosticsRequestAsync(filePath, requestId),
                 maxBudgetUsd: request.MaxBudgetUsd,
                 fallbackModel: string.IsNullOrWhiteSpace(request.FallbackModel) ? null : request.FallbackModel.Trim(),
@@ -3910,6 +3983,10 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("permissionDeny")]
         public List<string>? PermissionDeny { get; set; }
+
+        // Minutes a permission modal may sit unanswered; 0/absent = wait for it.
+        [JsonPropertyName("permissionTimeoutMinutes")]
+        public int? PermissionTimeoutMinutes { get; set; }
 
         // V7 claude settings (nullable so an absent field means "use default").
         [JsonPropertyName("coAuthoredBy")]

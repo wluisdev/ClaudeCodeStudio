@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -280,7 +280,8 @@ try
         // Permission rules ride along with every chat request; refreshing them
         // here (not at spawn) means edits in the UI apply on the next send
         // without restarting the session.
-        pipeServer?.SetRules(request.ClaudeSettings);
+        pipeServer?.SetRules(PermissionRuleMerge.Merge(request.ClaudeSettings, request.WorkingDirectory));
+        pipeServer?.SetPermissionTimeout(request.ClaudeSettings?.PermissionTimeoutMinutes ?? 0);
 
         var wantKey = ClaudeSession.MakeKey(request);
 
@@ -377,6 +378,7 @@ static void EmitDone()
     Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "done" }));
     Console.Out.Flush();
 }
+
 
 /// <summary>
 /// Holds a single persistent claude.exe instance running with --input-format stream-json
@@ -1238,7 +1240,34 @@ The user's IDE selection (if any) is included in the conversation context and ma
             {
                 new
                 {
-                    matcher = "Bash|KillBash|Edit|Write|NotebookEdit|Task|WebFetch|CronCreate|mcp__.*",
+                    // FAIL-CLOSED: gate everything except tools that only read.
+                    //
+                    // The old matcher listed the dangerous tools by name, so every
+                    // tool the CLI added later ran with NO gate at all — in ask/plan
+                    // mode we spawn under bypassPermissions, so a name this regex
+                    // misses is simply allowed and no modal ever appears. That is
+                    // how PowerShell, the default shell tool on Windows since CLI
+                    // 2.1.226, ended up running "git status" unprompted (rodada 17).
+                    //
+                    // Inverting it means a new tool defaults to *asking*, which is
+                    // recoverable (allow for the session, or add a permission rule)
+                    // instead of silent. The exclusions are read-only or
+                    // conversation-local: Read/Glob/Grep/NotebookRead inspect,
+                    // ToolSearch loads a schema, TodoWrite writes the task list,
+                    // BashOutput reads an existing shell's buffer, WebSearch returns
+                    // results (WebFetch, which pulls a URL, is deliberately NOT here).
+                    //
+                    // Negative lookahead verified against CLI 2.1.226 (rodada 17):
+                    // the hook fires for a shell command and does not fire for Read.
+                    // If a future CLI stops honouring it the regex matches nothing
+                    // and NOTHING is gated, so re-run that probe when bumping the CLI.
+                    //
+                    // AskUserQuestion and ExitPlanMode are excluded because they are already
+                    // gated on the control channel — the question card and the "Approve plan?"
+                    // modal. The old name list left them out by omission; inverting the rule
+                    // swept them in, which surfaces as the same plan being approved twice, once
+                    // per gate. Neither executes anything, so this hook has nothing to protect.
+                    matcher = "^(?!Read$|Glob$|Grep$|NotebookRead$|ToolSearch$|TodoWrite$|BashOutput$|WebSearch$|AskUserQuestion$|ExitPlanMode$).*",
                     hooks = new[]
                     {
                         new { type = "command", command = $"\"{agentPathFwd}\" --hook {_pipeName}" }

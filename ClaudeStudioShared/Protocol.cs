@@ -97,6 +97,15 @@ public class ClaudeSettings
     public List<string>? PermissionAllow { get; set; }
     public List<string>? PermissionAsk { get; set; }
     public List<string>? PermissionDeny { get; set; }
+
+    // How long a permission modal may go unanswered before the agent denies on
+    // the user's behalf. 0 (the default) waits indefinitely, matching the CLI's
+    // own terminal prompt: a timeout that fires while the user is away denies,
+    // claude then takes another route and raises fresh prompts, and answering
+    // any of the stale modals fails with "no pending permission request".
+    // Cancelling the turn still releases every waiting hook, so waiting forever
+    // is recoverable.
+    public int PermissionTimeoutMinutes { get; set; }
 }
 
 public class RewindRequest

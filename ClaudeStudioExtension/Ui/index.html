@@ -89,6 +89,7 @@
                         <div class="cmd-item" onclick="requestMcpStatus()">🔌 MCP status</div>
                         <div class="cmd-item" onclick="requestBuildErrors()">🔨 Send build errors</div>
                         <div class="cmd-item" onclick="requestDoctor()">🩺 Doctor</div>
+                        <div class="cmd-item" onclick="reauthenticate()">🔑 Re-authenticate…</div>
                         <div class="cmd-item" onclick="openSideQuestionCard()">💬 Side question</div>
                         <div class="cmd-item" onclick="exportChatToMarkdown()">⤓ Export to Markdown</div>
                         <div class="cmd-divider"></div>
@@ -289,6 +290,18 @@
                                 <span class="info-icon" title="Auto-decide tool permissions with claude-style rules like Bash(git *). Allow skips the prompt, deny blocks the tool, ask always prompts. Rules apply from the next message.">ⓘ</span>
                             </span>
                             <button type="button" class="settings-manage-btn" onclick="openPermRulesModal()">Manage…</button>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                Unanswered permission
+                                <span class="info-icon" title="What happens to a permission prompt you leave unanswered. Wait for answer (the default) holds the turn until you decide, like the CLI's own prompt — cancelling the turn still releases it. A timeout denies instead, and claude will then try another route and raise new prompts.">ⓘ</span>
+                            </span>
+                            <select id="perm-timeout-select" class="settings-select" onchange="setPermissionTimeout(this.value)">
+                                <option value="0">Wait for answer</option>
+                                <option value="3">Deny after 3 min</option>
+                                <option value="10">Deny after 10 min</option>
+                                <option value="30">Deny after 30 min</option>
+                            </select>
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
@@ -678,36 +691,62 @@
             </div>
             <div class="perm-rules-body">
                 <div class="perm-rules-hint">
-                    Rules use claude's format: <code>Tool</code> or <code>Tool(specifier)</code> —
-                    e.g. <code>Bash(git *)</code>, <code>Bash(npm run test:*)</code>, <code>Read</code>.
+                    Rules use claude's format: <code>Tool</code> or <code>Tool(specifier)</code>.
                     Deny wins over ask; ask wins over allow. Rules apply from the next message.
+                    <b>The tool name must match exactly</b> — on Windows a shell command usually
+                    arrives as <code>PowerShell</code>, not <code>Bash</code>. The Output window
+                    logs <code>tool_use: &lt;name&gt;</code> for every call, and
+                    <code>permission auto: … — allowed by rule: …</code> whenever a rule decides one.
                 </div>
+                <details class="perm-rules-examples" id="perm-rules-examples" open
+                         ontoggle="togglePermExamples(this.open)">
+                    <summary class="perm-rules-examples-title">Examples — click one to fill the box</summary>
+                    <div class="perm-rules-examples-grid">
+                    <button type="button" class="perm-rules-example" onclick="fillPermRule('allow','PowerShell(git status)')">
+                        <code>PowerShell(git status)</code><span>one exact command</span></button>
+                    <button type="button" class="perm-rules-example" onclick="fillPermRule('allow','PowerShell(git *)')">
+                        <code>PowerShell(git *)</code><span>any git command</span></button>
+                    <button type="button" class="perm-rules-example" onclick="fillPermRule('allow','Bash(npm run test:*)')">
+                        <code>Bash(npm run test:*)</code><span>prefix — npm run test and anything after</span></button>
+                    <button type="button" class="perm-rules-example" onclick="fillPermRule('allow','Read')">
+                        <code>Read</code><span>a whole tool, no specifier</span></button>
+                    <button type="button" class="perm-rules-example" onclick="fillPermRule('allow','mcp__testeLocal__soma')">
+                        <code>mcp__server__tool</code><span>one MCP tool, full name</span></button>
+                    <button type="button" class="perm-rules-example" onclick="fillPermRule('allow','PowerShell')">
+                        <code>PowerShell</code><span>every call of that tool — no <code>*</code> needed</span></button>
+                    <button type="button" class="perm-rules-example" onclick="fillPermRule('deny','PowerShell(git push*)')">
+                        <code>PowerShell(git push*)</code><span>good candidate for Deny</span></button>
+                    </div>
+                </details>
                 <div class="perm-rules-group">
                     <div class="perm-rules-group-title">✅ Allow — run without asking</div>
                     <div class="perm-rules-list" id="perm-rules-allow"></div>
                     <div class="perm-rules-add">
-                        <input type="text" id="perm-rules-input-allow" placeholder="Bash(git *)"
+                        <input type="text" id="perm-rules-input-allow" placeholder="PowerShell(git *)"
                             onkeydown="if(event.key==='Enter'){event.preventDefault();addPermRule('allow');}" />
                         <button type="button" onclick="addPermRule('allow')">Add</button>
                     </div>
+                    <div class="perm-rules-error" id="perm-rules-error-allow" hidden></div>
                 </div>
                 <div class="perm-rules-group">
                     <div class="perm-rules-group-title">❓ Ask — always prompt</div>
                     <div class="perm-rules-list" id="perm-rules-ask"></div>
                     <div class="perm-rules-add">
-                        <input type="text" id="perm-rules-input-ask" placeholder="Bash(git push*)"
+                        <input type="text" id="perm-rules-input-ask" placeholder="PowerShell(git push*)"
                             onkeydown="if(event.key==='Enter'){event.preventDefault();addPermRule('ask');}" />
                         <button type="button" onclick="addPermRule('ask')">Add</button>
                     </div>
+                    <div class="perm-rules-error" id="perm-rules-error-ask" hidden></div>
                 </div>
                 <div class="perm-rules-group">
                     <div class="perm-rules-group-title">⛔ Deny — block the tool</div>
                     <div class="perm-rules-list" id="perm-rules-deny"></div>
                     <div class="perm-rules-add">
-                        <input type="text" id="perm-rules-input-deny" placeholder="Bash(rm *)"
+                        <input type="text" id="perm-rules-input-deny" placeholder="PowerShell(rm *)"
                             onkeydown="if(event.key==='Enter'){event.preventDefault();addPermRule('deny');}" />
                         <button type="button" onclick="addPermRule('deny')">Add</button>
                     </div>
+                    <div class="perm-rules-error" id="perm-rules-error-deny" hidden></div>
                 </div>
             </div>
             <div class="cmd-modal-buttons">
