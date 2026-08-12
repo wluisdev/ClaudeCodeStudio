@@ -294,10 +294,10 @@
                         <div class="settings-row">
                             <span class="settings-label">
                                 Unanswered permission
-                                <span class="info-icon" title="What happens to a permission prompt you leave unanswered. Wait for answer (the default) holds the turn until you decide, like the CLI's own prompt — cancelling the turn still releases it. A timeout denies instead, and claude will then try another route and raise new prompts.">ⓘ</span>
+                                <span class="info-icon" title="How long a permission prompt waits before it is denied for you. The default holds the turn while you decide, up to one hour — one hour is the ceiling because past that the underlying CLI hook would let the tool run unapproved, so it is a hard limit, not a soft one. A shorter timeout denies sooner; cancelling the turn always releases it immediately.">ⓘ</span>
                             </span>
                             <select id="perm-timeout-select" class="settings-select" onchange="setPermissionTimeout(this.value)">
-                                <option value="0">Wait for answer</option>
+                                <option value="0">Wait for answer (max 1 hour)</option>
                                 <option value="3">Deny after 3 min</option>
                                 <option value="10">Deny after 10 min</option>
                                 <option value="30">Deny after 30 min</option>

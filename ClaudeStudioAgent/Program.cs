@@ -1270,7 +1270,20 @@ The user's IDE selection (if any) is included in the conversation context and ma
                     matcher = "^(?!Read$|Glob$|Grep$|NotebookRead$|ToolSearch$|TodoWrite$|BashOutput$|WebSearch$|AskUserQuestion$|ExitPlanMode$).*",
                     hooks = new[]
                     {
-                        new { type = "command", command = $"\"{agentPathFwd}\" --hook {_pipeName}" }
+                        // timeout must outlive the longest the permission modal can wait.
+                        // A PreToolUse hook that hits its own timeout does NOT block the
+                        // tool (measured); under bypassPermissions the tool would then run
+                        // unapproved. The CLI default is 600s, so leaving it unset let a
+                        // wait past ten minutes execute without approval — and the killed
+                        // hook is what produced "pipe is broken" when the server finally
+                        // answered. PermissionPipeServer.HookTimeoutSeconds is kept above
+                        // its own ceiling so the server always denies first.
+                        new
+                        {
+                            type = "command",
+                            command = $"\"{agentPathFwd}\" --hook {_pipeName}",
+                            timeout = PermissionPipeServer.HookTimeoutSeconds
+                        }
                     }
                 }
             },

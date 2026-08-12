@@ -9,13 +9,14 @@ namespace ClaudeStudioAgent;
 
 internal sealed class PermissionPipeServer : IAsyncDisposable
 {
-    // 0 = wait for the answer however long it takes (the default, and what the
-    // CLI's own terminal prompt does). Swapped per chat request like _rules, so
-    // changing it in the UI takes effect on the next send without a respawn.
+    // 0 = wait for the answer, bounded by HardCeiling (the "wait (max 1 hour)"
+    // option); a positive value denies after that many minutes. Swapped per chat
+    // request like _rules, so changing it in the UI applies on the next send
+    // without a respawn.
     private volatile int _timeoutMinutes;
 
     /// <summary>
-    /// Outer bound that applies even when the user asked to wait indefinitely.
+    /// Longest this server will wait for an answer, even under the "wait" setting.
     /// </summary>
     /// <remarks>
     /// "Wait for answer" is about the user taking their time; it is not a promise to
@@ -24,10 +25,28 @@ internal sealed class PermissionPipeServer : IAsyncDisposable
     /// call threw — claude stays parked inside PreToolUse and both it and the resident
     /// hook process leak for the rest of the session. The old three-minute clock
     /// papered over all of those; this restores a floor without touching what the
-    /// setting means. Deliberately not configurable and deliberately long: it must
-    /// never fire for someone who simply went to lunch.
+    /// setting means.
+    /// <para>
+    /// This is also a security bound, not just a convenience one. Measured against the
+    /// live CLI: a PreToolUse command hook that hits its own timeout does NOT block the
+    /// tool — the call proceeds through the normal permission flow, which under
+    /// bypassPermissions means it runs. The CLI's default hook timeout is 600s, so a
+    /// wait longer than that used to let the tool execute unapproved once the hook was
+    /// killed (the "pipe is broken" the extension logged is the server then writing to
+    /// the dead hook). This ceiling MUST stay strictly below <see cref="HookTimeoutSeconds"/>
+    /// so the server always denies before the hook can time out and open that window.
+    /// </para>
     /// </remarks>
     private static readonly TimeSpan HardCeiling = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// The `timeout` (seconds) written onto the CLI's PreToolUse hook, so the hook
+    /// outlives the longest wait this server can perform. Verified against the live CLI:
+    /// a large explicit value is accepted and honoured (the default is only 600s). Kept
+    /// above <see cref="HardCeiling"/> by a margin so the ceiling always fires first —
+    /// if the hook timed out first, the tool would run without approval.
+    /// </summary>
+    public static int HookTimeoutSeconds => (int)HardCeiling.TotalSeconds + 300;
 
     public void SetPermissionTimeout(int minutes) => _timeoutMinutes = minutes > 0 ? minutes : 0;
 

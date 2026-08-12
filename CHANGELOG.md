@@ -4,6 +4,10 @@ All notable changes to Claude Code Studio are documented here. Format loosely fo
 
 ## [1.1.1] - 2026-08-09
 
+### Security
+
+- **A permission prompt left open for more than about ten minutes could let the tool run unapproved.** The permission gate in ask and plan mode is the CLI's `PreToolUse` hook, and a hook that hits its own timeout does not block the tool: the call proceeds, which under the mode's `bypassPermissions` means it executes. Since 1.1.0 made "wait for the answer" the default while the CLI's hook timeout stayed at its 600-second default, a prompt sitting past that window would fire the tool and orphan the modal (the `pipe is broken` line the Output window showed). The hook is now given an explicit timeout that outlives the modal's own ceiling, so the extension always denies first. The **Unanswered permission** setting's wait option is now labelled **Wait for answer (max 1 hour)** to make that ceiling explicit.
+
 ### Fixed
 
 - **Home and End navigated the tab group instead of moving the caret** ([#2](https://github.com/wluisdev/ClaudeCodeStudio/issues/2)) whenever the panel was docked alongside other windows. WPF's `TabControl`, which Visual Studio's docking wells are built on, claims both keys inside its own `OnKeyDown`; floating the panel was the only workaround, since a floating window has no `TabControl` above it. Both keys now reach the panel normally while it has focus, without touching tab navigation anywhere else in the IDE. Ctrl+Home / Ctrl+End still switch tabs.
