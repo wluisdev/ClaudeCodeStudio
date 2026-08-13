@@ -10,6 +10,7 @@ All notable changes to Claude Code Studio are documented here. Format loosely fo
 
 ### Fixed
 
+- **A solution reload mid-turn could wedge the chat with "agent pipe not reachable".** When Claude edited a project file and Visual Studio reloaded the solution, the extension reset the session and stopped the agent; if the agent was busy answering a turn it was force-killed, and because that only killed the agent and not the `claude` process it had spawned, the orphaned CLI kept running and firing permission hooks at a pipe whose server (the dead agent) was gone. The agent is now stopped by killing its whole process tree, so the CLI never outlives it.
 - **Home and End navigated the tab group instead of moving the caret** ([#2](https://github.com/wluisdev/ClaudeCodeStudio/issues/2)) whenever the panel was docked alongside other windows. WPF's `TabControl`, which Visual Studio's docking wells are built on, claims both keys inside its own `OnKeyDown`; floating the panel was the only workaround, since a floating window has no `TabControl` above it. Both keys now reach the panel normally while it has focus, without touching tab navigation anywhere else in the IDE. Ctrl+Home / Ctrl+End still switch tabs.
 
 ## [1.1.0] - 2026-08-08
