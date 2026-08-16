@@ -18,6 +18,25 @@ namespace ClaudeStudioExtension
         public const int UsageWindowCommandId = 0x0104;
         public const int McpWindowCommandId = 0x0105;
 
+        // Editor right-click submenu actions (issue #6). Each sends the current
+        // selection prefixed with a fixed instruction so the common asks don't
+        // need the prompt typed out.
+        public const int EditorExplainCommandId = 0x0106;
+        public const int EditorSummaryCommandId = 0x0107;
+        public const int EditorCommentsCommandId = 0x0108;
+        public const int EditorUnitTestsCommandId = 0x0109;
+        public const int EditorRefactorCommandId = 0x010A;
+        public const int EditorSecurityCheckCommandId = 0x010B;
+
+        // Instruction prefixes for the editor actions above. Kept directive (and
+        // em-dash-free) so the model has clear intent without the user typing it.
+        private const string ExplainPrompt = "Explain what this code does, step by step:";
+        private const string SummaryPrompt = "Add documentation summary comments to this code (XML `<summary>` doc comments for C#, or the language's equivalent). Return the complete updated code:";
+        private const string CommentsPrompt = "Add clear inline comments explaining this code. Return the complete updated code:";
+        private const string UnitTestsPrompt = "Write unit tests for this code. Match the test framework this project already uses if you can tell which one:";
+        private const string RefactorPrompt = "Suggest and apply refactorings that improve this code's readability and performance without changing its behavior. Return the complete updated code:";
+        private const string SecurityCheckPrompt = "Review this code for security issues and suggest fixes:";
+
         public static readonly Guid CommandSet = new("dd63979a-7c8a-4d0c-b2f7-321ba5b6d8d2");
 
         public static AgentToolWindowControl? ActiveControl { get; set; }
@@ -35,6 +54,9 @@ namespace ClaudeStudioExtension
         /// <param name="commandService">Command service to add command to, not null.</param>
         private AgentToolWindowCommand(AsyncPackage package, OleMenuCommandService commandService)
         {
+            // Called by InitializeAsync after SwitchToMainThreadAsync, so the whole
+            // constructor (AddCommand, the editor-action registrations) is on the UI thread.
+            ThreadHelper.ThrowIfNotOnUIThread();
             this.package = package ?? throw new ArgumentNullException(nameof(package));
             commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
 
@@ -63,6 +85,40 @@ namespace ClaudeStudioExtension
             var mcpCmdID = new CommandID(CommandSet, McpWindowCommandId);
             var mcpItem = new MenuCommand(this.ExecuteShowMcp, mcpCmdID);
             commandService.AddCommand(mcpItem);
+
+            // Editor submenu actions (issue #6): same selection-gated visibility
+            // as Send Selection, each carrying its own fixed instruction prefix.
+            AddEditorAction(commandService, EditorExplainCommandId, ExplainPrompt);
+            AddEditorAction(commandService, EditorSummaryCommandId, SummaryPrompt);
+            AddEditorAction(commandService, EditorCommentsCommandId, CommentsPrompt);
+            AddEditorAction(commandService, EditorUnitTestsCommandId, UnitTestsPrompt);
+            AddEditorAction(commandService, EditorRefactorCommandId, RefactorPrompt);
+            AddEditorAction(commandService, EditorSecurityCheckCommandId, SecurityCheckPrompt);
+        }
+
+        private void AddEditorAction(OleMenuCommandService commandService, int commandId, string instruction)
+        {
+            var id = new CommandID(CommandSet, commandId);
+            var item = new OleMenuCommand((s, e) => { ThreadHelper.ThrowIfNotOnUIThread(); ExecuteEditorAction(instruction); }, id);
+            // Reuse the Send Selection gate: always visible, enabled only when the
+            // active document has a non-empty text selection.
+            item.BeforeQueryStatus += OnSendSelectionQueryStatus;
+            commandService.AddCommand(item);
+        }
+
+        private void ExecuteEditorAction(string instruction)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            ToolWindowPane window = this.package.FindToolWindow(typeof(AgentToolWindow), 0, true);
+            if (window?.Frame is IVsWindowFrame frame)
+                Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(frame.Show());
+
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                if (ActiveControl != null)
+                    await ActiveControl.SendEditorActionAsync(instruction);
+            });
         }
 
         private void ExecuteShowMcp(object sender, EventArgs e)

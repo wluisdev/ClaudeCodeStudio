@@ -2659,13 +2659,48 @@ public partial class AgentToolWindowControl : UserControl
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
+        var text = BuildActiveSelectionBlock();
+        if (text == null)
+            return;
+
+        var json = JsonSerializer.Serialize(new { type = "insert-text", text });
+        Browser.CoreWebView2.PostWebMessageAsJson(json);
+    }
+
+    /// <summary>
+    /// Editor context-menu action (issue #6): sends the active selection to the
+    /// chat prefixed with a fixed instruction, so common asks (Explain, Add
+    /// Summary, Security Check, ...) don't need the prompt typed out. The webview
+    /// composes instruction + code block and sends it as one turn.
+    /// </summary>
+    public async Task SendEditorActionAsync(string instruction)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var block = BuildActiveSelectionBlock();
+        if (block == null)
+            return;
+
+        var json = JsonSerializer.Serialize(new { type = "editor-action", instruction, text = block });
+        Browser.CoreWebView2.PostWebMessageAsJson(json);
+    }
+
+    /// <summary>
+    /// Builds the "File: path (lines) ```lang ... ```" block for the active
+    /// document's selection, or null when there is no non-empty selection. Must
+    /// be called on the UI thread.
+    /// </summary>
+    private static string? BuildActiveSelectionBlock()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
         var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
         var doc = dte?.ActiveDocument;
         var selection = doc?.Selection as EnvDTE.TextSelection;
         var code = selection?.Text;
 
         if (string.IsNullOrWhiteSpace(code))
-            return;
+            return null;
 
         var filePath = doc?.FullName ?? "";
         var startLine = selection?.TopLine ?? 0;
@@ -2696,10 +2731,7 @@ public partial class AgentToolWindowControl : UserControl
             }
         }
         var lineInfo = startLine == endLine ? $"line {startLine}" : $"lines {startLine}-{endLine}";
-        var text = $"File: {displayPath} ({lineInfo})\n```{lang}\n{code.TrimEnd('\r', '\n')}\n```\n";
-
-        var json = JsonSerializer.Serialize(new { type = "insert-text", text });
-        Browser.CoreWebView2.PostWebMessageAsJson(json);
+        return $"File: {displayPath} ({lineInfo})\n```{lang}\n{code.TrimEnd('\r', '\n')}\n```\n";
     }
 
     private static string GetLanguageId(string ext) => ext switch

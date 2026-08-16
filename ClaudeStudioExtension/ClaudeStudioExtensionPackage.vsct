@@ -42,6 +42,15 @@
           <CommandName>Claude Code Studio</CommandName>
         </Strings>
       </Menu>
+      <!-- Editor right-click submenu (issue #6): standardized actions over the
+           current selection, so common asks don't need the prompt typed out. -->
+      <Menu guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorActionsSubMenu" priority="0x0100" type="Menu">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorContextMenuGroup"/>
+        <Strings>
+          <ButtonText>Claude Code</ButtonText>
+          <CommandName>Claude Code</CommandName>
+        </Strings>
+      </Menu>
     </Menus>
 
     <Groups>
@@ -56,6 +65,9 @@
       </Group>
       <Group guid="guidClaudeStudioExtensionPackageCmdSet" id="ClaudeStudioSubMenuGroup" priority="0x0100">
         <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="ClaudeStudioSubMenu"/>
+      </Group>
+      <Group guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorActionsSubMenuGroup" priority="0x0100">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorActionsSubMenu"/>
       </Group>
     </Groups>
 
@@ -87,10 +99,52 @@
         </Strings>
       </Button>
       <Button guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorSendSelectionCommandId" priority="0x0100" type="Button">
-        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorContextMenuGroup"/>
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorActionsSubMenuGroup"/>
         <CommandFlag>DynamicVisibility</CommandFlag>
         <Strings>
-          <ButtonText>Send Selection to Claude Code Studio</ButtonText>
+          <ButtonText>Send Selection</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorExplainCommandId" priority="0x0110" type="Button">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorActionsSubMenuGroup"/>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <Strings>
+          <ButtonText>Explain</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorSummaryCommandId" priority="0x0120" type="Button">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorActionsSubMenuGroup"/>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <Strings>
+          <ButtonText>Add Summary</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorCommentsCommandId" priority="0x0130" type="Button">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorActionsSubMenuGroup"/>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <Strings>
+          <ButtonText>Add Comments</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorUnitTestsCommandId" priority="0x0140" type="Button">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorActionsSubMenuGroup"/>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <Strings>
+          <ButtonText>Add Unit Tests</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorRefactorCommandId" priority="0x0150" type="Button">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorActionsSubMenuGroup"/>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <Strings>
+          <ButtonText>Refactor</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorSecurityCheckCommandId" priority="0x0160" type="Button">
+        <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorActionsSubMenuGroup"/>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <Strings>
+          <ButtonText>Security Check</ButtonText>
         </Strings>
       </Button>
       <Button guid="guidClaudeStudioExtensionPackageCmdSet" id="SolutionExplorerSendFileCommandId" priority="0x0100" type="Button">
@@ -145,11 +199,19 @@
       <IDSymbol name="SolutionExplorerSendFileCommandId" value="0x0103" />
       <IDSymbol name="UsageToolWindowCommandId" value="0x0104" />
       <IDSymbol name="McpToolWindowCommandId" value="0x0105" />
+      <IDSymbol name="EditorExplainCommandId" value="0x0106" />
+      <IDSymbol name="EditorSummaryCommandId" value="0x0107" />
+      <IDSymbol name="EditorCommentsCommandId" value="0x0108" />
+      <IDSymbol name="EditorUnitTestsCommandId" value="0x0109" />
+      <IDSymbol name="EditorRefactorCommandId" value="0x010A" />
+      <IDSymbol name="EditorSecurityCheckCommandId" value="0x010B" />
       <IDSymbol name="ClaudeStudioSubMenu" value="0x1100" />
       <IDSymbol name="ClaudeStudioSubMenuGroup" value="0x1101" />
       <IDSymbol name="EditorContextMenuGroup" value="0x1020" />
       <IDSymbol name="SolutionExplorerContextMenuGroup" value="0x1021" />
       <IDSymbol name="ClaudeStudioExtensionsMenuGroup" value="0x1022" />
+      <IDSymbol name="EditorActionsSubMenu" value="0x1104" />
+      <IDSymbol name="EditorActionsSubMenuGroup" value="0x1105" />
     </GuidSymbol>
 
     <!-- IDM_VS_MENU_EXTENSIONS (0x0091) is not defined in vsshlids.h shipped with

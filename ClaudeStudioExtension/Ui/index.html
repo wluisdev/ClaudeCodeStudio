@@ -88,6 +88,7 @@
                         <div class="cmd-item" onclick="requestContextUsage()">◔ Context usage</div>
                         <div class="cmd-item" onclick="requestMcpStatus()">🔌 MCP status</div>
                         <div class="cmd-item" onclick="requestBuildErrors()">🔨 Send build errors</div>
+                        <div class="cmd-item" onclick="checkBackgroundTasks()">⏱ Check background tasks</div>
                         <div class="cmd-item" onclick="requestDoctor()">🩺 Doctor</div>
                         <div class="cmd-item" onclick="reauthenticate()">🔑 Re-authenticate…</div>
                         <div class="cmd-item" onclick="openSideQuestionCard()">💬 Side question</div>
@@ -204,6 +205,18 @@
                                 <input type="checkbox" id="build-errors-toggle" onchange="setAutoSendBuildErrors(this.checked)" />
                                 <span class="toggle-track"></span>
                             </label>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
+                                Auto-check background tasks (seconds)
+                                <span class="info-icon" title="Every N seconds, automatically ask Claude to check and report its background tasks. Blank or 0 = Manual (use the ⌘ menu's 'Check background tasks' instead). Only runs while the chat is idle, the composer is empty, and a background task has actually been started this session. The CLI has no completion event, so it keeps checking until you clear the chat or set this back to Manual. Each check is a full turn and costs tokens.">ⓘ</span>
+                            </span>
+                        </div>
+                        <div class="settings-input-wrap">
+                            <input type="text" inputmode="numeric" id="bgcheck-interval-input" class="settings-input" placeholder="Manual"
+                                oninput="setBgCheckInterval(this.value)"
+                                onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" />
+                            <button type="button" class="settings-input-clear" title="Clear" onclick="clearBgCheckInterval()">✕</button>
                         </div>
                         <div class="cmd-divider"></div>
                         <div class="cmd-section">Display</div>
