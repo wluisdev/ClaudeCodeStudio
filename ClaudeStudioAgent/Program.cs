@@ -771,57 +771,111 @@ The user's IDE selection (if any) is included in the conversation context and ma
             psi.ArgumentList.Add(pregeneratedSessionId);
         }
 
-        _proc = Process.Start(psi)
-            ?? throw new Exception("Process.Start returned null");
+        // Snapshot the fully-built argument list so the spawn can be retried with a
+        // flag removed if this claude build rejects one at launch.
+        var plannedArgs = psi.ArgumentList.ToList();
 
-        if (pregeneratedSessionId != null)
+        // Self-healing spawn against CLI version drift (issue #7). An optional flag
+        // this build doesn't recognise (e.g. --forward-subagent-text) makes claude
+        // exit at once with "unknown option '--X'", which otherwise surfaces as
+        // "session not started" on the first send and blocks the extension entirely.
+        // Drop the offending optional flag and respawn. Load-bearing and value-taking
+        // flags are never dropped (see DroppableOptionalFlags): if one of those is
+        // rejected the session genuinely can't run, so the CLI's own message is
+        // surfaced instead of looping.
+        const int maxSpawnAttempts = 6;
+        for (int attempt = 1; ; attempt++)
         {
-            SessionId = pregeneratedSessionId;
-            Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "session", Text = pregeneratedSessionId }));
-            Console.Out.Flush();
-        }
+            psi.ArgumentList.Clear();
+            foreach (var a in plannedArgs) psi.ArgumentList.Add(a);
+            lock (_stderrBuffer) _stderrBuffer.Clear();
 
-        // Force UTF-8 without BOM on stdin. .NET 10's default is already UTF-8 no BOM,
-        // but be explicit so this never regresses (the PoC hit a BOM bug on PS 5.1).
-        _stdin = new StreamWriter(_proc.StandardInput.BaseStream, new UTF8Encoding(false))
-        {
-            AutoFlush = false
-        };
-        _stdout = _proc.StandardOutput;
+            _proc = Process.Start(psi)
+                ?? throw new Exception("Process.Start returned null");
 
-        // Drain stderr in background. Without this, a full stderr pipe buffer would
-        // deadlock claude before it could emit init on stdout.
-        _stderrPump = Task.Run(async () =>
-        {
-            var buf = new char[4096];
-            try
+            // Force UTF-8 without BOM on stdin. .NET 10's default is already UTF-8 no BOM,
+            // but be explicit so this never regresses (the PoC hit a BOM bug on PS 5.1).
+            _stdin = new StreamWriter(_proc.StandardInput.BaseStream, new UTF8Encoding(false))
             {
-                while (true)
+                AutoFlush = false
+            };
+            _stdout = _proc.StandardOutput;
+
+            // Drain stderr in background. Without this, a full stderr pipe buffer would
+            // deadlock claude before it could emit init on stdout.
+            _stderrPump = Task.Run(async () =>
+            {
+                var buf = new char[4096];
+                try
                 {
-                    int n = await _proc.StandardError.ReadAsync(buf, 0, buf.Length);
-                    if (n == 0) break;
-                    lock (_stderrBuffer) _stderrBuffer.Append(buf, 0, n);
+                    while (true)
+                    {
+                        int n = await _proc.StandardError.ReadAsync(buf, 0, buf.Length);
+                        if (n == 0) break;
+                        lock (_stderrBuffer) _stderrBuffer.Append(buf, 0, n);
+                    }
                 }
+                catch { }
+            });
+
+            EmitTiming("claude spawned", sw.ElapsedMilliseconds);
+
+            // Which claude.exe actually launched, and its version — a stale install
+            // shadowing the expected one on PATH cost a whole validation round to
+            // diagnose (2026-07-16: chocolatey 2.1.144 vs ~/.local/bin 2.1.211).
+            // The probe spawns a separate `claude --version` and awaits it, which is
+            // enough wall-clock for a launch-time flag rejection to have already
+            // exited the main process — so the HasExited check right after is a free
+            // detection window, with no artificial delay added to the healthy path.
+            var claudeVersion = await ProbeClaudeAsync(psi.FileName);
+
+            if (!_proc.HasExited)
+            {
+                // Healthy: claude is up and blocked waiting for the first stdin line.
+                _claudeVersion = claudeVersion;
+                var exeLabel = claudeVersion != null ? $"{psi.FileName} ({claudeVersion})" : psi.FileName;
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"claude exe: {exeLabel}" }));
+                Console.Out.Flush();
+
+                if (pregeneratedSessionId != null)
+                {
+                    SessionId = pregeneratedSessionId;
+                    Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "session", Text = pregeneratedSessionId }));
+                    Console.Out.Flush();
+                }
+
+                // U4: hand the claude PID to the extension so it can watch the CLI's
+                // live presence file (~/.claude/sessions/<pid>.json) for status /
+                // waitingFor updates. Emitted mid-turn, so the read loop picks it up.
+                Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "claude-pid", Text = _proc!.Id.ToString() }));
+                Console.Out.Flush();
+                break;
             }
-            catch { }
-        });
 
-        EmitTiming("claude spawned", sw.ElapsedMilliseconds);
+            // Exited at launch. Let the stderr pump finish capturing the message,
+            // then decide whether a droppable optional flag caused it.
+            try { await Task.WhenAny(_stderrPump ?? Task.CompletedTask, Task.Delay(500)); } catch { }
+            string launchErr = SnapshotStderr();
 
-        // Which claude.exe actually launched, and its version — a stale install
-        // shadowing the expected one on PATH cost a whole validation round to
-        // diagnose (2026-07-16: chocolatey 2.1.144 vs ~/.local/bin 2.1.211).
-        var claudeVersion = await ProbeClaudeAsync(psi.FileName);
-        _claudeVersion = claudeVersion;
-        var exeLabel = claudeVersion != null ? $"{psi.FileName} ({claudeVersion})" : psi.FileName;
-        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"claude exe: {exeLabel}" }));
-        Console.Out.Flush();
+            bool dropped = LaunchFlagRecovery.TryDropRejectedFlags(plannedArgs, launchErr, out string droppedDesc);
 
-        // U4: hand the claude PID to the extension so it can watch the CLI's
-        // live presence file (~/.claude/sessions/<pid>.json) for status /
-        // waitingFor updates. Emitted mid-turn, so the read loop picks it up.
-        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "claude-pid", Text = _proc!.Id.ToString() }));
-        Console.Out.Flush();
+            // Tear down the dead spawn before retrying or giving up.
+            try { _stdin?.Dispose(); } catch { }
+            try { _stdout?.Dispose(); } catch { }
+            try { _proc?.Dispose(); } catch { }
+            _stdin = null; _stdout = null; _proc = null;
+
+            if (dropped && attempt < maxSpawnAttempts)
+            {
+                EmitWarn($"claude rejected {droppedDesc} at launch, dropping it and retrying (CLI version drift, issue #7)");
+                continue;
+            }
+
+            var trimmed = launchErr.Trim();
+            throw new Exception(string.IsNullOrEmpty(trimmed)
+                ? "claude exited immediately at launch"
+                : $"claude exited at launch: {trimmed}");
+        }
 
         // NOTE: we do NOT wait for `system/init` here. With `--input-format stream-json`
         // (no `-p`), claude does not emit any stdout until it receives the first stdin
