@@ -584,6 +584,48 @@ public class StreamEventParserTests
     }
 
     [Fact]
+    public void Result_is_error_matching_prior_synthetic_text_is_not_duplicated()
+    {
+        // The CLI surfaces "Prompt is too long" (and similar API errors) both as
+        // a synthetic assistant message and as a terminal is_error result. Both
+        // used to append to the same bubble, doubling the text; the result copy
+        // is now suppressed when it matches the synthetic already shown.
+        var state = new StreamEventState();
+        var synthetic = Process("""{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Prompt is too long"}]}}""", state);
+        Assert.Single(synthetic.Chunks, c => c.Type == "chunk" && c.Text == "Prompt is too long");
+
+        var result = Process("""{"type":"result","is_error":true,"result":"Prompt is too long"}""", state);
+        Assert.DoesNotContain(result.Chunks, c => c.Type == "error");
+    }
+
+    [Fact]
+    public void Result_is_error_different_from_prior_synthetic_still_emits_error_chunk()
+    {
+        // A legit synthetic (e.g. /cost output) must not suppress an unrelated
+        // is_error result with different text.
+        var state = new StreamEventState();
+        Process("""{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"cost info"}]}}""", state);
+
+        var result = Process("""{"type":"result","is_error":true,"result":"Something failed"}""", state);
+        var chunk = Assert.Single(result.Chunks, c => c.Type == "error");
+        Assert.Equal("Something failed", chunk.Text);
+    }
+
+    [Fact]
+    public void Result_clears_synthetic_text_so_it_does_not_leak_to_next_turn()
+    {
+        // Turn A ends with a synthetic-and-result error; turn B's identical
+        // is_error result (no synthetic this time) must still be emitted.
+        var state = new StreamEventState();
+        Process("""{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Prompt is too long"}]}}""", state);
+        Process("""{"type":"result","is_error":true,"result":"Prompt is too long"}""", state);
+
+        var next = Process("""{"type":"result","is_error":true,"result":"Prompt is too long"}""", state);
+        var chunk = Assert.Single(next.Chunks, c => c.Type == "error");
+        Assert.Equal("Prompt is too long", chunk.Text);
+    }
+
+    [Fact]
     public void Result_budget_and_is_error_both_present_only_budget_branch_fires()
     {
         // if/else if — mutually exclusive today even if a payload somehow set both.
