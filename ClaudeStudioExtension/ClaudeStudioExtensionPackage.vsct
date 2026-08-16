@@ -47,8 +47,8 @@
       <Menu guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorActionsSubMenu" priority="0x0100" type="Menu">
         <Parent guid="guidClaudeStudioExtensionPackageCmdSet" id="EditorContextMenuGroup"/>
         <Strings>
-          <ButtonText>Claude Code</ButtonText>
-          <CommandName>Claude Code</CommandName>
+          <ButtonText>Claude Code Studio</ButtonText>
+          <CommandName>Claude Code Studio</CommandName>
         </Strings>
       </Menu>
     </Menus>

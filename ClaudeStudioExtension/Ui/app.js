@@ -3172,24 +3172,29 @@ function onBuildErrors(msg) {
 }
 
 // ── Editor context-menu actions (issue #6) ────────────────────
-// C# captures the selection, prefixes a fixed instruction, and posts it here.
-// One turn, same in-flight guard as the build-errors path.
+// C# captures the selection and prefixes a fixed instruction; the action sends
+// it as one turn (Send Selection stays insert-only via its own path). A turn in
+// flight can't take a second send, so keep the prompt in the composer instead of
+// dropping it and let the user send when the turn finishes.
 function runEditorAction(instruction, block) {
-    if (isStreaming) { showToast("A turn is in progress — try again when it finishes"); return; }
     if (!block) return;
-    textarea.value = instruction + "\n\n" + block;
+    const composed = instruction + "\n\n" + block;
+    if (isStreaming) {
+        insertAtCursor(composed);
+        showToast("A turn is in progress — press send when it finishes");
+        return;
+    }
+    textarea.value = composed;
     sendMessage();
 }
 
 // ── Background tasks (issue #5) ───────────────────────────────
 // The CLI fires no push event when a background shell finishes, so there is
-// nothing to auto-notify from. Manual: the ⌘ item. Optional auto: a settings
-// interval that polls while the chat is idle and a background task has actually
-// been started this session. There is no completion signal, so the arm only
-// clears on a fresh chat — until then auto-check keeps polling (the accepted
-// trade-off, documented in the setting's tooltip).
-let _hasBackgroundTask = false;
-let _bgCheckTimer = null;
+// nothing to auto-notify from. This is a manual, on-demand check: the ⌘ item
+// injects a follow-up that asks Claude to poll and report its background tasks.
+// (An auto-check-every-N-seconds setting existed but was removed 2026-08-16:
+// with no completion signal the arm stayed sticky and kept firing after the
+// task had finished, which read as noise. Manual only is the accepted model.)
 const BG_CHECK_PROMPT = "Check on any background tasks or shells you started earlier in this session and report their current status. If any have finished, summarize their output; if any are still running, say so.";
 
 function sendBackgroundCheck() {
@@ -3203,43 +3208,6 @@ function checkBackgroundTasks() {
     if (isStreaming) { showToast("A turn is in progress — try again when it finishes"); return; }
     sendBackgroundCheck();
 }
-
-// Settings: 0 / blank = Manual (off). Any positive N arms a poll every N seconds.
-function setBgCheckInterval(value) {
-    const n = Math.max(0, Math.floor(Number(value) || 0));
-    localStorage.setItem("bgCheckIntervalSec", String(n));
-    restartBgCheckTimer();
-}
-
-function clearBgCheckInterval() {
-    const input = document.getElementById("bgcheck-interval-input");
-    if (input) input.value = "";
-    setBgCheckInterval(0);
-}
-
-function restartBgCheckTimer() {
-    if (_bgCheckTimer) { clearInterval(_bgCheckTimer); _bgCheckTimer = null; }
-    const n = parseInt(localStorage.getItem("bgCheckIntervalSec") || "0", 10);
-    if (!n || n < 1) return;
-    _bgCheckTimer = setInterval(() => {
-        // Guards: don't step on a turn in flight, don't clobber text you're
-        // composing, and only poll once a background task has been started.
-        if (isStreaming) return;
-        if (textarea.value.trim()) return;
-        if (!_hasBackgroundTask) return;
-        sendBackgroundCheck();
-    }, n * 1000);
-}
-
-// Restore the saved interval on load and arm the timer if it is set.
-(function initBgCheckInterval() {
-    const input = document.getElementById("bgcheck-interval-input");
-    if (input) {
-        const saved = parseInt(localStorage.getItem("bgCheckIntervalSec") || "0", 10);
-        input.value = saved > 0 ? String(saved) : "";
-    }
-    restartBgCheckTimer();
-})();
 
 // ── V7 claude settings (apply to new/restarted sessions) ──────
 const coAuthoredToggle = document.getElementById("coauthored-toggle");
@@ -3504,7 +3472,7 @@ const SETTINGS_KEYS = [
     // Appearance
     "themeOverride", "accentCustom",
     // Chat
-    "sendWithEnter", "autoResume", "autoSaveLevel", "soundOnInput", "soundOnDone", "autoIncludeAttachments", "bgCheckIntervalSec",
+    "sendWithEnter", "autoResume", "autoSaveLevel", "soundOnInput", "soundOnDone", "autoIncludeAttachments",
     // Display / layout
     "showTokens", "showTokenEstimate", "timingMode", "timeUnit", "compactLayout",
     "composerFontSize", "composerTextareaHeight",
@@ -4113,12 +4081,6 @@ document.addEventListener("keydown", e => {
 function appendToolEvent(kind, name, inputJson, text, id) {
     removeLoading();
     const bubble = ensureStreamBubble();
-
-    // Arm the background-task auto-check (issue #5): a Bash tool_use with
-    // run_in_background starts a detached shell. The CLI gives no completion
-    // event, so this only sets the flag; it clears on a fresh chat.
-    if (kind === "tool_use" && inputJson && /"run_in_background"\s*:\s*true/.test(inputJson))
-        _hasBackgroundTask = true;
 
     // AskUserQuestion is a meta tool whose entire purpose is interactive UI.
     // Render a question card with selectable options + write-in. The user's pick
@@ -4786,7 +4748,6 @@ function clearChat() {
     _turnUserIdx = 0;
     _lastReportedActiveModel = modelSelect.value; // #14: fresh chat, fresh fallback tracking
     subagentTraces.clear(); // #13: old entries would point at now-removed DOM nodes
-    _hasBackgroundTask = false; // #5: fresh chat has no pending background task
     updateUsageSessionValues();
     // User explicitly asked for a fresh chat — suppress --continue on the next
     // outbound message even if the "Auto-resume" setting is on.
@@ -4802,7 +4763,6 @@ function renderBranchedMessages(newSessionId, msgs) {
     msgCounter = 0;
     userMsgCounter = 0;
     currentSessionId = newSessionId;
-    _hasBackgroundTask = false; // #5: switching sessions drops any pending-task arm
     // Bubbles are re-rendered 1:1 from this session's JSONL — full range rewindable.
     _rewindBaseUserIdx = 0;
     _turnUserIdx = 0;

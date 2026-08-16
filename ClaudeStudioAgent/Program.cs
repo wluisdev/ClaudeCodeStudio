@@ -417,6 +417,12 @@ sealed class ClaudeSession : IAsyncDisposable
     // after the version probe to surface the duplicate visibly (chosen, other).
     private (string chosen, string other)? _duplicateInstall;
 
+    // The duplicate-install notice is a static fact about the machine, but
+    // StartAsync runs again on every respawn (workspace/model switch, and per
+    // turn when the CLI exits via stdout EOF). Static so the line shows once for
+    // the agent process lifetime instead of on every message.
+    private static bool _duplicateInstallNoticed;
+
     private Process? _proc;
     private StreamWriter? _stdin;
     // Serializes writes to claude.stdin so partial NDJSON lines can't interleave.
@@ -1271,17 +1277,24 @@ The user's IDE selection (if any) is included in the conversation context and ma
         Console.Out.Flush();
     }
 
-    // issue #7: two claude.exe installs. Probes the PATH copy's version and posts
-    // a visible system-info line naming both, with a hint when the PATH one is
-    // newer than the native one we launched (the reporter's exact case).
+    // issue #7: two claude.exe installs. We prefer the native ~\.local\bin one;
+    // this only speaks up when the copy on PATH is NEWER than what we launched,
+    // i.e. we may be running a stale CLI (the reporter's exact case). When we
+    // already picked the newest, the duplicate is harmless, so it stays in the
+    // log-only warn instead of a chat line. Shown once per agent process.
     private async Task EmitDuplicateInstallNoticeAsync(string chosen, string? chosenVer, string other)
     {
+        if (_duplicateInstallNoticed) return;
+
         var otherVer = await ProbeClaudeAsync(other);
+        if (ClaudeExeLocator.CompareVersions(otherVer, chosenVer) <= 0) return; // PATH not newer — nothing to flag
+
+        _duplicateInstallNoticed = true;
         string Label(string path, string? ver) => ver != null ? $"v{ver.Split(' ')[0]} at {path}" : path;
 
-        var msg = $"Two Claude CLI installs found. Using {Label(chosen, chosenVer)}; your PATH also has {Label(other, otherVer)}.";
-        if (ClaudeExeLocator.CompareVersions(otherVer, chosenVer) > 0)
-            msg += " The one on PATH is newer, so if the extension seems to use an outdated CLI, remove the older install or set the CLI path in Settings (Claude Code, CLI path).";
+        var msg = $"The Claude CLI on your PATH is newer than the one the extension is using. " +
+            $"Using {Label(chosen, chosenVer)}; PATH has {Label(other, otherVer)}. " +
+            "Remove the older install or set the CLI path in Settings (Claude Code, CLI path).";
 
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "system-info", Text = msg }));
         Console.Out.Flush();
