@@ -412,6 +412,11 @@ sealed class ClaudeSession : IAsyncDisposable
     // writer (#22b) so each request line records which CLI build produced it.
     private string? _claudeVersion;
 
+    // Set by FindClaudeExe's onPathShadow when the preferred native install
+    // (~\.local\bin) differs from a claude.exe on PATH (issue #7). Consumed once
+    // after the version probe to surface the duplicate visibly (chosen, other).
+    private (string chosen, string other)? _duplicateInstall;
+
     private Process? _proc;
     private StreamWriter? _stdin;
     // Serializes writes to claude.stdin so partial NDJSON lines can't interleave.
@@ -547,7 +552,8 @@ The user's IDE selection (if any) is included in the conversation context and ma
 
         var psi = new ProcessStartInfo
         {
-            FileName = ClaudeExeLocator.FindClaudeExe(_cliPath, EmitWarn),
+            FileName = ClaudeExeLocator.FindClaudeExe(_cliPath, EmitWarn,
+                onPathShadow: (chosen, other) => _duplicateInstall = (chosen, other)),
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -836,6 +842,14 @@ The user's IDE selection (if any) is included in the conversation context and ma
                 var exeLabel = claudeVersion != null ? $"{psi.FileName} ({claudeVersion})" : psi.FileName;
                 Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "timing", Text = $"claude exe: {exeLabel}" }));
                 Console.Out.Flush();
+
+                // issue #7: we chose the native ~\.local\bin install but a
+                // different claude.exe sits on PATH. Probe its version too and
+                // surface the duplicate as a visible system line (not just the
+                // log-only warn), flagging when the PATH one is newer — that was
+                // the reporter's case (stale .local\bin, fresh WinGet on PATH).
+                if (_duplicateInstall is { } dup)
+                    await EmitDuplicateInstallNoticeAsync(dup.chosen, claudeVersion, dup.other);
 
                 if (pregeneratedSessionId != null)
                 {
@@ -1254,6 +1268,22 @@ The user's IDE selection (if any) is included in the conversation context and ma
     private static void EmitWarn(string text)
     {
         Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "warn", Text = text }));
+        Console.Out.Flush();
+    }
+
+    // issue #7: two claude.exe installs. Probes the PATH copy's version and posts
+    // a visible system-info line naming both, with a hint when the PATH one is
+    // newer than the native one we launched (the reporter's exact case).
+    private async Task EmitDuplicateInstallNoticeAsync(string chosen, string? chosenVer, string other)
+    {
+        var otherVer = await ProbeClaudeAsync(other);
+        string Label(string path, string? ver) => ver != null ? $"v{ver.Split(' ')[0]} at {path}" : path;
+
+        var msg = $"Two Claude CLI installs found. Using {Label(chosen, chosenVer)}; your PATH also has {Label(other, otherVer)}.";
+        if (ClaudeExeLocator.CompareVersions(otherVer, chosenVer) > 0)
+            msg += " The one on PATH is newer, so if the extension seems to use an outdated CLI, remove the older install or set the CLI path in Settings (Claude Code, CLI path).";
+
+        Console.WriteLine(JsonSerializer.Serialize(new ChatChunk { Type = "system-info", Text = msg }));
         Console.Out.Flush();
     }
 

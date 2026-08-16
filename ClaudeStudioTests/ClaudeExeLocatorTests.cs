@@ -20,7 +20,8 @@ public class ClaudeExeLocatorTests
         HashSet<string>? existingDirs = null,
         IReadOnlyList<string>? pathDirs = null,
         string? nativeInstallPath = null,
-        IReadOnlyList<string>? fallbackPaths = null)
+        IReadOnlyList<string>? fallbackPaths = null,
+        System.Action<string, string>? onPathShadow = null)
     {
         existingFiles ??= new HashSet<string>();
         existingDirs ??= new HashSet<string>();
@@ -31,7 +32,8 @@ public class ClaudeExeLocatorTests
             directoryExists: existingDirs.Contains,
             pathDirs: pathDirs ?? new List<string>(),
             nativeInstallPath: nativeInstallPath ?? Native,
-            fallbackPaths: fallbackPaths ?? new List<string>());
+            fallbackPaths: fallbackPaths ?? new List<string>(),
+            onPathShadow: onPathShadow);
     }
 
     [Fact]
@@ -112,6 +114,69 @@ public class ClaudeExeLocatorTests
         Assert.Equal(Native, result);
         Assert.NotNull(warning);
         Assert.Contains(@"C:\shim\claude.exe", warning);
+    }
+
+    [Fact]
+    public void Native_shadowing_a_different_PATH_exe_reports_both_paths_via_onPathShadow()
+    {
+        (string chosen, string other)? shadow = null;
+        var result = FindClaudeExe(
+            null,
+            existingFiles: new HashSet<string> { Native, @"C:\winget\claude.exe" },
+            pathDirs: new[] { @"C:\winget" },
+            onPathShadow: (chosen, other) => shadow = (chosen, other));
+
+        Assert.Equal(Native, result);
+        Assert.NotNull(shadow);
+        Assert.Equal(Native, shadow!.Value.chosen);
+        Assert.Equal(@"C:\winget\claude.exe", shadow.Value.other);
+    }
+
+    [Fact]
+    public void No_shadow_does_not_fire_onPathShadow()
+    {
+        var fired = false;
+        // Native install, PATH points at the same directory — not a duplicate.
+        FindClaudeExe(
+            null,
+            existingFiles: new HashSet<string> { Native },
+            pathDirs: new[] { @"C:\Users\fake\.local\bin" },
+            onPathShadow: (_, __) => fired = true);
+        Assert.False(fired);
+    }
+
+    [Theory]
+    [InlineData("2.1.229 (Claude Code)", new[] { 2, 1, 229 })]
+    [InlineData("2.1.195", new[] { 2, 1, 195 })]
+    [InlineData("2.1.229-beta", new[] { 2, 1, 229 })]
+    public void ParseVersion_extracts_leading_dotted_numeric(string input, int[] expected)
+    {
+        Assert.Equal(expected, ClaudeExeLocator.ParseVersion(input));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("Claude Code")]
+    public void ParseVersion_returns_null_when_no_leading_number(string? input)
+    {
+        Assert.Null(ClaudeExeLocator.ParseVersion(input));
+    }
+
+    [Fact]
+    public void CompareVersions_orders_by_numeric_segments()
+    {
+        Assert.True(ClaudeExeLocator.CompareVersions("2.1.229 (Claude Code)", "2.1.195") > 0); // #7 case: PATH newer
+        Assert.True(ClaudeExeLocator.CompareVersions("2.1.195", "2.1.229") < 0);
+        Assert.Equal(0, ClaudeExeLocator.CompareVersions("2.1.229", "2.1.229 (Claude Code)"));
+        Assert.True(ClaudeExeLocator.CompareVersions("2.2.0", "2.1.999") > 0);
+    }
+
+    [Fact]
+    public void CompareVersions_returns_zero_when_either_side_is_unparseable()
+    {
+        Assert.Equal(0, ClaudeExeLocator.CompareVersions("2.1.229", "unknown"));
+        Assert.Equal(0, ClaudeExeLocator.CompareVersions(null, "2.1.229"));
     }
 
     [Fact]
