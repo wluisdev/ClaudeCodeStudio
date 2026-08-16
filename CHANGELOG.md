@@ -2,6 +2,26 @@
 
 All notable changes to Claude Code Studio are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.1] - 2026-08-16
+
+### Security
+
+- **A permission prompt left open for more than about ten minutes could let the tool run unapproved.** The permission gate in ask and plan mode is the CLI's `PreToolUse` hook, and a hook that hits its own timeout does not block the tool: the call proceeds, which under the mode's `bypassPermissions` means it executes. Since 1.1.0 made "wait for the answer" the default while the CLI's hook timeout stayed at its 600-second default, a prompt sitting past that window would fire the tool and orphan the modal (the `pipe is broken` line the Output window showed). The hook is now given an explicit timeout that outlives the modal's own ceiling, so the extension always denies first. The **Unanswered permission** setting's wait option is now labelled **Wait for answer (max 1 hour)** to make that ceiling explicit.
+
+### Added
+
+- **Editor selection actions** ([#6](https://github.com/wluisdev/ClaudeCodeStudio/issues/6)). Right-clicking a selection in the code editor now opens a **Claude Code Studio** submenu with Explain, Add Summary, Add Comments, Add Unit Tests, Refactor, and Security Check, alongside the existing Send Selection. The six actions send the selection as one turn with a fixed instruction; Send Selection still just places the code in the composer for you to send yourself. All of them are disabled when nothing is selected, and if a turn is already running the prompt is kept in the composer instead of dropped.
+- **Check background tasks** in the ⌘ menu ([#5](https://github.com/wluisdev/ClaudeCodeStudio/issues/5)). A background shell that Claude starts reports nothing back once the turn ends, because the CLI has no completion event to wake it. This on-demand item sends a follow-up that asks Claude to poll its background tasks and summarise their status.
+- **Copy button on code blocks.** Every code block in a response now has a Copy button beside Apply, and code blocks in your own messages get Copy as well. Apply stays on assistant blocks only, where writing back to a file makes sense.
+
+### Fixed
+
+- **"Prompt is too long" no longer renders twice in the same bubble.** When a turn overflowed the context window, the CLI delivered the overflow both as a synthetic assistant message and as an error result carrying the same text, and both were appended, so the bubble read `Prompt is too longPrompt is too long`. The error result is now de-duplicated against the synthetic text, so the message appears once.
+- **A CLI build missing an optional flag no longer blocks the whole extension** ([#7](https://github.com/wluisdev/ClaudeCodeStudio/issues/7)). The launch passes some experimental flags (such as `--forward-subagent-text`) that not every Claude CLI build has; a build without one exited at startup with `unknown option`, which surfaced as `session not started or already exited` and left the chat unusable. The launch now detects a rejected optional flag, drops it, and retries, so the session starts without that one feature instead of failing outright. Load-bearing flags are never dropped: if one of those is ever rejected, the CLI's own message is shown instead.
+- **A second, newer Claude CLI on your PATH is now flagged** ([#7](https://github.com/wluisdev/ClaudeCodeStudio/issues/7)). The extension prefers the CLI in `~\.local\bin`, so when a newer build sits on the PATH the older copy was used silently and could behave differently from the one on your command line. A one-time line in the Output window now names both versions and their paths and suggests removing the older install or setting the CLI path in Settings. It only appears when the PATH copy is strictly newer than the one in use.
+- **A solution reload mid-turn could wedge the chat with "agent pipe not reachable".** When Claude edited a project file and Visual Studio reloaded the solution, the extension reset the session and stopped the agent; if the agent was busy answering a turn it was force-killed, and because that only killed the agent and not the `claude` process it had spawned, the orphaned CLI kept running and firing permission hooks at a pipe whose server (the dead agent) was gone. The agent is now stopped by killing its whole process tree, so the CLI never outlives it.
+- **Home and End navigated the tab group instead of moving the caret** ([#2](https://github.com/wluisdev/ClaudeCodeStudio/issues/2)) whenever the panel was docked alongside other windows. WPF's `TabControl`, which Visual Studio's docking wells are built on, claims both keys inside its own `OnKeyDown`; floating the panel was the only workaround, since a floating window has no `TabControl` above it. Both keys now reach the panel normally while it has focus, without touching tab navigation anywhere else in the IDE. Ctrl+Home / Ctrl+End still switch tabs.
+
 ## [1.1.0] - 2026-08-08
 
 ### Security
@@ -56,6 +76,8 @@ Initial release. See the [README](README.md) for the full feature set, including
 - Workspace/trust management, integrated sign-in, working-directory cascade.
 - Searchable settings panel, model picker, fallback model, configurable CLI path, status line, theme awareness.
 
+[1.1.1]: https://github.com/wluisdev/ClaudeCodeStudio/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/wluisdev/ClaudeCodeStudio/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/wluisdev/ClaudeCodeStudio/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/wluisdev/ClaudeCodeStudio/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/wluisdev/ClaudeCodeStudio/releases/tag/v1.0.0

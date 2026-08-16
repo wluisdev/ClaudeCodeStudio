@@ -10,6 +10,14 @@ public sealed class StreamEventState
     public string? SessionId;
     public string? LastActiveModel;
     public bool ThinkingActive;
+
+    // Text of the last synthetic assistant message emitted this turn. The CLI
+    // surfaces some API errors (e.g. "Prompt is too long") BOTH as a synthetic
+    // assistant message and as a terminal is_error result carrying the same
+    // string; without this, both get appended to the same bubble and the text
+    // renders doubled. Set when a synthetic text chunk is emitted, checked in
+    // the result is_error branch, cleared at each result (turn boundary).
+    public string? LastSyntheticText;
 }
 
 public enum StreamEventOutcome { Continue, Done }
@@ -191,7 +199,12 @@ public static class StreamEventParser
                 {
                     var text = item.TryGetProperty("text", out var tp) ? tp.GetString() : null;
                     if (!string.IsNullOrEmpty(text))
+                    {
                         result.Chunks.Add(new ChatChunk { Type = "chunk", Text = text! });
+                        // Remember it so the terminal is_error result doesn't
+                        // re-append the same string and double it in the bubble.
+                        state.LastSyntheticText = text;
+                    }
                 }
             }
         }
@@ -425,8 +438,19 @@ public static class StreamEventParser
         else if (evt.TryGetProperty("is_error", out var isErrProp) && isErrProp.GetBoolean() &&
             evt.TryGetProperty("result", out var resultProp))
         {
-            result.Chunks.Add(new ChatChunk { Type = "error", Text = resultProp.GetString() ?? "" });
+            var errText = resultProp.GetString() ?? "";
+            // The CLI surfaces some API errors (e.g. "Prompt is too long") BOTH
+            // as a synthetic assistant message AND as this terminal is_error
+            // result. When the synthetic already rendered the text this turn,
+            // emitting it again doubled it in the bubble. Skip the duplicate;
+            // still emit when the result is the only carrier of the error.
+            if (errText != state.LastSyntheticText)
+                result.Chunks.Add(new ChatChunk { Type = "error", Text = errText });
         }
+
+        // Turn boundary — don't let this turn's synthetic text suppress a
+        // coincidentally-identical is_error result in a later turn.
+        state.LastSyntheticText = null;
     }
 
     // A subagent's content array can carry thinking/text/tool_use blocks

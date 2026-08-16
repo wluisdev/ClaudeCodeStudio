@@ -803,8 +803,8 @@ public class AgentClient
 
                 if (!exited && !proc.HasExited)
                 {
-                    OutputLog.Warn($"agent (pid {pid}) didn't exit in 2s, killing");
-                    proc.Kill();
+                    OutputLog.Warn($"agent (pid {pid}) didn't exit in 2s, killing the process tree");
+                    KillProcessTree(proc, pid);
                     proc.WaitForExit();
                 }
             }
@@ -815,6 +815,44 @@ public class AgentClient
             writer?.Dispose();
             proc.Dispose();
             OutputLog.Info($"agent (pid {pid}) stopped");
+        }
+    }
+
+    /// <summary>
+    /// Force-kills an agent process and its whole tree, so the claude CLI it spawned
+    /// dies with it.
+    /// </summary>
+    /// <remarks>
+    /// The agent only tears down its claude child when it shuts down gracefully; a hard
+    /// kill of just the agent (this path fires when the agent is busy mid-turn and
+    /// doesn't exit within the grace window, which is exactly what a solution reload
+    /// does) leaves claude orphaned. That orphan keeps running and fires PreToolUse
+    /// hooks at a pipe named after the now-dead agent's PID, so every gated call comes
+    /// back "agent pipe not reachable" and the turn wedges. .NET Framework has no
+    /// <c>Process.Kill(entireProcessTree: true)</c>, so this shells out to taskkill /T
+    /// while the agent is still alive (its PID, and thus the tree, is still valid).
+    /// </remarks>
+    private static void KillProcessTree(Process proc, int pid)
+    {
+        try
+        {
+            using var tk = Process.Start(new ProcessStartInfo
+            {
+                FileName = "taskkill",
+                Arguments = $"/PID {pid} /T /F",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            });
+            tk?.WaitForExit(3000);
+        }
+        catch (Exception ex)
+        {
+            // taskkill missing or refused: fall back to killing just the agent. The
+            // orphan risk returns, but a dead agent beats a stuck one.
+            OutputLog.Warn($"taskkill tree kill failed for pid {pid}: {ex.Message}, falling back to Kill()");
+            try { proc.Kill(); } catch { }
         }
     }
 

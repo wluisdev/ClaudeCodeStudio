@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace ClaudeStudioShared;
 
@@ -25,7 +26,8 @@ public static class ClaudeExeLocator
         Func<string, bool>? directoryExists = null,
         IReadOnlyList<string>? pathDirs = null,
         string? nativeInstallPath = null,
-        IReadOnlyList<string>? fallbackPaths = null)
+        IReadOnlyList<string>? fallbackPaths = null,
+        Action<string, string>? onPathShadow = null)
     {
         fileExists ??= File.Exists;
         directoryExists ??= Directory.Exists;
@@ -69,7 +71,14 @@ public static class ClaudeExeLocator
         if (nativeExists)
         {
             if (pathMatch != null && !string.Equals(pathMatch, nativeInstallPath, StringComparison.OrdinalIgnoreCase))
+            {
                 warn?.Invoke($"another claude.exe found on PATH at {pathMatch} — using {nativeInstallPath} instead");
+                // issue #7: the native install we prefer can itself be the STALE
+                // one while PATH has a newer build (a WinGet copy, in that case).
+                // Hand both paths back so the caller can probe versions and
+                // surface the duplicate visibly (the warn line above is log-only).
+                onPathShadow?.Invoke(nativeInstallPath, pathMatch);
+            }
             return nativeInstallPath;
         }
 
@@ -82,5 +91,41 @@ public static class ClaudeExeLocator
 
         throw new ClaudeNotFoundException(
             "claude.exe was not found on your PATH or any standard install location.");
+    }
+
+    // Extracts a leading dotted-numeric version from a `claude --version` line
+    // ("2.1.229 (Claude Code)" -> [2, 1, 229]). Stops at the first non-numeric
+    // segment (so "2.1.229-beta" -> [2, 1, 229]). Returns null when the string
+    // does not start with a number.
+    public static int[]? ParseVersion(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return null;
+        var token = s!.TrimStart().Split(new[] { ' ', '\t', '\r', '\n' }, 2)[0];
+        var nums = new List<int>();
+        foreach (var part in token.Split('.'))
+        {
+            var digits = new string(part.TakeWhile(char.IsDigit).ToArray());
+            if (digits.Length == 0) break;
+            nums.Add(int.Parse(digits));
+        }
+        return nums.Count > 0 ? nums.ToArray() : null;
+    }
+
+    // Compares two `claude --version` strings: >0 if a is newer than b, &lt;0 if
+    // older, 0 if equal or either can't be parsed (never guess "newer" from an
+    // unparseable version).
+    public static int CompareVersions(string? a, string? b)
+    {
+        var va = ParseVersion(a);
+        var vb = ParseVersion(b);
+        if (va == null || vb == null) return 0;
+        var n = Math.Max(va.Length, vb.Length);
+        for (var i = 0; i < n; i++)
+        {
+            var x = i < va.Length ? va[i] : 0;
+            var y = i < vb.Length ? vb[i] : 0;
+            if (x != y) return x > y ? 1 : -1;
+        }
+        return 0;
     }
 }

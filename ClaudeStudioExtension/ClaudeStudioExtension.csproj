@@ -68,6 +68,11 @@
     <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.14.40265" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="18.5.40034" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3967.48" />
+    <!-- issues/2 (Home/End): the only working fix found is patching TabControl.OnKeyDown
+         itself, so the CLI's tab-switch logic is skipped without touching KeyEventArgs.Handled
+         (marking Handled stops WebView2 from ever receiving the key — measured, not assumed).
+         See TabControlHomeEndPatch.cs for the full account of what else was tried. -->
+    <PackageReference Include="Lib.Harmony" Version="2.3.3" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Microsoft.CSharp" />
