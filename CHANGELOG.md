@@ -12,6 +12,7 @@ All notable changes to Claude Code Studio are documented here. Format loosely fo
 
 - **Editor selection actions** ([#6](https://github.com/wluisdev/ClaudeCodeStudio/issues/6)). Right-clicking a selection in the code editor now opens a **Claude Code Studio** submenu with Explain, Add Summary, Add Comments, Add Unit Tests, Refactor, and Security Check, alongside the existing Send Selection. The six actions send the selection as one turn with a fixed instruction; Send Selection still just places the code in the composer for you to send yourself. All of them are disabled when nothing is selected, and if a turn is already running the prompt is kept in the composer instead of dropped.
 - **Check background tasks** in the ⌘ menu ([#5](https://github.com/wluisdev/ClaudeCodeStudio/issues/5)). A background shell that Claude starts reports nothing back once the turn ends, because the CLI has no completion event to wake it. This on-demand item sends a follow-up that asks Claude to poll its background tasks and summarise their status.
+- **Copy button on code blocks.** Every code block in a response now has a Copy button beside Apply, and code blocks in your own messages get Copy as well. Apply stays on assistant blocks only, where writing back to a file makes sense.
 
 ### Fixed
 
