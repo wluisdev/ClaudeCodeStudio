@@ -19,6 +19,14 @@ namespace ClaudeStudioExtension;
 public partial class AgentToolWindowControl : UserControl
 {
     private readonly AgentClient _agentClient = new();
+
+    // Created here instead of in XAML so the type binds to the exact
+    // Microsoft.Web.WebView2.Wpf version this extension references. A XAML
+    // clr-namespace binds the assembly by simple name and can pick up a
+    // different copy loaded by another extension (ReSharper), which throws
+    // InvalidCastException against this field's type. See the .xaml and issue #4.
+    internal readonly Microsoft.Web.WebView2.Wpf.WebView2 Browser = new();
+
     private bool _initialized;
     private string? _lastWorkingDir;
     private DateTime _sessionStart = DateTime.Now;
@@ -57,6 +65,9 @@ public partial class AgentToolWindowControl : UserControl
     public AgentToolWindowControl()
     {
         InitializeComponent();
+
+        // Host the code-created browser (see the Browser field / issue #4).
+        BrowserHost.Children.Add(Browser);
 
         Loaded += (_, _) => { if (!Live.Contains(this)) Live.Add(this); };
         Unloaded += (_, _) => Live.Remove(this);

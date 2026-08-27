@@ -2,6 +2,12 @@
 
 All notable changes to Claude Code Studio are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.2] - 2026-08-27
+
+### Fixed
+
+- **The chat window failed to open when ReSharper was installed** ([#4](https://github.com/wluisdev/ClaudeCodeStudio/issues/4)). Visual Studio loads every extension into one process, and ReSharper ships its own, older, strong-named copy of the WebView2 WPF assembly. Because the panel declared its browser in XAML, which binds that assembly by simple name, the loader could build the control from ReSharper's copy and then fail to assign it to our own, differently versioned type: `Set connectionId threw an exception` wrapping an `InvalidCastException` between two `Microsoft.Web.WebView2.Wpf.WebView2` types. The browser is now created in code against the exact version the extension ships, so the two copies no longer collide. (This was not a missing WebView2 Runtime, which the error's top-level message can suggest.)
+
 ## [1.1.1] - 2026-08-16
 
 ### Security
@@ -76,6 +82,7 @@ Initial release. See the [README](README.md) for the full feature set, including
 - Workspace/trust management, integrated sign-in, working-directory cascade.
 - Searchable settings panel, model picker, fallback model, configurable CLI path, status line, theme awareness.
 
+[1.1.2]: https://github.com/wluisdev/ClaudeCodeStudio/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/wluisdev/ClaudeCodeStudio/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/wluisdev/ClaudeCodeStudio/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/wluisdev/ClaudeCodeStudio/compare/v1.0.1...v1.0.2
