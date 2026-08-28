@@ -1314,6 +1314,20 @@ public partial class AgentToolWindowControl : UserControl
                 return;
             }
 
+            if (request.Type == "set-appearance")
+            {
+                // Mirror the chat's Appearance choice to disk so the native WPF
+                // tool windows (MCP, Usage, and any future one) follow the same
+                // theme override and accent. NotifyChanged re-applies any open ones.
+                new Theming.AppearanceSettings
+                {
+                    ThemeMode = string.IsNullOrWhiteSpace(request.ThemeMode) ? "auto" : request.ThemeMode!.Trim(),
+                    Accent = string.IsNullOrWhiteSpace(request.Accent) ? null : request.Accent!.Trim()
+                }.Save();
+                Theming.NativeTheme.NotifyChanged();
+                return;
+            }
+
             if (request.Type == "cancel")
             {
                 OutputLog.Info("ui: cancel");
@@ -4032,6 +4046,14 @@ public partial class AgentToolWindowControl : UserControl
 
         [JsonPropertyName("block")]
         public bool Block { get; set; }
+
+        // Appearance mirror (set-appearance): theme override auto/dark/light and
+        // custom accent (#rrggbb or empty for the default), for the native windows.
+        [JsonPropertyName("themeMode")]
+        public string? ThemeMode { get; set; }
+
+        [JsonPropertyName("accent")]
+        public string? Accent { get; set; }
 
         [JsonPropertyName("content")]
         public string? Content { get; set; }

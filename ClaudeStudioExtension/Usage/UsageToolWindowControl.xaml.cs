@@ -4,9 +4,11 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using ClaudeStudioShared;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
+using Microsoft.VisualStudio.PlatformUI;
 
 namespace ClaudeStudioExtension.Usage;
 
@@ -25,8 +27,14 @@ public partial class UsageToolWindowControl : UserControl
     public UsageToolWindowControl()
     {
         InitializeComponent();
+
+        ApplyTheme();
+        Theming.NativeTheme.Changed += OnThemeChanged;
+        Unloaded += (_, _) => Theming.NativeTheme.Changed -= OnThemeChanged;
+
         Loaded += (_, _) =>
         {
+            ApplyTheme();
             if (_loadedOnce) return;
             _loadedOnce = true;
             Refresh();
@@ -40,6 +48,22 @@ public partial class UsageToolWindowControl : UserControl
             if (_loadedOnce && e.NewValue is bool visible && visible)
                 Refresh();
         };
+    }
+
+    // Native WPF tool window: the chat's CSS theming does not reach it. Theming is
+    // delegated to the shared NativeTheme helper, which follows the appearance
+    // override (auto/dark/light + custom accent) or the live VS theme and swaps the
+    // DynamicResource brush entries in place. NativeTheme.Changed fires for both a
+    // VS theme switch and an appearance-setting change from the chat.
+    private void OnThemeChanged() => Dispatcher.Invoke(ApplyTheme);
+
+    private void ApplyTheme()
+    {
+        try
+        {
+            Theming.NativeTheme.Apply(this);
+        }
+        catch (Exception ex) { OutputLog.Info($"Usage theme failed: {ex.GetType().Name}: {ex.Message}"); }
     }
 
     /// <summary>
