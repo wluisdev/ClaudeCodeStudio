@@ -2,11 +2,16 @@
 
 All notable changes to Claude Code Studio are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.1.2] - 2026-08-27
+## [1.1.2] - 2026-08-28
+
+### Changed
+
+- **The MCP and Usage tool windows follow the theme instead of a fixed dark palette.** These two native windows are not styled by the chat's CSS, so they ignored the theme and always rendered dark. They now follow the same Appearance choice as the chat (⚙ → Appearance): Auto tracks the Visual Studio theme, Dark and Light force one, and a custom accent applies. The choice is persisted, so a window opened before the chat still matches, and it lives in a small reusable theming layer so future native windows can follow it too. The enable/disable toggle's off state and the scrollbars in these windows are themed along with everything else.
 
 ### Fixed
 
 - **The chat window failed to open when ReSharper was installed** ([#4](https://github.com/wluisdev/ClaudeCodeStudio/issues/4)). Visual Studio loads every extension into one process, and ReSharper ships its own, older, strong-named copy of the WebView2 WPF assembly. Because the panel declared its browser in XAML, which binds that assembly by simple name, the loader could build the control from ReSharper's copy and then fail to assign it to our own, differently versioned type: `Set connectionId threw an exception` wrapping an `InvalidCastException` between two `Microsoft.Web.WebView2.Wpf.WebView2` types. The browser is now created in code against the exact version the extension ships, so the two copies no longer collide. (This was not a missing WebView2 Runtime, which the error's top-level message can suggest.)
+- **The chat's light theme left several surfaces dark or low-contrast** ([#9](https://github.com/wluisdev/ClaudeCodeStudio/issues/9)). The light palette had been applied piecemeal, so under the Light theme parts of the UI stayed dark-on-dark. Native form controls (checkbox, radio, the select drop-down, the color input, and scrollbars) now follow the theme through `color-scheme`, and the remaining gaps are filled: settings rows, the question/status/context card family, the usage and diff modals, modal titles and footer buttons, the About footer, the history title, toggles, the top bar hover, and the per-message rewind and branch buttons.
 
 ## [1.1.1] - 2026-08-16
 
