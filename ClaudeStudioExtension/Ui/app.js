@@ -3246,6 +3246,20 @@ themeOverrideSelect.value = localStorage.getItem("themeOverride") || "auto";
 function setThemeOverride(value) {
     localStorage.setItem("themeOverride", value);
     applyThemeOverride();
+    syncAppearanceToHost();
+}
+
+// Mirror the Appearance choice (theme override + custom accent) to the C# host so
+// the native WPF tool windows (MCP, Usage, and future ones) follow the same
+// choice. They read a small on-disk copy, so this also seeds it on first load.
+function syncAppearanceToHost() {
+    try {
+        window.chrome.webview.postMessage({
+            type: "set-appearance",
+            themeMode: localStorage.getItem("themeOverride") || "auto",
+            accent: localStorage.getItem("accentCustom") || ""
+        });
+    } catch (_) { }
 }
 
 function applyThemeOverride() {
@@ -3270,12 +3284,14 @@ accentCustomInput.value = localStorage.getItem("accentCustom") || ACCENT_DEFAULT
 function setAccentCustom(value) {
     localStorage.setItem("accentCustom", value);
     applyAccent();
+    syncAppearanceToHost();
 }
 
 function resetAccent() {
     localStorage.removeItem("accentCustom");
     accentCustomInput.value = ACCENT_DEFAULT;
     applyAccent();
+    syncAppearanceToHost();
 }
 
 function applyAccent() {
@@ -3285,6 +3301,11 @@ function applyAccent() {
 }
 
 applyAccent();
+
+// Seed the host's on-disk appearance copy from whatever is already in
+// localStorage, so a native window opened without touching the settings still
+// follows the current choice.
+syncAppearanceToHost();
 
 // Working directory (per-solution overrides — see workingDirKey above)
 const workingDirInput = document.getElementById("working-dir-input");

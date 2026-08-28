@@ -3,10 +3,15 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
     mc:Ignorable="d">
 
-    <Grid>
-        <wv2:WebView2 x:Name="Browser"/>
-    </Grid>
+    <!-- The WebView2 is created in code-behind, not declared here, on purpose.
+         A XAML clr-namespace maps the assembly by simple name, so the BAML
+         loader binds Microsoft.Web.WebView2.Wpf to whichever copy is already
+         loaded in the devenv process. When another extension (ReSharper) has
+         loaded a different, strong-named version first, the control it builds
+         is a foreign type and assigning it to our Browser field throws
+         InvalidCastException (issue #4). Instantiating in code binds to the
+         exact version we reference, so no cross-version cast can happen. -->
+    <Grid x:Name="BrowserHost"/>
 </UserControl>

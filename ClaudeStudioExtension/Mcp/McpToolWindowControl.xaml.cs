@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.PlatformUI;
 
 namespace ClaudeStudioExtension.Mcp;
 
@@ -27,9 +28,38 @@ public partial class McpToolWindowControl : UserControl
     private static readonly SolidColorBrush SurfaceBrush = new(Color.FromRgb(0x2a, 0x2a, 0x2a));
     private static readonly SolidColorBrush HoverBrush = new(Color.FromRgb(0x3a, 0x3a, 0x3a));
 
+    // This tool window is native WPF, so the chat's CSS theming does not reach it.
+    // Theming is delegated to the shared NativeTheme helper, which follows the
+    // appearance override (auto/dark/light + custom accent) or the live VS theme
+    // and swaps the DynamicResource brush entries in place. We also copy the
+    // resolved palette onto the standalone static brushes the server rows are built
+    // from (safe: those never enter a ResourceDictionary, so mutating them is fine).
+    // NativeTheme.Changed fires for both a VS theme switch and an appearance change.
+    private void OnThemeChanged() => Dispatcher.Invoke(ApplyTheme);
+
+    private void ApplyTheme()
+    {
+        try
+        {
+            var p = Theming.NativeTheme.Apply(this);
+
+            AccentBrush.Color = p.Accent;
+            MutedBrush.Color = p.Muted;
+            FgBrush.Color = p.Foreground;
+            BorderBrushColor.Color = p.Border;
+            SurfaceBrush.Color = p.Surface;
+            HoverBrush.Color = p.Hover;
+        }
+        catch (Exception ex) { OutputLog.Info($"MCP theme failed: {ex.GetType().Name}: {ex.Message}"); }
+    }
+
     public McpToolWindowControl()
     {
         InitializeComponent();
+
+        ApplyTheme();
+        Theming.NativeTheme.Changed += OnThemeChanged;
+        Unloaded += (_, _) => Theming.NativeTheme.Changed -= OnThemeChanged;
 
         foreach (var t in McpTemplates.All)
             TemplateCombo.Items.Add(new ComboBoxItem { Content = t.Label, Tag = t });
@@ -38,6 +68,7 @@ public partial class McpToolWindowControl : UserControl
         Loaded += (_, _) =>
         {
             ActiveControl = this;
+            ApplyTheme();
             Refresh();
         };
         Unloaded += (_, _) =>

@@ -14,10 +14,15 @@
        for contrast on light backgrounds. Border/scrollbar #555s are separate
        and intentionally not tied to this token. */
     --text-dim: #888;
+    /* Make native controls (checkbox, radio, the select drop-down popup, the
+       color input, default scrollbars) follow the theme. Without this the
+       Chromium host renders them dark even on a light page (issue #9). */
+    color-scheme: dark;
 }
 html.light-theme {
     --accent: #b05c35;
     --text-dim: #666;
+    color-scheme: light;
 }
 
 body {
@@ -2067,6 +2072,14 @@ html.light-theme .model-divider::after { background: #d8d8d8; }
 .message:hover .msg-rewind { opacity: 1; }
 .msg-rewind:hover { color: #fff; border-color: var(--accent); background: #3a3a3a; }
 
+/* Light theme: the rewind/branch pills and the rewind file list were dark-only
+   (issue #9). */
+html.light-theme .msg-branch,
+html.light-theme .msg-rewind { background: #ebebeb; border-color: #c8c8c8; color: #666; }
+html.light-theme .msg-branch:hover,
+html.light-theme .msg-rewind:hover { background: #e0e0e0; color: #111; border-color: var(--accent); }
+html.light-theme .rewind-file-list { color: #555; }
+
 .rewind-file-list {
     margin: 0 0 10px;
     padding-left: 18px;
@@ -3040,6 +3053,15 @@ html.light-theme .settings-input { background: #fff; border-color: #bbb; color: 
 html.light-theme .settings-input::placeholder { color: #aaa; }
 html.light-theme .settings-input-clear { color: #999; }
 html.light-theme .settings-input-clear:hover { color: #333; }
+/* Settings rows were dark-only: the label (#aaa) washed out on a light panel,
+   and the select / number / color controls kept their dark surfaces. Match the
+   light palette used by .settings-input above (issue #9). */
+html.light-theme .settings-label { color: #333; }
+html.light-theme .settings-select,
+html.light-theme .settings-number { background: #fff; border-color: #bbb; color: #333; }
+html.light-theme .settings-color { background: #fff; border-color: #c8c8c8; }
+html.light-theme .settings-color-reset { color: #666; border-color: #c8c8c8; }
+html.light-theme .settings-color-reset:hover { color: #111; border-color: #999; }
 
 .trusted-workspaces-list {
     padding: 0 2px;
@@ -3257,6 +3279,51 @@ html.light-theme .ask-question-other { background: #fff; border-color: #bbb; col
 html.light-theme .ask-question-other::placeholder { color: #999; }
 html.light-theme .ask-question-btn.selected { color: #5a3210; background: rgba(216, 135, 99, 0.18); border-color: #c87a55; }
 
+/* ── Light-theme completeness sweep (issue #9) ─────────────────
+   The light palette was applied piecemeal, so several surfaces stayed dark or
+   dark-on-dark. Fill the gaps. (color-scheme, set on the roots above, handles
+   the native controls: checkboxes, the select popup, the color input.) */
+
+/* Shared card family: ask picker, MCP status, context usage, model picker,
+   rewind, sign-in, install. The .question-card base was dark-only, so in light
+   theme .ask-question-text flipped to #333 but sat on a #252525 card. Give the
+   card the assistant-bubble light surface, dark body text, and light neutral
+   buttons; primary (.q-yes) keeps its accent and the selected ask option keeps
+   its tint (both handled above). */
+html.light-theme .question-card { background: #efefef; border-color: #d5d5d5; }
+html.light-theme .question-text { color: #333; }
+html.light-theme .claude-install-hint { color: #555; }
+html.light-theme .q-btn:not(.q-yes):not(.selected) { background: #ebebeb; border-color: #c8c8c8; color: #333; }
+html.light-theme .q-btn:not(.q-yes):not(.selected):hover { background: #e0e0e0; color: #000; }
+html.light-theme .pinned-dock { border-top-color: #d5d5d5; }
+html.light-theme .mcp-status-state { color: #666; }
+
+/* Usage modal and Git Diff modal share .usage-modal-header h3 (the title, incl.
+   its ⎇ / Usage glyph); it was near-white on the now-light modal. */
+html.light-theme .usage-modal-header h3 { color: #1e1e1e; }
+html.light-theme .usage-raw { background: #f5f5f5; border-color: #ddd; color: #333; }
+html.light-theme .usage-session-values { color: #333; }
+html.light-theme .usage-divider { border-top-color: #ddd; }
+html.light-theme .diff-stat { color: #555; border-bottom-color: #ddd; }
+html.light-theme .diff-empty-message { color: #555; }
+
+/* Settings "About" footer (Claude Code Studio name) and the history title. */
+html.light-theme .about-name { color: #1e1e1e; }
+html.light-theme .history-preview { color: #222; }
+
+/* Modal footer buttons (e.g. Close in Trusted workspaces); primary keeps accent. */
+html.light-theme .cmd-modal-buttons button:not(.btn-primary) { background: #ebebeb; border-color: #c8c8c8; color: #333; }
+html.light-theme .cmd-modal-buttons button:not(.btn-primary):hover { background: #e0e0e0; color: #000; }
+
+/* Modal titles (.cmd-modal h3 covers the MCP / custom-command modals), the
+   settings toggles (both states were dark), and the topbar action-btn hover
+   (its light override set color but not the #333 background, so hovering left a
+   dark blob on the light bar). */
+html.light-theme .cmd-modal h3 { color: #1e1e1e; }
+html.light-theme .toggle-track { background: #c8c8c8; }
+html.light-theme .toggle-track::after { background: #fff; }
+html.light-theme .toggle input:checked + .toggle-track { background: rgba(176, 92, 53, 0.35); }
+
 /* ── History delete button ─────────────────────────────────── */
 .history-item {
     display: flex;
@@ -3405,7 +3472,7 @@ html.light-theme body { background: #f5f5f5; color: #1e1e1e; }
 html.light-theme .topbar { background: #ececec; border-bottom-color: #d0d0d0; }
 html.light-theme .brand { color: #1e1e1e; }
 html.light-theme .action-btn { color: #444; }
-html.light-theme .action-btn:hover { color: #000; }
+html.light-theme .action-btn:hover { background: #ddd; color: #000; }
 html.light-theme .titlebar { background: #f5f5f5; border-bottom-color: #d0d0d0; color: #1e1e1e; }
 html.light-theme .account-info-muted { color: #888; }
 html.light-theme .account-info-plan { color: #b88066; }
