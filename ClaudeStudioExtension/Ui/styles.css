@@ -3312,8 +3312,13 @@ html.light-theme .about-name { color: #1e1e1e; }
 html.light-theme .history-preview { color: #222; }
 
 /* Modal footer buttons (e.g. Close in Trusted workspaces); primary keeps accent. */
-html.light-theme .cmd-modal-buttons button:not(.btn-primary) { background: #ebebeb; border-color: #c8c8c8; color: #333; }
-html.light-theme .cmd-modal-buttons button:not(.btn-primary):hover { background: #e0e0e0; color: #000; }
+/* Neutral modal buttons only (Close/Cancel and the like). The permission actions
+   (.perm-deny / .perm-allow-session / .perm-allow) carry their own semantic colors
+   (red / blue / green) and must keep them in light theme, so exclude them here;
+   otherwise this rule outweighs their .perm-modal-buttons .perm-* colors and greys
+   them out. */
+html.light-theme .cmd-modal-buttons button:not(.btn-primary):not(.perm-allow):not(.perm-deny):not(.perm-allow-session) { background: #ebebeb; border-color: #c8c8c8; color: #333; }
+html.light-theme .cmd-modal-buttons button:not(.btn-primary):not(.perm-allow):not(.perm-deny):not(.perm-allow-session):hover { background: #e0e0e0; color: #000; }
 
 /* Modal titles (.cmd-modal h3 covers the MCP / custom-command modals), the
    settings toggles (both states were dark), and the topbar action-btn hover
