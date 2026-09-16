@@ -2,6 +2,18 @@
 
 All notable changes to Claude Code Studio are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.3] - 2026-09-15
+
+### Added
+
+- **Question picker mode** (⚙ → Chat) ([#10](https://github.com/wluisdev/ClaudeCodeStudio/issues/10)). Controls how the AskUserQuestion picker submits. **Instant** (the default, and the previous behavior) sends a single-choice question as soon as you click an option, and picking an option and typing in "Other" are mutually exclusive. **Always Submit** never sends on click: the Submit button is always shown, clicking a selected option again clears it, and you can keep an option selected while adding your own text in "Other", in any order, which is sent as `Choice 1 (your text)`.
+
+### Fixed
+
+- **The chat panel could open but stay completely unresponsive on some machines** ([#12](https://github.com/wluisdev/ClaudeCodeStudio/issues/12)). The panel loads from a `file://` URL, and on some systems (seen on a non-UTF-8 Windows locale) the browser decoded the panel's scripts with the system code page instead of UTF-8, which corrupted their non-ASCII characters so the scripts failed to parse. With the scripts dead, no click handlers were wired up and every button was inert. The scripts are now tagged as UTF-8 so they decode correctly regardless of the system locale, and, as a safety net, storage access is guarded so a blocked `localStorage` can no longer halt the panel.
+- **Permission dialog buttons lost their colors under the Light theme.** The 1.1.2 light-theme sweep added a neutral grey style for modal buttons, which also matched the permission actions (they share the modal button class) and outweighed their own red, blue and green. Deny, Allow for session and Allow keep their colors in the Light theme again; the neutral modal buttons (Close, Cancel) still get the light styling.
+- **The Doctor output was unreadable under the Light theme.** Its panel kept a fixed dark background with no light override, so the dark text sat on a dark box. It now uses a light panel in the Light theme.
+
 ## [1.1.2] - 2026-08-28
 
 ### Changed

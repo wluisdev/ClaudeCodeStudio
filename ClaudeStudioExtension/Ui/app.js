@@ -1,5 +1,37 @@
 console.log("Claude Code Studio loaded");
 
+// Harden localStorage (issue #12). On some environments — certain file:// origins,
+// or storage blocked by an enterprise/AV policy — even *accessing* window.localStorage
+// throws a SecurityError. The first such access happens at load (restoreCompactLayout
+// below), and because it is top-level and unguarded it would halt this whole script,
+// leaving the static HTML shell with no wired handlers so every button is dead. Probe
+// it once; if it is unavailable, shadow it with an in-memory store so the UI still
+// works (settings just won't persist across sessions).
+(function hardenLocalStorage() {
+    try {
+        const probe = "__cs_ls_probe__";
+        window.localStorage.setItem(probe, "1");
+        window.localStorage.removeItem(probe);
+        return; // real localStorage works — nothing to do
+    } catch (_) { /* fall through to the in-memory shim */ }
+
+    const mem = new Map();
+    const shim = {
+        getItem(k) { return mem.has(String(k)) ? mem.get(String(k)) : null; },
+        setItem(k, v) { mem.set(String(k), String(v)); },
+        removeItem(k) { mem.delete(String(k)); },
+        clear() { mem.clear(); },
+        key(i) { return Array.from(mem.keys())[i] ?? null; },
+        get length() { return mem.size; },
+    };
+    try {
+        Object.defineProperty(window, "localStorage", { value: shim, configurable: true });
+        console.warn("Claude Code Studio: localStorage unavailable, using an in-memory fallback (settings won't persist).");
+    } catch (e) {
+        console.error("Claude Code Studio: localStorage unavailable and could not be shimmed:", e);
+    }
+})();
+
 // ── Layout toggle ────────────────────────────────────────────
 function toggleLayout() {
     const app = document.querySelector(".app");
@@ -3274,6 +3306,16 @@ function applyThemeOverride() {
 // Apply on load so the choice is visible even before the first VS theme event.
 applyThemeOverride();
 
+// Issue #10: how the AskUserQuestion picker submits — "instant" (default,
+// send on click) or "always" (always show Submit; options toggle and combine
+// with Other). Persists across sessions in localStorage.
+const askModeSelect = document.getElementById("ask-mode");
+if (askModeSelect) askModeSelect.value = getAskMode();
+function setAskMode(value) { localStorage.setItem("askMode", value); }
+// Only "always" and "instant" exist; anything else (e.g. a stale "hybrid" from
+// an earlier build) falls back to the default.
+function getAskMode() { return localStorage.getItem("askMode") === "always" ? "always" : "instant"; }
+
 // Accent color — user picks a HEX via color input. Persists across sessions.
 // Empty localStorage = default (CSS cascade: #d88763 dark, #b05c35 light).
 // Reset button clears the override and snaps back to the brand default.
@@ -3493,7 +3535,7 @@ const SETTINGS_KEYS = [
     // Appearance
     "themeOverride", "accentCustom",
     // Chat
-    "sendWithEnter", "autoResume", "autoSaveLevel", "soundOnInput", "soundOnDone", "autoIncludeAttachments",
+    "sendWithEnter", "autoResume", "autoSaveLevel", "soundOnInput", "soundOnDone", "autoIncludeAttachments", "askMode",
     // Display / layout
     "showTokens", "showTokenEstimate", "timingMode", "timeUnit", "compactLayout",
     "composerFontSize", "composerTextareaHeight",
@@ -4432,7 +4474,38 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
     // them in the final payload (claude harness expects a single string per q).
     const multiSelectMap = {};
 
-    const needsConfirm = questions.length > 1 || questions.some(q => q && q.multiSelect);
+    // Issue #10: the picker's submit behavior is configurable (default "instant").
+    //   instant  — current behavior: a lone single-choice question sends on click,
+    //              picking an option and typing "Other" are mutually exclusive.
+    //   always   — never sends on click; Submit is always shown; options toggle
+    //              and combine with "Other" ("Option (write-in)").
+    const askMode = getAskMode();
+    const alwaysSubmit = askMode === "always";
+    const enableToggleCombine = alwaysSubmit;
+    const baseNeedsConfirm = questions.length > 1 || questions.some(q => q && q.multiSelect);
+
+    // Rebuilds a row's answer from its current selection plus any "Other" text.
+    // A selected option combined with a write-in becomes "Option (write-in)".
+    function recomputeAnswer(q, row, opts) {
+        const wi = row.querySelector(".ask-question-other");
+        const note = wi ? wi.value.trim() : "";
+        let base;
+        if (q.multiSelect) {
+            base = Array.from(multiSelectMap[q.question] || []).join(", ");
+        } else {
+            const sel = opts.querySelector(".ask-question-btn.selected");
+            base = sel ? (sel.dataset.label || sel.textContent) : "";
+        }
+        const combined = base && note ? `${base} (${note})` : (base || note);
+        if (combined) answers[q.question] = combined;
+        else delete answers[q.question];
+    }
+
+    // Whether the Submit button is visible. When it is not (a lone single-choice
+    // question in "instant" mode) a pick sends immediately.
+    function submitShown() {
+        return alwaysSubmit || baseNeedsConfirm;
+    }
 
     questions.forEach((q, qIdx) => {
         const row = document.createElement("div");
@@ -4472,11 +4545,16 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
                 cb.onchange = () => {
                     const set = multiSelectMap[q.question];
                     if (cb.checked) set.add(opt.label); else set.delete(opt.label);
-                    answers[q.question] = Array.from(set).join(", ");
-                    if (set.size === 0) delete answers[q.question];
-                    // Multi-select clears any write-in for this row
-                    const wi = row.querySelector(".ask-question-other");
-                    if (wi) wi.value = "";
+                    if (enableToggleCombine) {
+                        // Checked boxes combine with any "Other" write-in.
+                        recomputeAnswer(q, row, opts);
+                    } else {
+                        answers[q.question] = Array.from(set).join(", ");
+                        if (set.size === 0) delete answers[q.question];
+                        // Multi-select clears any write-in for this row
+                        const wi = row.querySelector(".ask-question-other");
+                        if (wi) wi.value = "";
+                    }
                     updateConfirmState();
                 };
                 lbl.appendChild(cb);
@@ -4489,13 +4567,23 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
                 btn.type = "button";
                 btn.className = "q-btn ask-question-btn";
                 btn.textContent = opt.label;
+                btn.dataset.label = opt.label;
                 if (tooltip) btn.title = tooltip;
                 btn.onclick = () => {
-                    opts.querySelectorAll(".ask-question-btn").forEach(b => b.classList.remove("selected"));
-                    btn.classList.add("selected");
-                    answers[q.question] = opt.label;
-                    const wi = row.querySelector(".ask-question-other");
-                    if (wi) wi.value = "";
+                    if (enableToggleCombine) {
+                        // Toggle: clicking the selected option again clears it, and
+                        // any "Other" write-in is kept and combined.
+                        const wasSelected = btn.classList.contains("selected");
+                        opts.querySelectorAll(".ask-question-btn").forEach(b => b.classList.remove("selected"));
+                        if (!wasSelected) btn.classList.add("selected");
+                        recomputeAnswer(q, row, opts);
+                    } else {
+                        opts.querySelectorAll(".ask-question-btn").forEach(b => b.classList.remove("selected"));
+                        btn.classList.add("selected");
+                        answers[q.question] = opt.label;
+                        const wi = row.querySelector(".ask-question-other");
+                        if (wi) wi.value = "";
+                    }
                     maybeAutoSubmit();
                 };
                 opts.appendChild(btn);
@@ -4509,24 +4597,29 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
         otherInput.className = "ask-question-other";
         otherInput.placeholder = "Other — type your own answer…";
         otherInput.oninput = () => {
-            const val = otherInput.value.trim();
-            if (val) {
-                // Write-in overrides any clicked option for this row
-                opts.querySelectorAll(".ask-question-btn").forEach(b => b.classList.remove("selected"));
-                if (q.multiSelect) {
-                    opts.querySelectorAll("input[type=checkbox]").forEach(c => c.checked = false);
-                    multiSelectMap[q.question]?.clear();
-                }
-                answers[q.question] = val;
+            if (enableToggleCombine) {
+                // Keep the current selection; the write-in combines with it.
+                recomputeAnswer(q, row, opts);
             } else {
-                delete answers[q.question];
+                const val = otherInput.value.trim();
+                if (val) {
+                    // Write-in overrides any clicked option for this row
+                    opts.querySelectorAll(".ask-question-btn").forEach(b => b.classList.remove("selected"));
+                    if (q.multiSelect) {
+                        opts.querySelectorAll("input[type=checkbox]").forEach(c => c.checked = false);
+                        multiSelectMap[q.question]?.clear();
+                    }
+                    answers[q.question] = val;
+                } else {
+                    delete answers[q.question];
+                }
             }
             updateConfirmState();
         };
         otherInput.onkeydown = e => {
-            if (e.key === "Enter" && otherInput.value.trim()) {
+            if (e.key === "Enter") {
                 e.preventDefault();
-                maybeAutoSubmit();
+                submitAnswers();
             }
         };
         row.appendChild(otherInput);
@@ -4537,25 +4630,28 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
     const footer = document.createElement("div");
     footer.className = "ask-question-footer";
 
-    let confirmBtn = null;
-    if (needsConfirm) {
-        confirmBtn = document.createElement("button");
-        confirmBtn.type = "button";
-        confirmBtn.className = "q-btn q-yes ask-question-confirm";
-        confirmBtn.textContent = "Submit";
-        confirmBtn.disabled = true;
-        confirmBtn.onclick = submitAnswers;
-        footer.appendChild(confirmBtn);
-    }
+    // Always create the Submit button; submitShown() controls when it is visible
+    // (in "always" mode or when a confirm is inherently needed; never for a lone
+    // single-choice question in "instant").
+    const confirmBtn = document.createElement("button");
+    confirmBtn.type = "button";
+    confirmBtn.className = "q-btn q-yes ask-question-confirm";
+    confirmBtn.textContent = "Submit";
+    confirmBtn.disabled = true;
+    confirmBtn.onclick = submitAnswers;
+    footer.appendChild(confirmBtn);
     card.appendChild(footer);
 
     // Pending picks dock above the composer so streaming can't scroll them
     // away; submitAnswers moves the card back into the bubble.
     pinCard(card, bubble, "turn");
     renderPresence("waiting", "question");
+    updateConfirmState();
 
     function updateConfirmState() {
-        if (!confirmBtn) return;
+        const show = submitShown();
+        confirmBtn.style.display = show ? "" : "none";
+        if (!show) { confirmBtn.disabled = true; return; }
         const allAnswered = questions.every(q => {
             const v = answers[q.question];
             return v && String(v).trim().length > 0;
@@ -4564,7 +4660,9 @@ function renderAskUserQuestionCard(bubble, toolId, inputJson) {
     }
 
     function maybeAutoSubmit() {
-        if (!needsConfirm) submitAnswers();
+        // When Submit isn't shown (a lone single-choice question in "instant") a
+        // pick sends immediately; otherwise it just refreshes the Submit button.
+        if (!submitShown()) submitAnswers();
         else updateConfirmState();
     }
 

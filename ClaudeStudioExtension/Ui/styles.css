@@ -3297,6 +3297,7 @@ html.light-theme .q-btn:not(.q-yes):not(.selected) { background: #ebebeb; border
 html.light-theme .q-btn:not(.q-yes):not(.selected):hover { background: #e0e0e0; color: #000; }
 html.light-theme .pinned-dock { border-top-color: #d5d5d5; }
 html.light-theme .mcp-status-state { color: #666; }
+html.light-theme .doctor-output { background: #f5f5f5; border-color: #ddd; color: #333; }
 
 /* Usage modal and Git Diff modal share .usage-modal-header h3 (the title, incl.
    its ⎇ / Usage glyph); it was near-white on the now-light modal. */
