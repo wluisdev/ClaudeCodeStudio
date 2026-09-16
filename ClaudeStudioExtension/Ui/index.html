@@ -155,6 +155,16 @@
                         </div>
                         <div class="settings-row">
                             <span class="settings-label">
+                                Question picker
+                                <span class="info-icon" title="How the AskUserQuestion picker submits. Instant: a single-choice question sends on click. Always Submit: never sends on click — click an option to toggle it, and combine it with your own text in Other.">ⓘ</span>
+                            </span>
+                            <select id="ask-mode" class="settings-select" onchange="setAskMode(this.value)">
+                                <option value="instant">Instant (send on click)</option>
+                                <option value="always">Always show Submit</option>
+                            </select>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">
                                 Auto-include attachments
                                 <span class="info-icon" title="When on, attached files are sent to Claude automatically, skipping the per-file 'read this file?' confirmation. You can still drop one with its × chip before sending.">ⓘ</span>
                             </span>
@@ -700,7 +710,7 @@
                     <code>permission auto: … — allowed by rule: …</code> whenever a rule decides one.
                 </div>
                 <details class="perm-rules-examples" id="perm-rules-examples" open
-                         ontoggle="togglePermExamples(this.open)">
+                         ontoggle="window.togglePermExamples && togglePermExamples(this.open)">
                     <summary class="perm-rules-examples-title">Examples — click one to fill the box</summary>
                     <div class="perm-rules-examples-grid">
                     <button type="button" class="perm-rules-example" onclick="fillPermRule('allow','PowerShell(git status)')">
@@ -845,7 +855,7 @@
         </div>
     </div>
 
-    <script src="highlight.min.js"></script>
-    <script src="app.js"></script>
+    <script src="highlight.min.js" charset="utf-8"></script>
+    <script src="app.js" charset="utf-8"></script>
 </body>
 </html>
