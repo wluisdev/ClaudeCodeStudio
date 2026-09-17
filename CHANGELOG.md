@@ -2,6 +2,12 @@
 
 All notable changes to Claude Code Studio are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.4] - 2026-09-17
+
+### Added
+
+- **Subscription plan limits in the Usage window** ([#15](https://github.com/wluisdev/ClaudeCodeStudio/issues/15)). Above the token and cost tiles, a "Plan limits" panel shows your Current session and This week windows (percent used and reset time) as progress bars, with a refresh button. It reads the same data as Claude Code's `/usage`, so it matches what you would see on the web without leaving Visual Studio. The last snapshot is cached and shown instantly when the window opens, while a background run (the CLI takes a few seconds) refreshes it.
+
 ## [1.1.3] - 2026-09-15
 
 ### Added

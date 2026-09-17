@@ -1,7 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -23,6 +27,9 @@ public partial class UsageToolWindowControl : UserControl
     // a manual choice.
     private bool _autoCheckedDueToNoCwd;
     private bool _suppressManualClearOnNextToggle;
+    // Whether the plan-limit bars currently show data (from cache or a live run).
+    // A failed refresh keeps them instead of blanking to an error.
+    private bool _haveLimits;
 
     public UsageToolWindowControl()
     {
@@ -38,6 +45,8 @@ public partial class UsageToolWindowControl : UserControl
             if (_loadedOnce) return;
             _loadedOnce = true;
             Refresh();
+            LoadCachedLimits();       // instant bars from the last snapshot…
+            _ = LoadPlanLimitsAsync(); // …then refresh in the background (the CLI is ~3s)
         };
 
         // Auto-refresh whenever the tool window becomes visible again (after a
@@ -119,6 +128,160 @@ public partial class UsageToolWindowControl : UserControl
             TotalCostText.Text = "error";
             SessionCountText.Text = ex.Message;
         }
+    }
+
+    // ── Plan limits (issue #15) ───────────────────────────────────────────
+    // The subscription session/week limits are not in the local JSONL; they come
+    // from `claude -p "/usage"`, which prints them as text. Run the CLI once on
+    // open (and on the refresh button) and parse the two lines into progress bars.
+    private async Task LoadPlanLimitsAsync()
+    {
+        var sw = Stopwatch.StartNew();
+        if (LimitsRefreshButton != null) LimitsRefreshButton.IsEnabled = false;
+        // Keep the bars up while refreshing if we already have data; only show the
+        // full "Loading…" placeholder on the first run with nothing cached.
+        if (_haveLimits)
+        {
+            if (LimitsStatusText != null) { LimitsStatusText.Text = "Updating…"; LimitsStatusText.Visibility = Visibility.Visible; }
+        }
+        else
+        {
+            ShowLimitsStatus("Loading…");
+        }
+
+        string output;
+        try
+        {
+            output = await Task.Run(RunUsageCommand);
+        }
+        catch (ClaudeNotFoundException)
+        {
+            FinishLimitsRefresh("Claude CLI not found.");
+            return;
+        }
+        catch (Exception ex)
+        {
+            OutputLog.Info($"plan limits failed: {ex.GetType().Name}: {ex.Message}");
+            FinishLimitsRefresh("Could not read plan limits.");
+            return;
+        }
+        finally
+        {
+            if (LimitsRefreshButton != null) LimitsRefreshButton.IsEnabled = true;
+        }
+
+        var session = ParseLimit(output, @"Current session:\s*(\d+)% used[^\n]*?resets\s+([^\n]+)");
+        var week = ParseLimit(output, @"Current week[^:]*:\s*(\d+)% used[^\n]*?resets\s+([^\n]+)");
+        if (session == null && week == null)
+        {
+            FinishLimitsRefresh("Could not read plan limits.");
+            return;
+        }
+
+        if (LimitsStatusText != null) LimitsStatusText.Visibility = Visibility.Collapsed;
+        ApplyLimit(session, SessionLimitRow, SessionPctText, SessionResetText, SessionFillCol, SessionRestCol);
+        ApplyLimit(week, WeekLimitRow, WeekPctText, WeekResetText, WeekFillCol, WeekRestCol);
+        _haveLimits = true;
+        new PlanLimitsCache
+        {
+            SessionPct = session?.pct, SessionReset = session?.reset,
+            WeekPct = week?.pct, WeekReset = week?.reset,
+        }.Save();
+        OutputLog.Info($"plan limits rendered in {sw.ElapsedMilliseconds}ms (total, incl. CLI)");
+    }
+
+    // A failed refresh keeps already-shown bars (just hides the "Updating…" hint);
+    // the error text only appears when there is nothing cached to show.
+    private void FinishLimitsRefresh(string errorIfEmpty)
+    {
+        if (_haveLimits)
+        {
+            if (LimitsStatusText != null) LimitsStatusText.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            ShowLimitsStatus(errorIfEmpty);
+        }
+    }
+
+    // Shows the last cached snapshot instantly (before the ~3s CLI run) so the
+    // window is never blank on open.
+    private void LoadCachedLimits()
+    {
+        var c = PlanLimitsCache.Load();
+        var session = c.SessionPct is int sp ? ((int pct, string reset)?)(sp, c.SessionReset ?? "") : null;
+        var week = c.WeekPct is int wp ? ((int pct, string reset)?)(wp, c.WeekReset ?? "") : null;
+        if (session == null && week == null) return;
+        if (LimitsStatusText != null) LimitsStatusText.Visibility = Visibility.Collapsed;
+        ApplyLimit(session, SessionLimitRow, SessionPctText, SessionResetText, SessionFillCol, SessionRestCol);
+        ApplyLimit(week, WeekLimitRow, WeekPctText, WeekResetText, WeekFillCol, WeekRestCol);
+        _haveLimits = true;
+    }
+
+    private void OnRefreshLimitsClick(object sender, RoutedEventArgs e) => _ = LoadPlanLimitsAsync();
+
+    private void ShowLimitsStatus(string text)
+    {
+        if (LimitsStatusText != null) { LimitsStatusText.Text = text; LimitsStatusText.Visibility = Visibility.Visible; }
+        if (SessionLimitRow != null) SessionLimitRow.Visibility = Visibility.Collapsed;
+        if (WeekLimitRow != null) WeekLimitRow.Visibility = Visibility.Collapsed;
+    }
+
+    // Runs `claude -p "/usage"` and returns its stdout. Blocking — call via Task.Run.
+    private static string RunUsageCommand()
+    {
+        var sw = Stopwatch.StartNew();
+        var exe = ClaudeExeLocator.FindClaudeExe(null); // may throw ClaudeNotFoundException
+        var resolveMs = sw.ElapsedMilliseconds;
+        sw.Restart();
+        var psi = new ProcessStartInfo
+        {
+            FileName = exe,
+            Arguments = "-p /usage",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        };
+
+        using var proc = new Process { StartInfo = psi };
+        var sb = new StringBuilder();
+        proc.OutputDataReceived += (_, e) => { if (e.Data != null) sb.AppendLine(e.Data); };
+        proc.ErrorDataReceived += (_, _) => { /* drained so stderr can't deadlock; ignored */ };
+        proc.Start();
+        proc.BeginOutputReadLine();
+        proc.BeginErrorReadLine();
+        if (!proc.WaitForExit(30000))
+        {
+            try { proc.Kill(); } catch { /* already gone */ }
+            throw new TimeoutException("claude -p /usage timed out");
+        }
+        proc.WaitForExit(); // let the async readers flush
+        OutputLog.Info($"plan limits: exe resolve={resolveMs}ms, claude -p /usage={sw.ElapsedMilliseconds}ms");
+        return sb.ToString();
+    }
+
+    private static (int pct, string reset)? ParseLimit(string output, string pattern)
+    {
+        var m = Regex.Match(output, pattern, RegexOptions.IgnoreCase);
+        if (!m.Success || !int.TryParse(m.Groups[1].Value, out var pct)) return null;
+        var reset = m.Groups[2].Value.Trim();
+        // Drop a trailing " (timezone)" so the line stays short.
+        reset = Regex.Replace(reset, @"\s*\([^)]*\)\s*$", "").Trim();
+        return (pct, reset);
+    }
+
+    private static void ApplyLimit((int pct, string reset)? data, StackPanel row, TextBlock pctText,
+        TextBlock resetText, ColumnDefinition fillCol, ColumnDefinition restCol)
+    {
+        if (data == null) { row.Visibility = Visibility.Collapsed; return; }
+        var pct = Math.Max(0, Math.Min(100, data.Value.pct));
+        pctText.Text = data.Value.pct + "%";
+        resetText.Text = "resets " + data.Value.reset;
+        fillCol.Width = new GridLength(pct, GridUnitType.Star);
+        restCol.Width = new GridLength(100 - pct, GridUnitType.Star);
+        row.Visibility = Visibility.Visible;
     }
 
     private void CaptureCurrentCwd()

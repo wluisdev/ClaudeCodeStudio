@@ -293,6 +293,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -308,7 +309,66 @@
             <CheckBox x:Name="AllProjects" Content="all projects" Margin="14,0,0,0" VerticalAlignment="Center" Checked="OnFilterChanged" Unchecked="OnFilterChanged"/>
         </StackPanel>
 
-        <UniformGrid Grid.Row="1" Columns="5" Margin="0,0,0,10">
+        <Border Grid.Row="1" Background="{DynamicResource surfaceBrush}" BorderBrush="{DynamicResource borderBrush}" BorderThickness="1" CornerRadius="5" Padding="12" Margin="0,0,0,10">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Plan limits" Foreground="{DynamicResource mutedBrush}" FontSize="11" VerticalAlignment="Center"/>
+                    <Button Grid.Column="1" x:Name="LimitsRefreshButton" Content="🔄" Padding="6,1" FontSize="11" Click="OnRefreshLimitsClick" ToolTip="Refresh plan limits"/>
+                </Grid>
+
+                <TextBlock x:Name="LimitsStatusText" Foreground="{DynamicResource mutedBrush}" FontSize="11" Margin="0,6,0,0" Text="Loading…"/>
+
+                <StackPanel x:Name="SessionLimitRow" Margin="0,8,0,0" Visibility="Collapsed">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Current session" FontSize="12"/>
+                        <TextBlock Grid.Column="1" x:Name="SessionPctText" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource accentBrush}"/>
+                    </Grid>
+                    <Grid Height="6" Margin="0,4,0,0">
+                        <Border Background="{DynamicResource borderBrush}" CornerRadius="3"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="SessionFillCol" Width="0*"/>
+                                <ColumnDefinition x:Name="SessionRestCol" Width="100*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Background="{DynamicResource accentBrush}" CornerRadius="3"/>
+                        </Grid>
+                    </Grid>
+                    <TextBlock x:Name="SessionResetText" Foreground="{DynamicResource mutedBrush}" FontSize="10" Margin="0,3,0,0"/>
+                </StackPanel>
+
+                <StackPanel x:Name="WeekLimitRow" Margin="0,10,0,0" Visibility="Collapsed">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="This week" FontSize="12"/>
+                        <TextBlock Grid.Column="1" x:Name="WeekPctText" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource accentBrush}"/>
+                    </Grid>
+                    <Grid Height="6" Margin="0,4,0,0">
+                        <Border Background="{DynamicResource borderBrush}" CornerRadius="3"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="WeekFillCol" Width="0*"/>
+                                <ColumnDefinition x:Name="WeekRestCol" Width="100*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Background="{DynamicResource accentBrush}" CornerRadius="3"/>
+                        </Grid>
+                    </Grid>
+                    <TextBlock x:Name="WeekResetText" Foreground="{DynamicResource mutedBrush}" FontSize="10" Margin="0,3,0,0"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <UniformGrid Grid.Row="2" Columns="5" Margin="0,0,0,10">
             <Border Background="{DynamicResource surfaceBrush}" BorderBrush="{DynamicResource borderBrush}" BorderThickness="1" CornerRadius="5" Padding="12" Margin="0,0,4,0">
                 <StackPanel>
                     <TextBlock Text="Total cost" Foreground="{DynamicResource mutedBrush}" FontSize="11"/>
@@ -341,7 +401,7 @@
             </Border>
         </UniformGrid>
 
-        <DataGrid Grid.Row="2" x:Name="SessionsGrid" AutoGenerateColumns="False" IsReadOnly="True"
+        <DataGrid Grid.Row="3" x:Name="SessionsGrid" AutoGenerateColumns="False" IsReadOnly="True"
                   HeadersVisibility="Column" GridLinesVisibility="Horizontal">
             <DataGrid.Columns>
                 <DataGridTemplateColumn Header="Last activity" Width="140">
