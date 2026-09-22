@@ -2,11 +2,15 @@
 
 All notable changes to Claude Code Studio are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.1.4] - 2026-09-17
+## [1.1.5] - 2026-09-22
 
 ### Added
 
 - **Subscription plan limits in the Usage window** ([#15](https://github.com/wluisdev/ClaudeCodeStudio/issues/15)). Above the token and cost tiles, a "Plan limits" panel shows your Current session and This week windows (percent used and reset time) as progress bars, with a refresh button. It reads the same data as Claude Code's `/usage`, so it matches what you would see on the web without leaving Visual Studio. The last snapshot is cached and shown instantly when the window opens, while a background run (the CLI takes a few seconds) refreshes it.
+
+### Fixed
+
+- **A full session left the chat stuck failing with "Prompt is too long".** Once a conversation grows past the model's context window, every path that carries it forward (the next turn, auto-resume, or an explicit resume) fails on the way in, because the history alone is over the limit. The chat showed a plain error bubble and, with Auto-resume on, kept dragging the dead session back so every new message failed again. That error now raises a "This session is full" card with a **Start new session** button, and auto-resume is suppressed for the next send so a fresh message is no longer pulled back into the full session.
 
 ## [1.1.3] - 2026-09-15
 

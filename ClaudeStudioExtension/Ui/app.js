@@ -2386,6 +2386,11 @@ window.chrome.webview.addEventListener("message", event => {
         return;
     }
 
+    if (event.data.type === "context-full") {
+        showContextFullCard(event.data.detail || "");
+        return;
+    }
+
     if (event.data.type === "claude-not-found") {
         showClaudeNotFoundCard(event.data.detail || "");
         return;
@@ -5257,6 +5262,35 @@ function showClaudeNotFoundCard(detail) {
 function startClaudeInstall(card) {
     try { window.chrome.webview.postMessage({ type: "start-claude-install" }); } catch (e) {}
     if (card && card.classList) card.classList.add("question-answered");
+}
+
+// The session's context window is full: it can no longer be resumed, so every
+// path that carries its transcript forward (a normal next turn, auto-resume, or
+// an explicit resume) refails with "Prompt is too long" before doing any work.
+// A fresh session is the only reliable way out. Suppress auto-resume right away
+// so that even if the user ignores the card and just types, the next send won't
+// drag the dead session back into the refail loop.
+function showContextFullCard(detail) {
+    _suppressNextAutoResume = true;
+    if (welcome) { welcome.remove(); welcome = null; }
+    // Avoid stacking duplicate cards when several sends fail in a row.
+    const last = messages.lastElementChild;
+    if (last && last.classList && last.classList.contains("context-full-card")) return;
+    const card = document.createElement("div");
+    card.className = "question-card context-full-card";
+    card.innerHTML = `
+<div class="question-text">🧠 <strong>This session is full.</strong> The conversation grew past the model's context window, so it can't be continued. Start a new session to keep going. Compacting won't help once the limit is hit; a new session is the way forward.</div>
+${detail && detail.trim() ? `<div class="claude-install-hint">${escapeHtml(detail.trim())}</div>` : ""}
+<div class="question-buttons">
+<button class="q-btn q-yes" onclick="startNewSessionFromCard(this.closest('.question-card'))">Start new session</button>
+</div>`;
+    messages.appendChild(card);
+    autoScroll();
+}
+
+function startNewSessionFromCard(card) {
+    if (card && card.classList) card.classList.add("question-answered");
+    clearChat();
 }
 
 function openSigninOverlay() {
