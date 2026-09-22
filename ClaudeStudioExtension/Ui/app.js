@@ -2837,17 +2837,36 @@ function openPermissionModal(tool, input, id, cwd) {
     }
     if (isPlan && typeof marked !== "undefined") {
         inputContainer.innerHTML = marked.parse(formatted || "(no input)");
+        // marked emits plain <a href>; rewire them like the chat does so a click
+        // opens in the VS editor (workspace file refs) or the browser (external
+        // links), never navigating the WebView away from the app to a dead page.
+        inputContainer.querySelectorAll("a[href]").forEach(a => {
+            const href = a.getAttribute("href") || "";
+            if (/^(https?:|mailto:)/i.test(href)) {
+                a.setAttribute("target", "_blank");
+            } else {
+                const fm = href.match(/^(.*?)(?:#L(\d+)(?:-L?(\d+))?)?$/);
+                a.className = "file-link";
+                a.dataset.path = fm[1] || href;
+                a.dataset.start = fm[2] || "0";
+                a.dataset.end = fm[3] || fm[2] || "0";
+                a.setAttribute("href", "#");
+                a.addEventListener("click", ev => { ev.preventDefault(); openFileLink(a); });
+            }
+        });
     } else {
         inputContainer.textContent = formatted || "(no input)";
     }
 
-    // Plans open wider; every permission modal is horizontally draggable
-    // (resize handle). Clear any width the user dragged to on a prior modal so
-    // each one opens at its own default before they resize it again.
+    // A plan or a long input can be widened (drag handle on the right edge); a
+    // plain permission with a short input stays a fixed width. Clear any width
+    // dragged on a prior modal so each opens at its own default.
     const permModal = document.querySelector(".perm-modal");
     if (permModal) {
+        const longInput = (formatted || "").length > 400;
         permModal.style.width = "";
         permModal.classList.toggle("perm-modal-plan", isPlan);
+        permModal.classList.toggle("perm-modal-resizable", isPlan || longInput);
     }
 
     document.getElementById("perm-modal-overlay").classList.add("open");
