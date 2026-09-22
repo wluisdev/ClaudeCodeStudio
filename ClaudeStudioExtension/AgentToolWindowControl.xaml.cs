@@ -194,6 +194,30 @@ public partial class AgentToolWindowControl : UserControl
             "Ui",
             "index.html");
 
+        // Safety net: nothing may navigate the panel away from its own page. A
+        // link that isn't intercepted in the UI (e.g. a file/http anchor in
+        // rendered Markdown) would otherwise replace the app with a dead error
+        // page the user can't get back from. Allow the app page itself; cancel
+        // everything else and route http(s) to the default browser.
+        Browser.CoreWebView2.NavigationStarting += (_, e) =>
+        {
+            var uri = e.Uri ?? "";
+            if (uri.StartsWith("about:", StringComparison.OrdinalIgnoreCase)) return;
+            if (Uri.TryCreate(uri, UriKind.Absolute, out var target) &&
+                target.IsFile &&
+                string.Equals(target.LocalPath.TrimEnd('/', '\\'),
+                              htmlPath, StringComparison.OrdinalIgnoreCase))
+                return;  // the app's own index.html
+
+            e.Cancel = true;
+            if (uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri) { UseShellExecute = true }); }
+                catch (Exception ex) { OutputLog.Warn($"open link failed: {ex.Message}"); }
+            }
+        };
+
         Browser.Source = new Uri(htmlPath);
 
         Browser.NavigationCompleted += (_, _) =>
