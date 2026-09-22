@@ -155,6 +155,15 @@ public static class StreamEventParser
         bool hasModel = msgObj.TryGetProperty("model", out var modelEl);
         bool isSynthetic = hasModel && modelEl.GetString() == "<synthetic>";
 
+        // A synthetic context-overflow message ("Prompt is too long …") is
+        // emitted alongside the terminal is_error result carrying the same
+        // text. The result drives the "session full" card, so the whole
+        // synthetic message is suppressed here — its bubble and its 0/0 token
+        // line — to avoid duplicating the error above the card. (The agent
+        // rebuilds StreamEventState per stdout line, so the LastSyntheticText
+        // dedup below can't catch this cross-line at runtime.)
+        bool isSyntheticOverflow = isSynthetic && SyntheticContentIsOverflow(msgObj);
+
         // --fallback-model can silently swap in a different model when the
         // primary is overloaded. LastActiveModel starts at the requested
         // model, so this only fires on an actual deviation (engaged) or a
@@ -170,7 +179,7 @@ public static class StreamEventParser
             }
         }
 
-        if (msgObj.TryGetProperty("usage", out var usageLive))
+        if (!isSyntheticOverflow && msgObj.TryGetProperty("usage", out var usageLive))
             result.Chunks.Add(BuildTokensLiveChunk(usageLive));
 
         var content = msgObj.GetProperty("content");
@@ -200,7 +209,11 @@ public static class StreamEventParser
                     var text = item.TryGetProperty("text", out var tp) ? tp.GetString() : null;
                     if (!string.IsNullOrEmpty(text))
                     {
-                        result.Chunks.Add(new ChatChunk { Type = "chunk", Text = text! });
+                        // Suppress the bubble for a context-overflow error; the
+                        // is_error result routes the same text to the "session
+                        // full" card instead.
+                        if (!isSyntheticOverflow)
+                            result.Chunks.Add(new ChatChunk { Type = "chunk", Text = text! });
                         // Remember it so the terminal is_error result doesn't
                         // re-append the same string and double it in the bubble.
                         state.LastSyntheticText = text;
@@ -208,6 +221,24 @@ public static class StreamEventParser
                 }
             }
         }
+    }
+
+    // A synthetic assistant message whose text is a context-overflow error.
+    // Peeked before emitting so the whole message (bubble + token line) can be
+    // suppressed in favor of the "session full" card the is_error result raises.
+    private static bool SyntheticContentIsOverflow(JsonElement msgObj)
+    {
+        if (!msgObj.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
+            return false;
+
+        foreach (var item in content.EnumerateArray())
+        {
+            if (item.TryGetProperty("type", out var t) && t.GetString() == "text" &&
+                item.TryGetProperty("text", out var tx) && ContextErrors.IsContextOverflow(tx.GetString()))
+                return true;
+        }
+
+        return false;
     }
 
     private static void ProcessStreamEvent(JsonElement evt, StreamEventState state, StreamEventResult result)
@@ -444,7 +475,11 @@ public static class StreamEventParser
             // result. When the synthetic already rendered the text this turn,
             // emitting it again doubled it in the bubble. Skip the duplicate;
             // still emit when the result is the only carrier of the error.
-            if (errText != state.LastSyntheticText)
+            // Context overflow is always emitted: it drives the "session full"
+            // card and its synthetic bubble is suppressed in ProcessAssistant,
+            // so it must never be deduped away here (even if the per-line state
+            // ever starts carrying LastSyntheticText across events).
+            if (ContextErrors.IsContextOverflow(errText) || errText != state.LastSyntheticText)
                 result.Chunks.Add(new ChatChunk { Type = "error", Text = errText });
         }
 

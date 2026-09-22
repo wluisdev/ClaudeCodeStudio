@@ -1794,6 +1794,7 @@ public partial class AgentToolWindowControl : UserControl
                     const string notFound = "CLAUDE_NOT_FOUND::";
                     const string budgetExceeded = "BUDGET_EXCEEDED::";
                     const string authRequired = "AUTH_REQUIRED::";
+                    const string contextFull = "CONTEXT_FULL::";
                     if (chunk != null && chunk.StartsWith(notFound, StringComparison.Ordinal))
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "claude-not-found", detail = chunk.Substring(notFound.Length) }));
@@ -1805,6 +1806,11 @@ public partial class AgentToolWindowControl : UserControl
                     else if (chunk != null && chunk.StartsWith(authRequired, StringComparison.Ordinal))
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "auth-required", detail = chunk.Substring(authRequired.Length) }));
+                    // Context window full: the session can't be resumed any more, so
+                    // route it to the "start a new session" card instead of a bubble.
+                    else if (chunk != null && chunk.StartsWith(contextFull, StringComparison.Ordinal))
+                        Browser.CoreWebView2.PostWebMessageAsJson(
+                            JsonSerializer.Serialize(new { type = "context-full", detail = chunk.Substring(contextFull.Length) }));
                     else
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "chunk", text = chunk }));
