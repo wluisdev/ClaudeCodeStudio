@@ -2841,6 +2841,15 @@ function openPermissionModal(tool, input, id, cwd) {
         inputContainer.textContent = formatted || "(no input)";
     }
 
+    // Plans open wider; every permission modal is horizontally draggable
+    // (resize handle). Clear any width the user dragged to on a prior modal so
+    // each one opens at its own default before they resize it again.
+    const permModal = document.querySelector(".perm-modal");
+    if (permModal) {
+        permModal.style.width = "";
+        permModal.classList.toggle("perm-modal-plan", isPlan);
+    }
+
     document.getElementById("perm-modal-overlay").classList.add("open");
     renderPresence("waiting", "permission prompt");
     // claude is blocked on our PreToolUse hook response — same as an

@@ -659,7 +659,16 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
 
 .perm-modal {
     width: 420px;
-    max-width: calc(100vw - 40px);
+    min-width: 360px;
+    max-width: min(920px, calc(100vw - 40px));
+    resize: horizontal;
+    overflow: auto;
+}
+
+/* Plans render Markdown and tend to be long, so their modal opens wider.
+   Still draggable within the shared min/max like any permission modal. */
+.perm-modal.perm-modal-plan {
+    width: 640px;
 }
 
 .perm-modal-header {
