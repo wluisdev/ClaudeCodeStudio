@@ -7,6 +7,7 @@ All notable changes to Claude Code Studio are documented here. Format loosely fo
 ### Added
 
 - **Subscription plan limits in the Usage window** ([#15](https://github.com/wluisdev/ClaudeCodeStudio/issues/15)). Above the token and cost tiles, a "Plan limits" panel shows your Current session and This week windows (percent used and reset time) as progress bars, with a refresh button. It reads the same data as Claude Code's `/usage`, so it matches what you would see on the web without leaving Visual Studio. The last snapshot is cached and shown instantly when the window opens, while a background run (the CLI takes a few seconds) refreshes it.
+- **Plan approval modal now displays Markdown with larger viewport** ([#17](https://github.com/wluisdev/ClaudeCodeStudio/issues/17)). When approving a plan in plan mode, the dialog now renders the plan document with full Markdown formatting (headings, lists, code blocks, blockquotes) instead of plain text, and the content area is expanded from 260px to 80vh so longer plans can be read without scrolling through a tiny window.
 
 ### Fixed
 

@@ -2813,12 +2813,15 @@ function openPermissionModal(tool, input, id, cwd) {
         cwdRow.hidden = true;
     }
 
-    const pre = document.getElementById("perm-modal-input");
+    const inputContainer = document.getElementById("perm-modal-input");
     let formatted = input;
+    let isPlan = false;
     if (tool === "ExitPlanMode") {
         // Plan approval gate: show the plan markdown itself, not escaped JSON.
+        // Render it as Markdown for proper formatting and readability.
         document.getElementById("perm-modal-tool").textContent = "Approve plan? (ExitPlanMode)";
         try { formatted = JSON.parse(input).plan || input; } catch (_) { /* leave as-is */ }
+        isPlan = true;
     } else if (tool === "Skill") {
         // Skill gate: title the modal with the skill being invoked (official
         // extension pattern: "Use skill /name?").
@@ -2832,7 +2835,11 @@ function openPermissionModal(tool, input, id, cwd) {
         try { formatted = JSON.stringify(JSON.parse(input), null, 2); }
         catch (_) { /* leave as-is */ }
     }
-    pre.textContent = formatted || "(no input)";
+    if (isPlan && typeof marked !== "undefined") {
+        inputContainer.innerHTML = marked.parse(formatted || "(no input)");
+    } else {
+        inputContainer.textContent = formatted || "(no input)";
+    }
 
     document.getElementById("perm-modal-overlay").classList.add("open");
     renderPresence("waiting", "permission prompt");

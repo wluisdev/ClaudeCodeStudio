@@ -724,14 +724,71 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
     border: 1px solid #3a3a3a;
     border-radius: 6px;
     color: #ddd;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 13px;
+    padding: 16px;
+    margin: 0 0 14px;
+    max-height: 80vh;
+    overflow: auto;
+    word-break: break-word;
+    line-height: 1.6;
+}
+
+.perm-modal-input h1,
+.perm-modal-input h2,
+.perm-modal-input h3,
+.perm-modal-input h4,
+.perm-modal-input h5,
+.perm-modal-input h6 {
+    margin: 14px 0 8px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.perm-modal-input h1 { font-size: 20px; }
+.perm-modal-input h2 { font-size: 18px; }
+.perm-modal-input h3 { font-size: 16px; }
+.perm-modal-input h4 { font-size: 14px; }
+
+.perm-modal-input p {
+    margin: 8px 0;
+}
+
+.perm-modal-input code {
+    background: #2a2a2a;
+    border-radius: 3px;
+    padding: 2px 6px;
     font-family: Consolas, Menlo, monospace;
     font-size: 12px;
-    padding: 10px 12px;
-    margin: 0 0 14px;
-    max-height: 260px;
-    overflow: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
+    color: #a8d8ea;
+}
+
+.perm-modal-input pre {
+    background: #0d0d0d;
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    padding: 10px;
+    margin: 10px 0;
+    overflow-x: auto;
+    font-family: Consolas, Menlo, monospace;
+    font-size: 12px;
+}
+
+.perm-modal-input ul,
+.perm-modal-input ol {
+    margin: 8px 0;
+    padding-left: 20px;
+}
+
+.perm-modal-input li {
+    margin: 4px 0;
+}
+
+.perm-modal-input blockquote {
+    border-left: 3px solid #555;
+    padding-left: 12px;
+    margin: 8px 0;
+    color: #aaa;
 }
 
 .perm-modal-buttons .perm-allow {
@@ -764,6 +821,31 @@ html.light-theme .perm-modal-input {
     background: #f7f7f7;
     border-color: #ddd;
     color: #222;
+}
+
+html.light-theme .perm-modal-input h1,
+html.light-theme .perm-modal-input h2,
+html.light-theme .perm-modal-input h3,
+html.light-theme .perm-modal-input h4,
+html.light-theme .perm-modal-input h5,
+html.light-theme .perm-modal-input h6 {
+    color: #1e1e1e;
+}
+
+html.light-theme .perm-modal-input code {
+    background: #ececec;
+    color: #d73a49;
+}
+
+html.light-theme .perm-modal-input pre {
+    background: #f6f8fa;
+    border-color: #ddd;
+    color: #24292e;
+}
+
+html.light-theme .perm-modal-input blockquote {
+    border-left-color: #ddd;
+    color: #666;
 }
 
 html.light-theme .perm-modal-cwd {
