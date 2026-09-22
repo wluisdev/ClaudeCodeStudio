@@ -685,9 +685,17 @@ public class AgentClient
                     // only, no token and no expiry), so the CLI is the first thing to
                     // notice. Same sentinel trick as CLAUDE_NOT_FOUND:: below, routing
                     // it to the sign-in card instead of a dead-end error bubble.
-                    onChunk(ClaudeStudioShared.AuthErrors.IsAuthFailure(chunk.Text)
-                        ? "AUTH_REQUIRED::" + chunk.Text
-                        : chunk.Text);
+                    // "Prompt is too long" gets the same treatment: the session's
+                    // context is over the ceiling and every resume of it refails, so
+                    // route it to the "start a new session" card.
+                    string routed;
+                    if (ClaudeStudioShared.AuthErrors.IsAuthFailure(chunk.Text))
+                        routed = "AUTH_REQUIRED::" + chunk.Text;
+                    else if (ClaudeStudioShared.ContextErrors.IsContextOverflow(chunk.Text))
+                        routed = "CONTEXT_FULL::" + chunk.Text;
+                    else
+                        routed = chunk.Text;
+                    onChunk(routed);
                 }
                 continue;
             }

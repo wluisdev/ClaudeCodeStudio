@@ -587,15 +587,17 @@ public class StreamEventParserTests
     public void Result_is_error_matching_prior_synthetic_text_is_not_duplicated()
     {
         // The CLI surfaces "Prompt is too long" (and similar API errors) both as
-        // a synthetic assistant message and as a terminal is_error result. Both
-        // used to append to the same bubble, doubling the text; the result copy
-        // is now suppressed when it matches the synthetic already shown.
+        // a synthetic assistant message and as a terminal is_error result. The
+        // synthetic message is now suppressed when it's a context overflow, to
+        // avoid competing with the "session full" card; the is_error result must
+        // always emit so the card receives its signal.
         var state = new StreamEventState();
         var synthetic = Process("""{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Prompt is too long"}]}}""", state);
-        Assert.Single(synthetic.Chunks, c => c.Type == "chunk" && c.Text == "Prompt is too long");
+        Assert.Empty(synthetic.Chunks);
 
         var result = Process("""{"type":"result","is_error":true,"result":"Prompt is too long"}""", state);
-        Assert.DoesNotContain(result.Chunks, c => c.Type == "error");
+        var chunk = Assert.Single(result.Chunks, c => c.Type == "error");
+        Assert.Equal("Prompt is too long", chunk.Text);
     }
 
     [Fact]

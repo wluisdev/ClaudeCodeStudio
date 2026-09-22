@@ -2386,6 +2386,11 @@ window.chrome.webview.addEventListener("message", event => {
         return;
     }
 
+    if (event.data.type === "context-full") {
+        showContextFullCard(event.data.detail || "");
+        return;
+    }
+
     if (event.data.type === "claude-not-found") {
         showClaudeNotFoundCard(event.data.detail || "");
         return;
@@ -2808,12 +2813,15 @@ function openPermissionModal(tool, input, id, cwd) {
         cwdRow.hidden = true;
     }
 
-    const pre = document.getElementById("perm-modal-input");
+    const inputContainer = document.getElementById("perm-modal-input");
     let formatted = input;
+    let isPlan = false;
     if (tool === "ExitPlanMode") {
         // Plan approval gate: show the plan markdown itself, not escaped JSON.
+        // Render it as Markdown for proper formatting and readability.
         document.getElementById("perm-modal-tool").textContent = "Approve plan? (ExitPlanMode)";
         try { formatted = JSON.parse(input).plan || input; } catch (_) { /* leave as-is */ }
+        isPlan = true;
     } else if (tool === "Skill") {
         // Skill gate: title the modal with the skill being invoked (official
         // extension pattern: "Use skill /name?").
@@ -2827,7 +2835,39 @@ function openPermissionModal(tool, input, id, cwd) {
         try { formatted = JSON.stringify(JSON.parse(input), null, 2); }
         catch (_) { /* leave as-is */ }
     }
-    pre.textContent = formatted || "(no input)";
+    if (isPlan && typeof marked !== "undefined") {
+        inputContainer.innerHTML = marked.parse(formatted || "(no input)");
+        // marked emits plain <a href>; rewire them like the chat does so a click
+        // opens in the VS editor (workspace file refs) or the browser (external
+        // links), never navigating the WebView away from the app to a dead page.
+        inputContainer.querySelectorAll("a[href]").forEach(a => {
+            const href = a.getAttribute("href") || "";
+            if (/^(https?:|mailto:)/i.test(href)) {
+                a.setAttribute("target", "_blank");
+            } else {
+                const fm = href.match(/^(.*?)(?:#L(\d+)(?:-L?(\d+))?)?$/);
+                a.className = "file-link";
+                a.dataset.path = fm[1] || href;
+                a.dataset.start = fm[2] || "0";
+                a.dataset.end = fm[3] || fm[2] || "0";
+                a.setAttribute("href", "#");
+                a.addEventListener("click", ev => { ev.preventDefault(); openFileLink(a); });
+            }
+        });
+    } else {
+        inputContainer.textContent = formatted || "(no input)";
+    }
+
+    // A plan or a long input can be widened (drag handle on the right edge); a
+    // plain permission with a short input stays a fixed width. Clear any width
+    // dragged on a prior modal so each opens at its own default.
+    const permModal = document.querySelector(".perm-modal");
+    if (permModal) {
+        const longInput = (formatted || "").length > 400;
+        permModal.style.width = "";
+        permModal.classList.toggle("perm-modal-plan", isPlan);
+        permModal.classList.toggle("perm-modal-resizable", isPlan || longInput);
+    }
 
     document.getElementById("perm-modal-overlay").classList.add("open");
     renderPresence("waiting", "permission prompt");
@@ -5257,6 +5297,35 @@ function showClaudeNotFoundCard(detail) {
 function startClaudeInstall(card) {
     try { window.chrome.webview.postMessage({ type: "start-claude-install" }); } catch (e) {}
     if (card && card.classList) card.classList.add("question-answered");
+}
+
+// The session's context window is full: it can no longer be resumed, so every
+// path that carries its transcript forward (a normal next turn, auto-resume, or
+// an explicit resume) refails with "Prompt is too long" before doing any work.
+// A fresh session is the only reliable way out. Suppress auto-resume right away
+// so that even if the user ignores the card and just types, the next send won't
+// drag the dead session back into the refail loop.
+function showContextFullCard(detail) {
+    _suppressNextAutoResume = true;
+    if (welcome) { welcome.remove(); welcome = null; }
+    // Avoid stacking duplicate cards when several sends fail in a row.
+    const last = messages.lastElementChild;
+    if (last && last.classList && last.classList.contains("context-full-card")) return;
+    const card = document.createElement("div");
+    card.className = "question-card context-full-card";
+    card.innerHTML = `
+<div class="question-text">🧠 <strong>This session is full.</strong> The conversation grew past the model's context window, so it can't be continued. Start a new session to keep going. Compacting won't help once the limit is hit; a new session is the way forward.</div>
+${detail && detail.trim() ? `<div class="claude-install-hint">${escapeHtml(detail.trim())}</div>` : ""}
+<div class="question-buttons">
+<button class="q-btn q-yes" onclick="startNewSessionFromCard(this.closest('.question-card'))">Start new session</button>
+</div>`;
+    messages.appendChild(card);
+    autoScroll();
+}
+
+function startNewSessionFromCard(card) {
+    if (card && card.classList) card.classList.add("question-answered");
+    clearChat();
 }
 
 function openSigninOverlay() {

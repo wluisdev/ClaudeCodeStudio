@@ -662,6 +662,20 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
     max-width: calc(100vw - 40px);
 }
 
+/* A plan or a long tool input can be widened to read more (drag handle on the
+   right edge). A plain permission with a short input keeps the fixed 420px. */
+.perm-modal.perm-modal-resizable {
+    min-width: 360px;
+    max-width: min(920px, calc(100vw - 40px));
+    resize: horizontal;
+    overflow: auto;
+}
+
+/* Plans render Markdown and tend to be long, so their modal opens wider. */
+.perm-modal.perm-modal-plan {
+    width: 640px;
+}
+
 .perm-modal-header {
     display: flex;
     align-items: center;
@@ -724,14 +738,103 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
     border: 1px solid #3a3a3a;
     border-radius: 6px;
     color: #ddd;
-    font-family: Consolas, Menlo, monospace;
-    font-size: 12px;
-    padding: 10px 12px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    /* Same Ctrl+Scroll size as the chat; headings and code below use em so the
+       whole plan scales proportionally (page-zoom feel). */
+    font-size: var(--chat-font-size, 13px);
+    padding: 16px;
     margin: 0 0 14px;
-    max-height: 260px;
+    max-height: 80vh;
     overflow: auto;
-    white-space: pre-wrap;
     word-break: break-word;
+    line-height: 1.6;
+}
+
+.perm-modal-input h1,
+.perm-modal-input h2,
+.perm-modal-input h3,
+.perm-modal-input h4,
+.perm-modal-input h5,
+.perm-modal-input h6 {
+    margin: 14px 0 8px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.perm-modal-input h1 { font-size: 1.54em; }
+.perm-modal-input h2 { font-size: 1.38em; }
+.perm-modal-input h3 { font-size: 1.23em; }
+.perm-modal-input h4 { font-size: 1.08em; }
+
+.perm-modal-input p {
+    margin: 8px 0;
+}
+
+.perm-modal-input code {
+    background: #2a2a2a;
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-family: Consolas, Menlo, monospace;
+    font-size: 0.92em;
+    color: #a8d8ea;
+}
+
+.perm-modal-input pre {
+    background: #0d0d0d;
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    padding: 10px;
+    margin: 10px 0;
+    overflow-x: auto;
+    font-family: Consolas, Menlo, monospace;
+    font-size: 0.92em;
+}
+
+.perm-modal-input ul,
+.perm-modal-input ol {
+    margin: 8px 0;
+    padding-left: 20px;
+}
+
+.perm-modal-input li {
+    margin: 4px 0;
+}
+
+/* GFM task lists (- [ ]) render as disabled checkboxes (view-only). Undo the
+   generic .cmd-modal input styling (full width, border, padding) that stretched
+   them across the row, drop the redundant bullet, and keep the label inline
+   next to the box. */
+.perm-modal-input input[type="checkbox"] {
+    width: auto;
+    margin: 0 6px 0 0;
+    padding: 0;
+    border: 0;
+    box-sizing: content-box;
+    vertical-align: middle;
+}
+
+.perm-modal-input li:has(input[type="checkbox"]) {
+    list-style: none;
+}
+
+.perm-modal-input li:has(input[type="checkbox"]) > p {
+    display: inline;
+    margin: 0;
+}
+
+/* A list nested under a task item indents further so it reads as a sub-list of
+   that checkbox, lining up past the checkbox + label rather than under it. */
+.perm-modal-input li:has(input[type="checkbox"]) > ul,
+.perm-modal-input li:has(input[type="checkbox"]) > ol {
+    padding-left: 50px;
+    margin-top: 4px;
+}
+
+.perm-modal-input blockquote {
+    border-left: 3px solid #555;
+    padding-left: 12px;
+    margin: 8px 0;
+    color: #aaa;
 }
 
 .perm-modal-buttons .perm-allow {
@@ -764,6 +867,31 @@ html.light-theme .perm-modal-input {
     background: #f7f7f7;
     border-color: #ddd;
     color: #222;
+}
+
+html.light-theme .perm-modal-input h1,
+html.light-theme .perm-modal-input h2,
+html.light-theme .perm-modal-input h3,
+html.light-theme .perm-modal-input h4,
+html.light-theme .perm-modal-input h5,
+html.light-theme .perm-modal-input h6 {
+    color: #1e1e1e;
+}
+
+html.light-theme .perm-modal-input code {
+    background: #ececec;
+    color: #d73a49;
+}
+
+html.light-theme .perm-modal-input pre {
+    background: #f6f8fa;
+    border-color: #ddd;
+    color: #24292e;
+}
+
+html.light-theme .perm-modal-input blockquote {
+    border-left-color: #ddd;
+    color: #666;
 }
 
 html.light-theme .perm-modal-cwd {

@@ -194,6 +194,30 @@ public partial class AgentToolWindowControl : UserControl
             "Ui",
             "index.html");
 
+        // Safety net: nothing may navigate the panel away from its own page. A
+        // link that isn't intercepted in the UI (e.g. a file/http anchor in
+        // rendered Markdown) would otherwise replace the app with a dead error
+        // page the user can't get back from. Allow the app page itself; cancel
+        // everything else and route http(s) to the default browser.
+        Browser.CoreWebView2.NavigationStarting += (_, e) =>
+        {
+            var uri = e.Uri ?? "";
+            if (uri.StartsWith("about:", StringComparison.OrdinalIgnoreCase)) return;
+            if (Uri.TryCreate(uri, UriKind.Absolute, out var target) &&
+                target.IsFile &&
+                string.Equals(target.LocalPath.TrimEnd('/', '\\'),
+                              htmlPath, StringComparison.OrdinalIgnoreCase))
+                return;  // the app's own index.html
+
+            e.Cancel = true;
+            if (uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri) { UseShellExecute = true }); }
+                catch (Exception ex) { OutputLog.Warn($"open link failed: {ex.Message}"); }
+            }
+        };
+
         Browser.Source = new Uri(htmlPath);
 
         Browser.NavigationCompleted += (_, _) =>
@@ -1794,6 +1818,7 @@ public partial class AgentToolWindowControl : UserControl
                     const string notFound = "CLAUDE_NOT_FOUND::";
                     const string budgetExceeded = "BUDGET_EXCEEDED::";
                     const string authRequired = "AUTH_REQUIRED::";
+                    const string contextFull = "CONTEXT_FULL::";
                     if (chunk != null && chunk.StartsWith(notFound, StringComparison.Ordinal))
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "claude-not-found", detail = chunk.Substring(notFound.Length) }));
@@ -1805,6 +1830,11 @@ public partial class AgentToolWindowControl : UserControl
                     else if (chunk != null && chunk.StartsWith(authRequired, StringComparison.Ordinal))
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "auth-required", detail = chunk.Substring(authRequired.Length) }));
+                    // Context window full: the session can't be resumed any more, so
+                    // route it to the "start a new session" card instead of a bubble.
+                    else if (chunk != null && chunk.StartsWith(contextFull, StringComparison.Ordinal))
+                        Browser.CoreWebView2.PostWebMessageAsJson(
+                            JsonSerializer.Serialize(new { type = "context-full", detail = chunk.Substring(contextFull.Length) }));
                     else
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "chunk", text = chunk }));
