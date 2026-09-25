@@ -2,6 +2,12 @@
 
 All notable changes to Claude Code Studio are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.7] - 2026-09-25
+
+### Fixed
+
+- **Resizing the plan or permission modal could reject the request.** Dragging the modal's resize grip and releasing the mouse outside the modal counted as a click on the dark backdrop, which closed the modal and denied the pending tool (or rejected the plan) on the spot. Modals now only close from the backdrop when the click also started there, so a resize or a text selection that ends outside is safe. A click outside the permission modal no longer denies anything either: the modal gives a short pulse, and the decision stays on the buttons (Esc still denies).
+
 ## [1.1.6] - 2026-09-24
 
 ### Added

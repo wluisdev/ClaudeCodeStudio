@@ -599,7 +599,7 @@
         </div>
     </div>
 
-    <div class="cmd-modal-overlay" id="usage-modal-overlay" onclick="if(event.target===this)closeUsageModal()">
+    <div class="cmd-modal-overlay" id="usage-modal-overlay" onclick="if(overlayClicked(event,this))closeUsageModal()">
         <div class="cmd-modal usage-modal">
             <div class="usage-modal-header">
                 <h3>Usage</h3>
@@ -614,7 +614,7 @@
         </div>
     </div>
 
-    <div class="cmd-modal-overlay" id="diff-modal-overlay" onclick="if(event.target===this)closeDiffModal()">
+    <div class="cmd-modal-overlay" id="diff-modal-overlay" onclick="if(overlayClicked(event,this))closeDiffModal()">
         <div class="cmd-modal diff-modal">
             <div class="usage-modal-header">
                 <h3>⎇ Git Diff</h3>
@@ -625,7 +625,7 @@
         </div>
     </div>
 
-    <div class="cmd-modal-overlay" id="tool-diff-modal-overlay" onclick="if(event.target===this)closeToolDiffModal()">
+    <div class="cmd-modal-overlay" id="tool-diff-modal-overlay" onclick="if(overlayClicked(event,this))closeToolDiffModal()">
         <div class="cmd-modal diff-modal">
             <div class="diff-modal-header">
                 <div class="diff-modal-title">
@@ -641,7 +641,7 @@
         </div>
     </div>
 
-    <div class="cmd-modal-overlay" id="perm-modal-overlay" onclick="if(event.target===this)permissionDeny('dismissed')">
+    <div class="cmd-modal-overlay" id="perm-modal-overlay" onclick="if(overlayClicked(event,this))nudgePermissionModal()">
         <div class="cmd-modal perm-modal">
             <div class="perm-modal-header">
                 <span class="perm-modal-icon">🔒</span>
@@ -846,7 +846,7 @@
         </div>
     </div>
 
-    <div class="cmd-modal-overlay" id="cmd-modal-overlay" onclick="if(event.target===this)closeAddCommand()">
+    <div class="cmd-modal-overlay" id="cmd-modal-overlay" onclick="if(overlayClicked(event,this))closeAddCommand()">
         <div class="cmd-modal">
             <h3>Add command</h3>
             <label>Name (shown in menu)</label>

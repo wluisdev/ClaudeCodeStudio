@@ -2918,6 +2918,7 @@ function closePermissionModal() {
     if (_captionAttention === "pending") setCaptionAttention(null);
     renderPresence("", "");
     document.getElementById("perm-modal-overlay").classList.remove("open");
+    document.querySelector("#perm-modal-overlay .perm-modal")?.classList.remove("perm-modal-nudge");
     if (pendingPermissionToolId) {
         const chip = messages.querySelector(`.tool-chip[data-tool-id="${CSS.escape(pendingPermissionToolId)}"]`);
         if (chip) chip.classList.remove("tool-pending");
@@ -2984,6 +2985,28 @@ function permissionDeny(reason) {
         reason: reason || "denied by user"
     });
     closePermissionModal();
+}
+
+// A drag that starts inside a modal and is released over its overlay (the
+// resize grip of the plan modal, a text selection) fires `click` on the
+// overlay, their common ancestor, so `event.target === this` alone closed the
+// modal mid-resize. Overlays only honour a click that also started on them.
+let _overlayPressTarget = null;
+document.addEventListener("mousedown", e => { _overlayPressTarget = e.target; }, true);
+
+function overlayClicked(e, overlay) {
+    return e.target === overlay && _overlayPressTarget === overlay;
+}
+
+// A click outside the permission modal used to deny the tool, so a slip next
+// to the resize grip threw the plan away. It now only nudges the modal: the
+// decision stays on the buttons (and Esc).
+function nudgePermissionModal() {
+    const modal = document.querySelector("#perm-modal-overlay .perm-modal");
+    if (!modal) return;
+    modal.classList.remove("perm-modal-nudge");
+    void modal.offsetWidth; // restart the animation on repeated clicks
+    modal.classList.add("perm-modal-nudge");
 }
 
 document.addEventListener("keydown", e => {

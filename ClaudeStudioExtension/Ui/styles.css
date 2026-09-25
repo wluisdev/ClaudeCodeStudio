@@ -676,6 +676,17 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
     width: 640px;
 }
 
+/* Click outside the permission modal: a short pulse instead of a deny. */
+.perm-modal.perm-modal-nudge {
+    animation: perm-modal-nudge 0.25s ease-out;
+}
+
+@keyframes perm-modal-nudge {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.02); }
+    100% { transform: scale(1); }
+}
+
 .perm-modal-header {
     display: flex;
     align-items: center;
