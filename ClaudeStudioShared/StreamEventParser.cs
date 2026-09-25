@@ -163,23 +163,32 @@ public static class StreamEventParser
         // rebuilds StreamEventState per stdout line, so the LastSyntheticText
         // dedup below can't catch this cross-line at runtime.)
         bool isSyntheticOverflow = isSynthetic && SyntheticContentIsOverflow(msgObj);
+        // Same shape for a "requires usage credits" refusal: the result drives
+        // the dedicated credit card, so suppress the raw synthetic bubble here.
+        bool isSyntheticCredits = isSynthetic && SyntheticContentIsCredits(msgObj);
+        bool suppressSyntheticBubble = isSyntheticOverflow || isSyntheticCredits;
 
         // --fallback-model can silently swap in a different model when the
         // primary is overloaded. LastActiveModel starts at the requested
         // model, so this only fires on an actual deviation (engaged) or a
         // later match against the pre-deviation value (recovered) — never on
-        // the ordinary, unchanged case.
+        // the ordinary, unchanged case. Compare with the dated snapshot suffix
+        // stripped: an alias like "claude-haiku-4-5" resolves server-side to
+        // its snapshot ("claude-haiku-4-5-20251001") and the response echoes
+        // the snapshot, so a raw compare would flag every Haiku turn as a
+        // fallback (the id we send never equals the id that comes back).
         if (hasModel && !isSynthetic)
         {
             var actualModel = modelEl.GetString();
-            if (!string.IsNullOrEmpty(actualModel) && actualModel != state.LastActiveModel)
+            if (!string.IsNullOrEmpty(actualModel)
+                && StripSnapshotDate(actualModel!) != StripSnapshotDate(state.LastActiveModel))
             {
                 state.LastActiveModel = actualModel;
                 result.Chunks.Add(new ChatChunk { Type = "model-used", Text = actualModel! });
             }
         }
 
-        if (!isSyntheticOverflow && msgObj.TryGetProperty("usage", out var usageLive))
+        if (!suppressSyntheticBubble && msgObj.TryGetProperty("usage", out var usageLive))
             result.Chunks.Add(BuildTokensLiveChunk(usageLive));
 
         var content = msgObj.GetProperty("content");
@@ -209,10 +218,10 @@ public static class StreamEventParser
                     var text = item.TryGetProperty("text", out var tp) ? tp.GetString() : null;
                     if (!string.IsNullOrEmpty(text))
                     {
-                        // Suppress the bubble for a context-overflow error; the
-                        // is_error result routes the same text to the "session
-                        // full" card instead.
-                        if (!isSyntheticOverflow)
+                        // Suppress the bubble for an overflow or credit error;
+                        // the is_error result routes the same text to the right
+                        // dedicated card ("session full" / "needs credits").
+                        if (!suppressSyntheticBubble)
                             result.Chunks.Add(new ChatChunk { Type = "chunk", Text = text! });
                         // Remember it so the terminal is_error result doesn't
                         // re-append the same string and double it in the bubble.
@@ -239,6 +248,36 @@ public static class StreamEventParser
         }
 
         return false;
+    }
+
+    private static bool SyntheticContentIsCredits(JsonElement msgObj)
+    {
+        if (!msgObj.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
+            return false;
+
+        foreach (var item in content.EnumerateArray())
+        {
+            if (item.TryGetProperty("type", out var t) && t.GetString() == "text" &&
+                item.TryGetProperty("text", out var tx) && CreditErrors.IsOutOfCredits(tx.GetString()))
+                return true;
+        }
+
+        return false;
+    }
+
+    // Drops a trailing "-YYYYMMDD" snapshot date ("claude-haiku-4-5-20251001"
+    // -> "claude-haiku-4-5") so an alias and the dated snapshot the API echoes
+    // for it compare equal. Only an exactly-8-digit final segment is treated as
+    // a date, so a version bump like "claude-opus-5-5" is left intact and still
+    // counts as a different model from "claude-opus-5".
+    private static string? StripSnapshotDate(string? id)
+    {
+        if (string.IsNullOrEmpty(id)) return id;
+        var dash = id!.LastIndexOf('-');
+        if (dash <= 0 || dash >= id.Length - 1) return id;
+        for (var k = dash + 1; k < id.Length; k++)
+            if (!char.IsDigit(id[k])) return id;
+        return id.Length - dash - 1 == 8 ? id.Substring(0, dash) : id;
     }
 
     private static void ProcessStreamEvent(JsonElement evt, StreamEventState state, StreamEventResult result)
@@ -475,11 +514,12 @@ public static class StreamEventParser
             // result. When the synthetic already rendered the text this turn,
             // emitting it again doubled it in the bubble. Skip the duplicate;
             // still emit when the result is the only carrier of the error.
-            // Context overflow is always emitted: it drives the "session full"
-            // card and its synthetic bubble is suppressed in ProcessAssistant,
-            // so it must never be deduped away here (even if the per-line state
-            // ever starts carrying LastSyntheticText across events).
-            if (ContextErrors.IsContextOverflow(errText) || errText != state.LastSyntheticText)
+            // Context overflow and credit errors are always emitted: each drives
+            // its own dedicated card and its synthetic bubble is suppressed in
+            // ProcessAssistant, so it must never be deduped away here (even now
+            // that the per-line state carries LastSyntheticText across events).
+            if (ContextErrors.IsContextOverflow(errText) || CreditErrors.IsOutOfCredits(errText)
+                || errText != state.LastSyntheticText)
                 result.Chunks.Add(new ChatChunk { Type = "error", Text = errText });
         }
 

@@ -222,6 +222,39 @@ public class StreamEventParserTests
     }
 
     [Fact]
+    public void Assistant_alias_resolving_to_dated_snapshot_is_not_a_fallback()
+    {
+        // Requested "claude-haiku-4-5"; the API echoes the dated snapshot it
+        // resolves to. That must not be reported as a --fallback-model switch.
+        var state = new StreamEventState { LastActiveModel = "claude-haiku-4-5" };
+        var result = Process("""{"type":"assistant","message":{"model":"claude-haiku-4-5-20251001","content":[]}}""", state);
+
+        Assert.DoesNotContain(result.Chunks, c => c.Type == "model-used");
+    }
+
+    [Fact]
+    public void Assistant_real_fallback_to_dated_model_still_fires()
+    {
+        // A genuine cross-family fallback must still be detected even when the
+        // landed model comes back with a dated snapshot suffix.
+        var state = new StreamEventState { LastActiveModel = "claude-opus-5" };
+        var result = Process("""{"type":"assistant","message":{"model":"claude-haiku-4-5-20251001","content":[]}}""", state);
+
+        Assert.Contains(result.Chunks, c => c.Type == "model-used" && c.Text == "claude-haiku-4-5-20251001");
+    }
+
+    [Fact]
+    public void Assistant_version_bump_is_a_real_change_not_a_snapshot()
+    {
+        // "claude-opus-5-5" is Opus 5.5, a different model from Opus 5 — the
+        // trailing "-5" is not an 8-digit date, so it must still fire.
+        var state = new StreamEventState { LastActiveModel = "claude-opus-5" };
+        var result = Process("""{"type":"assistant","message":{"model":"claude-opus-5-5","content":[]}}""", state);
+
+        Assert.Contains(result.Chunks, c => c.Type == "model-used" && c.Text == "claude-opus-5-5");
+    }
+
+    [Fact]
     public void Assistant_synthetic_model_never_emits_model_used()
     {
         var state = new StreamEventState { LastActiveModel = "claude-sonnet-5" };
@@ -625,6 +658,30 @@ public class StreamEventParserTests
         var next = Process("""{"type":"result","is_error":true,"result":"Prompt is too long"}""", state);
         var chunk = Assert.Single(next.Chunks, c => c.Type == "error");
         Assert.Equal("Prompt is too long", chunk.Text);
+    }
+
+    [Fact]
+    public void Assistant_synthetic_credit_error_suppresses_its_bubble()
+    {
+        // A "requires usage credits" synthetic must not render a raw bubble; the
+        // is_error result drives the dedicated credit card instead.
+        var state = new StreamEventState();
+        var result = Process("""{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Fable 5.1 requires usage credits. Switch to another model."}]}}""", state);
+
+        Assert.Empty(result.Chunks);
+    }
+
+    [Fact]
+    public void Result_credit_error_always_emits_even_after_matching_synthetic()
+    {
+        // The synthetic bubble is suppressed, so the is_error result is the only
+        // carrier of the credit signal and must never be deduped away.
+        var state = new StreamEventState();
+        Process("""{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Fable 5.1 requires usage credits. Switch to another model."}]}}""", state);
+
+        var result = Process("""{"type":"result","is_error":true,"result":"Fable 5.1 requires usage credits. Switch to another model."}""", state);
+        var chunk = Assert.Single(result.Chunks, c => c.Type == "error");
+        Assert.Equal("Fable 5.1 requires usage credits. Switch to another model.", chunk.Text);
     }
 
     [Fact]

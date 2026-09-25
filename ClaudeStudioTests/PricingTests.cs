@@ -42,6 +42,53 @@ public class PricingTests
     }
 
     [Fact]
+    public void Calculate_opus5_exact_match_uses_opus5_rate()
+    {
+        Assert.Equal(5m, Pricing.Calculate("claude-opus-5", 1_000_000, 0, 0, 0, 0));
+    }
+
+    [Fact]
+    public void Calculate_opus55_input_uses_its_own_rate_not_opus5()
+    {
+        // Regression: "claude-opus-5-5" starts with "claude-opus-5", so a
+        // first-match scan would bill it at Opus 5's $5. Longest-prefix wins → $4.
+        Assert.Equal(4m, Pricing.Calculate("claude-opus-5-5", 1_000_000, 0, 0, 0, 0));
+    }
+
+    [Fact]
+    public void Calculate_opus55_output_uses_its_own_rate()
+    {
+        Assert.Equal(20m, Pricing.Calculate("claude-opus-5-5", 0, 1_000_000, 0, 0, 0));
+    }
+
+    [Fact]
+    public void Calculate_opus55_cache_read_is_five_percent_not_ten()
+    {
+        // Opus 5.5 cache read is $0.20/1M, not input * 0.10 ($0.40).
+        Assert.Equal(0.20m, Pricing.Calculate("claude-opus-5-5", 0, 0, 1_000_000, 0, 0));
+    }
+
+    [Fact]
+    public void Calculate_opus5_dated_suffix_still_resolves_to_opus5()
+    {
+        // A dated Opus 5 must not be captured by the Opus 5.5 entry.
+        Assert.Equal(5m, Pricing.Calculate("claude-opus-5-20260401", 1_000_000, 0, 0, 0, 0));
+    }
+
+    [Fact]
+    public void Calculate_fable51_exact_match_uses_fable_rate()
+    {
+        Assert.Equal(10m, Pricing.Calculate("claude-fable-5-1", 1_000_000, 0, 0, 0, 0));
+    }
+
+    [Fact]
+    public void Calculate_fable51_cache_read_is_lower_than_fable5()
+    {
+        // Fable 5.1 cache read is $0.25/1M, not input * 0.10 ($1.00).
+        Assert.Equal(0.25m, Pricing.Calculate("claude-fable-5-1", 0, 0, 1_000_000, 0, 0));
+    }
+
+    [Fact]
     public void Calculate_output_tokens_priced_at_output_rate()
     {
         Assert.Equal(15m, Pricing.Calculate("claude-sonnet-5", 0, 1_000_000, 0, 0, 0));

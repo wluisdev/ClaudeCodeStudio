@@ -2,6 +2,17 @@
 
 All notable changes to Claude Code Studio are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.6] - 2026-09-24
+
+### Added
+
+- **Claude Opus 5.5 and Claude Fable 5.1 in the model picker.** Both new models are selectable from the model dropdown and the `/model` command, and Opus 5.5, Opus 5, and Fable 5.1 are now available as fallback models. Cost tracking in the Usage window knows their rates, including the lower cache-read prices on the newer models (Opus 5.5 reads at $0.20 per 1M, Fable 5.1 at $0.25), and a model id like `claude-opus-5-5` is no longer mis-priced as Opus 5.
+
+### Fixed
+
+- **A session resumed from History lost its context after the first reply** ([#19](https://github.com/wluisdev/ClaudeCodeStudio/issues/19)). Loading a session from History and sending a query continued that conversation, but the resume only applied to that one turn: the next query was sent with no session to continue, so the CLI started a fresh, empty session. The first reply had context, the second did not, and the second query was written to a brand new session instead of the resumed one. The resumed (or branched) session id is now carried forward across turns, so every query after the first stays in the same conversation.
+- **A model that needs usage credits showed a doubled, dead-end error.** When a model that isn't on your plan requires paid usage credits (for example Fable), the CLI reported the error both as a message and as a result, so the same text rendered twice in the bubble. The duplicate is removed, and the error now raises a dedicated card explaining the model needs credits, with a **Choose another model** button and a link to manage credits, instead of a raw bubble. The same de-duplication now covers any error the CLI surfaces both ways, not just this one.
+
 ## [1.1.5] - 2026-09-22
 
 ### Added

@@ -1819,6 +1819,7 @@ public partial class AgentToolWindowControl : UserControl
                     const string budgetExceeded = "BUDGET_EXCEEDED::";
                     const string authRequired = "AUTH_REQUIRED::";
                     const string contextFull = "CONTEXT_FULL::";
+                    const string creditsRequired = "CREDITS_REQUIRED::";
                     if (chunk != null && chunk.StartsWith(notFound, StringComparison.Ordinal))
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "claude-not-found", detail = chunk.Substring(notFound.Length) }));
@@ -1835,6 +1836,11 @@ public partial class AgentToolWindowControl : UserControl
                     else if (chunk != null && chunk.StartsWith(contextFull, StringComparison.Ordinal))
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "context-full", detail = chunk.Substring(contextFull.Length) }));
+                    // Model needs paid usage credits: route to the "choose another
+                    // model" card instead of a raw bubble (session stays alive).
+                    else if (chunk != null && chunk.StartsWith(creditsRequired, StringComparison.Ordinal))
+                        Browser.CoreWebView2.PostWebMessageAsJson(
+                            JsonSerializer.Serialize(new { type = "credits-required", detail = chunk.Substring(creditsRequired.Length) }));
                     else
                         Browser.CoreWebView2.PostWebMessageAsJson(
                             JsonSerializer.Serialize(new { type = "chunk", text = chunk }));
