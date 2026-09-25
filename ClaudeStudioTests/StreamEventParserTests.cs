@@ -661,6 +661,30 @@ public class StreamEventParserTests
     }
 
     [Fact]
+    public void Assistant_synthetic_credit_error_suppresses_its_bubble()
+    {
+        // A "requires usage credits" synthetic must not render a raw bubble; the
+        // is_error result drives the dedicated credit card instead.
+        var state = new StreamEventState();
+        var result = Process("""{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Fable 5.1 requires usage credits. Switch to another model."}]}}""", state);
+
+        Assert.Empty(result.Chunks);
+    }
+
+    [Fact]
+    public void Result_credit_error_always_emits_even_after_matching_synthetic()
+    {
+        // The synthetic bubble is suppressed, so the is_error result is the only
+        // carrier of the credit signal and must never be deduped away.
+        var state = new StreamEventState();
+        Process("""{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Fable 5.1 requires usage credits. Switch to another model."}]}}""", state);
+
+        var result = Process("""{"type":"result","is_error":true,"result":"Fable 5.1 requires usage credits. Switch to another model."}""", state);
+        var chunk = Assert.Single(result.Chunks, c => c.Type == "error");
+        Assert.Equal("Fable 5.1 requires usage credits. Switch to another model.", chunk.Text);
+    }
+
+    [Fact]
     public void Result_budget_and_is_error_both_present_only_budget_branch_fires()
     {
         // if/else if — mutually exclusive today even if a payload somehow set both.

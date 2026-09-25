@@ -1020,6 +1020,11 @@ The user's IDE selection (if any) is included in the conversation context and ma
         bool firstLine = true;
         bool firstChunk = true;
         bool thinkingActive = false;
+        // Carried across stdout lines within this turn so StreamEventParser can
+        // dedup an API error the CLI surfaces both as a synthetic assistant
+        // message and as the terminal is_error result (they arrive on separate
+        // lines). Turn-scoped: it resets naturally on the next SendMessageAsync.
+        string? lastSyntheticText = null;
 
         string? line;
         while ((line = await _stdout.ReadLineAsync()) != null)
@@ -1043,13 +1048,14 @@ The user's IDE selection (if any) is included in the conversation context and ma
             // returned state deltas, write the chunks it built, perform the
             // side effects it can't (pending-ask registration, the stdin
             // auto-allow write, the perf log) and stop on Done.
-            var state = new StreamEventState { SessionId = SessionId, LastActiveModel = _lastActiveModel, ThinkingActive = thinkingActive };
+            var state = new StreamEventState { SessionId = SessionId, LastActiveModel = _lastActiveModel, ThinkingActive = thinkingActive, LastSyntheticText = lastSyntheticText };
             var lineElapsedMs = sw.ElapsedMilliseconds;
             var result = StreamEventParser.Process(evt, state, lineElapsedMs, _workingDirectory, ExpectedCliPermissionMode(), _permissionMode);
 
             SessionId = state.SessionId;
             _lastActiveModel = state.LastActiveModel;
             thinkingActive = state.ThinkingActive;
+            lastSyntheticText = state.LastSyntheticText;
 
             foreach (var chunk in result.Chunks)
             {

@@ -688,11 +688,16 @@ public class AgentClient
                     // "Prompt is too long" gets the same treatment: the session's
                     // context is over the ceiling and every resume of it refails, so
                     // route it to the "start a new session" card.
+                    // A model that needs paid usage credits (e.g. Fable) fails
+                    // the turn on the way in; route it to the "choose another
+                    // model" card instead of a raw bubble.
                     string routed;
                     if (ClaudeStudioShared.AuthErrors.IsAuthFailure(chunk.Text))
                         routed = "AUTH_REQUIRED::" + chunk.Text;
                     else if (ClaudeStudioShared.ContextErrors.IsContextOverflow(chunk.Text))
                         routed = "CONTEXT_FULL::" + chunk.Text;
+                    else if (ClaudeStudioShared.CreditErrors.IsOutOfCredits(chunk.Text))
+                        routed = "CREDITS_REQUIRED::" + chunk.Text;
                     else
                         routed = chunk.Text;
                     onChunk(routed);

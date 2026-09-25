@@ -163,6 +163,10 @@ public static class StreamEventParser
         // rebuilds StreamEventState per stdout line, so the LastSyntheticText
         // dedup below can't catch this cross-line at runtime.)
         bool isSyntheticOverflow = isSynthetic && SyntheticContentIsOverflow(msgObj);
+        // Same shape for a "requires usage credits" refusal: the result drives
+        // the dedicated credit card, so suppress the raw synthetic bubble here.
+        bool isSyntheticCredits = isSynthetic && SyntheticContentIsCredits(msgObj);
+        bool suppressSyntheticBubble = isSyntheticOverflow || isSyntheticCredits;
 
         // --fallback-model can silently swap in a different model when the
         // primary is overloaded. LastActiveModel starts at the requested
@@ -184,7 +188,7 @@ public static class StreamEventParser
             }
         }
 
-        if (!isSyntheticOverflow && msgObj.TryGetProperty("usage", out var usageLive))
+        if (!suppressSyntheticBubble && msgObj.TryGetProperty("usage", out var usageLive))
             result.Chunks.Add(BuildTokensLiveChunk(usageLive));
 
         var content = msgObj.GetProperty("content");
@@ -214,10 +218,10 @@ public static class StreamEventParser
                     var text = item.TryGetProperty("text", out var tp) ? tp.GetString() : null;
                     if (!string.IsNullOrEmpty(text))
                     {
-                        // Suppress the bubble for a context-overflow error; the
-                        // is_error result routes the same text to the "session
-                        // full" card instead.
-                        if (!isSyntheticOverflow)
+                        // Suppress the bubble for an overflow or credit error;
+                        // the is_error result routes the same text to the right
+                        // dedicated card ("session full" / "needs credits").
+                        if (!suppressSyntheticBubble)
                             result.Chunks.Add(new ChatChunk { Type = "chunk", Text = text! });
                         // Remember it so the terminal is_error result doesn't
                         // re-append the same string and double it in the bubble.
@@ -240,6 +244,21 @@ public static class StreamEventParser
         {
             if (item.TryGetProperty("type", out var t) && t.GetString() == "text" &&
                 item.TryGetProperty("text", out var tx) && ContextErrors.IsContextOverflow(tx.GetString()))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool SyntheticContentIsCredits(JsonElement msgObj)
+    {
+        if (!msgObj.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
+            return false;
+
+        foreach (var item in content.EnumerateArray())
+        {
+            if (item.TryGetProperty("type", out var t) && t.GetString() == "text" &&
+                item.TryGetProperty("text", out var tx) && CreditErrors.IsOutOfCredits(tx.GetString()))
                 return true;
         }
 
@@ -495,11 +514,12 @@ public static class StreamEventParser
             // result. When the synthetic already rendered the text this turn,
             // emitting it again doubled it in the bubble. Skip the duplicate;
             // still emit when the result is the only carrier of the error.
-            // Context overflow is always emitted: it drives the "session full"
-            // card and its synthetic bubble is suppressed in ProcessAssistant,
-            // so it must never be deduped away here (even if the per-line state
-            // ever starts carrying LastSyntheticText across events).
-            if (ContextErrors.IsContextOverflow(errText) || errText != state.LastSyntheticText)
+            // Context overflow and credit errors are always emitted: each drives
+            // its own dedicated card and its synthetic bubble is suppressed in
+            // ProcessAssistant, so it must never be deduped away here (even now
+            // that the per-line state carries LastSyntheticText across events).
+            if (ContextErrors.IsContextOverflow(errText) || CreditErrors.IsOutOfCredits(errText)
+                || errText != state.LastSyntheticText)
                 result.Chunks.Add(new ChatChunk { Type = "error", Text = errText });
         }
 

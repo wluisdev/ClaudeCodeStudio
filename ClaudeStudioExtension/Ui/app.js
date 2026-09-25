@@ -2393,6 +2393,11 @@ window.chrome.webview.addEventListener("message", event => {
         return;
     }
 
+    if (event.data.type === "credits-required") {
+        showCreditsRequiredCard(event.data.detail || "");
+        return;
+    }
+
     if (event.data.type === "claude-not-found") {
         showClaudeNotFoundCard(event.data.detail || "");
         return;
@@ -5328,6 +5333,34 @@ ${detail && detail.trim() ? `<div class="claude-install-hint">${escapeHtml(detai
 function startNewSessionFromCard(card) {
     if (card && card.classList) card.classList.add("question-answered");
     clearChat();
+}
+
+// The selected model isn't on the account's plan and needs paid usage credits,
+// so the turn failed on the way in. Unlike a full session, the conversation is
+// still alive: the fix is to pick a model that is included (or add credits), so
+// this card offers the model picker and a link to manage credits. Auto-resume is
+// left alone on purpose — switching models and continuing the session is fine.
+function showCreditsRequiredCard(detail) {
+    if (welcome) { welcome.remove(); welcome = null; }
+    // Avoid stacking duplicate cards when several sends fail in a row.
+    const last = messages.lastElementChild;
+    if (last && last.classList && last.classList.contains("credits-required-card")) return;
+    const card = document.createElement("div");
+    card.className = "question-card credits-required-card";
+    card.innerHTML = `
+<div class="question-text">💳 <strong>This model needs usage credits.</strong> The selected model isn't included in your plan and requires paid usage credits to run. Pick another model to keep going, or add credits to your account.</div>
+${detail && detail.trim() ? `<div class="claude-install-hint">${escapeHtml(detail.trim())}</div>` : ""}
+<div class="question-buttons">
+<button class="q-btn q-yes" onclick="chooseAnotherModelFromCard(this.closest('.question-card'))">Choose another model</button>
+<a class="q-btn" href="https://claude.ai/settings/usage" rel="noopener noreferrer">Manage credits</a>
+</div>`;
+    messages.appendChild(card);
+    autoScroll();
+}
+
+function chooseAnotherModelFromCard(card) {
+    if (card && card.classList) card.classList.add("question-answered");
+    showModelPicker();
 }
 
 function openSigninOverlay() {
