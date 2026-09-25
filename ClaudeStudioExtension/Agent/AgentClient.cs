@@ -40,6 +40,12 @@ public class AgentClient
     // (its session forks the previous transcript instead of starting empty).
     public bool LastTurnResumed { get; private set; }
 
+    // #19: true once the live session was born from a resume (History) or a
+    // fork/branch. Drives carrying CurrentSessionId forward as the resume id on
+    // later turns so a resumed conversation isn't silently restarted after its
+    // first reply. Cleared by ResetSession (new chat / solution reset).
+    private bool _sessionResumedLineage;
+
     // U4: fired with claude.exe's PID right after the agent spawns it, so the
     // control can point a FileSystemWatcher at the CLI's presence file
     // (~/.claude/sessions/<pid>.json — carries status/waitingFor).
@@ -452,6 +458,22 @@ public class AgentClient
         PendingResumeSessionId = null;
         var forkSession = PendingForkSession;
         PendingForkSession = false;
+
+        // #19: keep a resumed/forked conversation going across turns. The pending
+        // resume id is consumed after a single turn (#12 fork semantics), so on the
+        // NEXT turn resumeId is null again — and because a resumed turn's spawn key
+        // carries the id while a null turn's does not, the agent tore down the warm
+        // claude process and spawned a fresh, empty --session-id. The second query
+        // then landed in a brand-new session with no context (the #19 report).
+        // Once a session has a resumed/forked lineage, carry the live session id
+        // forward as the resume id: the spawn key stays stable (warm reuse) and any
+        // forced respawn re-resumes the same transcript instead of starting over.
+        // Normal (never-resumed) chats keep resumeId == null and are untouched.
+        if (resumeId != null || forkSession)
+            _sessionResumedLineage = true;
+        else if (_sessionResumedLineage && CurrentSessionId != null)
+            resumeId = CurrentSessionId;
+
         // Whether this turn carries the previous transcript forward (--resume /
         // --continue). The control forwards it with session-info so the UI can
         // tell a forked-with-history session from a fresh one (rewind base).
@@ -777,6 +799,7 @@ public class AgentClient
         PendingResumeSessionId = null;
         PendingForkSession = false;
         LastTurnResumed = false;
+        _sessionResumedLineage = false; // #19
     }
 
     public async Task StopAsync()
