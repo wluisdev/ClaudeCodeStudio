@@ -5479,6 +5479,9 @@ function renderHistoryList(sessions, query) {
     list.innerHTML = sessions.map(s => {
         const tok = s.tokens > 1000 ? `${(s.tokens / 1000).toFixed(1)}k tok` : `${s.tokens} tok`;
         const msgs = (s.messages != null) ? `${s.messages} msg${s.messages === 1 ? "" : "s"} · ` : "";
+        const model = s.model
+            ? `<span title="Last model used: ${escapeAttr(s.model)}">${escapeHtml(historyModelLabel(s.model))}</span> · `
+            : "";
         // Generated/custom title (V18) leads when present; the raw preview
         // stays reachable via tooltip.
         const label = s.title || s.preview;
@@ -5491,9 +5494,18 @@ function renderHistoryList(sessions, query) {
     <button class="history-action" onclick="viewSession('${escapeAttr(s.id)}')" title="Open transcript in editor">⤢</button>
     <button class="history-delete" onclick="deleteSession('${escapeAttr(s.id)}')" title="Delete session">×</button>
   </div>
-  <div class="history-date">${escapeHtml(s.date)} · ${msgs}${tok}</div>
+  <div class="history-date">${escapeHtml(s.date)} · ${model}${msgs}${tok}</div>
 </div>`;
     }).join("");
+}
+
+// #21: the transcript stores the API id, often with a snapshot date
+// (claude-haiku-4-5-20251001). Map it to the picker label; unknown ids fall
+// back to the bare id without the "claude-" prefix.
+function historyModelLabel(id) {
+    const bare = String(id).replace(/-\d{8}$/, "");
+    const known = modelList.find(m => m.id === bare);
+    return known ? known.label : bare.replace(/^claude-/, "");
 }
 
 // D4: opens the past session's transcript as readable markdown in the editor.

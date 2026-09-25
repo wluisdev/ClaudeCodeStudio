@@ -4,6 +4,10 @@ All notable changes to Claude Code Studio are documented here. Format loosely fo
 
 ## [1.1.7] - 2026-09-25
 
+### Added
+
+- **History shows the last model used in each session** ([#21](https://github.com/wluisdev/ClaudeCodeStudio/issues/21)). Each entry now lists the model of the session's last reply next to the date, message count, and tokens (hover it for the full model id). Resuming a session on a different model than the one it last used makes the CLI re-read the whole conversation without the prompt cache, which shows up as a usage spike on long sessions; the model in the list makes that visible before you resume.
+
 ### Fixed
 
 - **Resizing the plan or permission modal could reject the request.** Dragging the modal's resize grip and releasing the mouse outside the modal counted as a click on the dark backdrop, which closed the modal and denied the pending tool (or rejected the plan) on the spot. Modals now only close from the backdrop when the click also started there, so a resize or a text selection that ends outside is safe. A click outside the permission modal no longer denies anything either: the modal gives a short pulse, and the decision stays on the buttons (Esc still denies).

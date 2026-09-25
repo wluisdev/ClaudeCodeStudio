@@ -3007,6 +3007,9 @@ public partial class AgentToolWindowControl : UserControl
                 // persist:true. Last occurrence wins.
                 var nativeCustom = "";
                 var nativeAi = "";
+                // Model of the last real assistant turn: resuming on a different
+                // one re-reads the whole context without cache (#21).
+                var lastModel = "";
 
                 try
                 {
@@ -3072,6 +3075,7 @@ public partial class AgentToolWindowControl : UserControl
                             {
                                 var m = modelEl.GetString();
                                 if (!string.IsNullOrEmpty(m) && m!.StartsWith("<")) continue;
+                                if (!string.IsNullOrEmpty(m)) lastModel = m!;
                             }
 
                             if (!msg.TryGetProperty("usage", out var usage)) continue;
@@ -3097,7 +3101,7 @@ public partial class AgentToolWindowControl : UserControl
                 }
                 catch { }
 
-                return (file, sessionId, preview, date, lastWrite, tokenCount, messageCount, assistantTurns, nativeCustom, nativeAi);
+                return (file, sessionId, preview, date, lastWrite, tokenCount, messageCount, assistantTurns, nativeCustom, nativeAi, lastModel);
             })));
 
             foreach (var entry in parsed.OrderByDescending(e => e.lastWrite))
@@ -3117,7 +3121,7 @@ public partial class AgentToolWindowControl : UserControl
                         ? entry.nativeCustom : null)
                     ?? SessionTitlesStore.GetGenerated(entry.sessionId)
                     ?? (entry.nativeAi.Length > 0 ? entry.nativeAi : null);
-                sessions.Add(new { id = entry.sessionId, preview, title, date = entry.date, tokens = entry.tokenCount, messages = entry.messageCount, isBranch });
+                sessions.Add(new { id = entry.sessionId, preview, title, date = entry.date, tokens = entry.tokenCount, messages = entry.messageCount, isBranch, model = entry.lastModel });
             }
         }
 
