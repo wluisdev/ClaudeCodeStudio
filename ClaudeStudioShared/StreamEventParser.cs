@@ -168,11 +168,16 @@ public static class StreamEventParser
         // primary is overloaded. LastActiveModel starts at the requested
         // model, so this only fires on an actual deviation (engaged) or a
         // later match against the pre-deviation value (recovered) — never on
-        // the ordinary, unchanged case.
+        // the ordinary, unchanged case. Compare with the dated snapshot suffix
+        // stripped: an alias like "claude-haiku-4-5" resolves server-side to
+        // its snapshot ("claude-haiku-4-5-20251001") and the response echoes
+        // the snapshot, so a raw compare would flag every Haiku turn as a
+        // fallback (the id we send never equals the id that comes back).
         if (hasModel && !isSynthetic)
         {
             var actualModel = modelEl.GetString();
-            if (!string.IsNullOrEmpty(actualModel) && actualModel != state.LastActiveModel)
+            if (!string.IsNullOrEmpty(actualModel)
+                && StripSnapshotDate(actualModel!) != StripSnapshotDate(state.LastActiveModel))
             {
                 state.LastActiveModel = actualModel;
                 result.Chunks.Add(new ChatChunk { Type = "model-used", Text = actualModel! });
@@ -239,6 +244,21 @@ public static class StreamEventParser
         }
 
         return false;
+    }
+
+    // Drops a trailing "-YYYYMMDD" snapshot date ("claude-haiku-4-5-20251001"
+    // -> "claude-haiku-4-5") so an alias and the dated snapshot the API echoes
+    // for it compare equal. Only an exactly-8-digit final segment is treated as
+    // a date, so a version bump like "claude-opus-5-5" is left intact and still
+    // counts as a different model from "claude-opus-5".
+    private static string? StripSnapshotDate(string? id)
+    {
+        if (string.IsNullOrEmpty(id)) return id;
+        var dash = id!.LastIndexOf('-');
+        if (dash <= 0 || dash >= id.Length - 1) return id;
+        for (var k = dash + 1; k < id.Length; k++)
+            if (!char.IsDigit(id[k])) return id;
+        return id.Length - dash - 1 == 8 ? id.Substring(0, dash) : id;
     }
 
     private static void ProcessStreamEvent(JsonElement evt, StreamEventState state, StreamEventResult result)

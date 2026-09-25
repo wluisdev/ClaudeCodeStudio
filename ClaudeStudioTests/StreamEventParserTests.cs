@@ -222,6 +222,39 @@ public class StreamEventParserTests
     }
 
     [Fact]
+    public void Assistant_alias_resolving_to_dated_snapshot_is_not_a_fallback()
+    {
+        // Requested "claude-haiku-4-5"; the API echoes the dated snapshot it
+        // resolves to. That must not be reported as a --fallback-model switch.
+        var state = new StreamEventState { LastActiveModel = "claude-haiku-4-5" };
+        var result = Process("""{"type":"assistant","message":{"model":"claude-haiku-4-5-20251001","content":[]}}""", state);
+
+        Assert.DoesNotContain(result.Chunks, c => c.Type == "model-used");
+    }
+
+    [Fact]
+    public void Assistant_real_fallback_to_dated_model_still_fires()
+    {
+        // A genuine cross-family fallback must still be detected even when the
+        // landed model comes back with a dated snapshot suffix.
+        var state = new StreamEventState { LastActiveModel = "claude-opus-5" };
+        var result = Process("""{"type":"assistant","message":{"model":"claude-haiku-4-5-20251001","content":[]}}""", state);
+
+        Assert.Contains(result.Chunks, c => c.Type == "model-used" && c.Text == "claude-haiku-4-5-20251001");
+    }
+
+    [Fact]
+    public void Assistant_version_bump_is_a_real_change_not_a_snapshot()
+    {
+        // "claude-opus-5-5" is Opus 5.5, a different model from Opus 5 — the
+        // trailing "-5" is not an 8-digit date, so it must still fire.
+        var state = new StreamEventState { LastActiveModel = "claude-opus-5" };
+        var result = Process("""{"type":"assistant","message":{"model":"claude-opus-5-5","content":[]}}""", state);
+
+        Assert.Contains(result.Chunks, c => c.Type == "model-used" && c.Text == "claude-opus-5-5");
+    }
+
+    [Fact]
     public void Assistant_synthetic_model_never_emits_model_used()
     {
         var state = new StreamEventState { LastActiveModel = "claude-sonnet-5" };
