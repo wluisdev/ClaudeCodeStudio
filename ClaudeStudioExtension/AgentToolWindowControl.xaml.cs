@@ -3163,6 +3163,11 @@ public partial class AgentToolWindowControl : UserControl
         // chip. Hold it here and flush it after the chip (manual compact) or
         // before the next message (auto-compact) to match the live order.
         (long pre, long post)? pendingCompact = null;
+        // #21 backlog item 16: the model picker is a global pick, not per
+        // session — resuming on a different model than the session last used
+        // forces a cache miss even inside the prompt-cache TTL. Track the last
+        // real (non-synthetic) model so the UI can restore it on resume.
+        var lastModel = "";
 
         try
         {
@@ -3187,6 +3192,11 @@ public partial class AgentToolWindowControl : UserControl
                     if (entryType != "user" && entryType != "assistant") continue;
                     if (ClaudeStudioShared.SessionOrdinals.IsHiddenReplayLine(root)) continue;
                     if (!root.TryGetProperty("message", out var msg)) continue;
+                    if (entryType == "assistant" && msg.TryGetProperty("model", out var modelEl))
+                    {
+                        var m = modelEl.GetString();
+                        if (!string.IsNullOrEmpty(m) && !m!.StartsWith("<")) lastModel = m!;
+                    }
                     if (!msg.TryGetProperty("content", out var content)) continue;
 
                     string? text = null;
@@ -3263,7 +3273,8 @@ public partial class AgentToolWindowControl : UserControl
         {
             type = "branched",
             sessionId,
-            messages = msgs
+            messages = msgs,
+            model = lastModel
         });
         var dispatcher = System.Windows.Application.Current.Dispatcher;
         dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));

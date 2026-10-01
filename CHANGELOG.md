@@ -7,6 +7,7 @@ All notable changes to Claude Code Studio are documented here. Format loosely fo
 ### Added
 
 - **History shows the last model used in each session** ([#21](https://github.com/wluisdev/ClaudeCodeStudio/issues/21)). Each entry now lists the model of the session's last reply next to the date, message count, and tokens (hover it for the full model id). Resuming a session on a different model than the one it last used makes the CLI re-read the whole conversation without the prompt cache, which shows up as a usage spike on long sessions; the model in the list makes that visible before you resume.
+- **Resuming a session restores the model it last used** ([#21](https://github.com/wluisdev/ClaudeCodeStudio/issues/21)). The model picker is a global pick, so resuming a session that last ran on a different model stayed on whatever was selected, which forces a full prompt-cache miss even inside the cache window. Resuming (or forking) a session from History now quietly switches the picker to that session's own model, with a discreet "Resumed on <model>" note at the top of the transcript. It does not change the default new chats start with, and switching the model yourself afterward works as usual.
 
 ### Fixed
 

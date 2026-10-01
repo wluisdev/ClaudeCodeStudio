@@ -1296,19 +1296,49 @@ function insertOrUpdateModelDivider(text) {
     autoScroll();
 }
 
+// #21 backlog item 16: restoreSessionModel below flips this while it sets
+// modelSelect programmatically, so a resume doesn't persist its (possibly
+// one-off) model as the global default for new chats, nor drop the loud
+// "Switched to" divider meant for a manual pick mid-conversation.
+let _restoringSessionModel = false;
+
 function noteModelSwitch() {
     const newId = modelSelect.value;
     if (newId === activeModelId) return;
     activeModelId = newId;
-    localStorage.setItem("chatModel", newId);
     // A manual pick resets what #14 considers "the primary" — otherwise a
     // fallback recovery notice could fire against the old selection.
     _lastReportedActiveModel = newId;
+    if (_restoringSessionModel) return;
+    localStorage.setItem("chatModel", newId);
 
     const label = modelSelect.options[modelSelect.selectedIndex]?.text || newId;
     insertOrUpdateModelDivider(`🤖 Switched to ${label}`);
 }
 modelSelect.addEventListener("change", noteModelSwitch);
+
+// #21 backlog item 16: the model picker is a single global pick, so resuming
+// a session that last ran on a different model silently stayed on whatever's
+// currently selected — a guaranteed prompt-cache miss even inside the TTL
+// window, on top of being surprising. Restore the session's own model
+// instead, quietly: no divider (nothing changed mid-conversation, the whole
+// transcript above used this model) and no write to the global default (a
+// one-off resume shouldn't decide what new chats start with).
+function restoreSessionModel(rawId) {
+    if (!rawId) return;
+    const bareId = String(rawId).replace(/-\d{8}$/, "");
+    const opt = [...modelSelect.options].find(o => o.value === bareId);
+    if (!opt || modelSelect.value === bareId) return;
+    _restoringSessionModel = true;
+    modelSelect.value = bareId;
+    modelSelect.dispatchEvent(new Event("change"));
+    _restoringSessionModel = false;
+
+    const note = document.createElement("div");
+    note.className = "resume-model-note";
+    note.textContent = `🤖 Resumed on ${opt.text}`;
+    messages.insertBefore(note, messages.firstChild);
+}
 
 // #14: assistant.message.model can silently differ from what was requested
 // when --fallback-model engages. Server-authoritative signal (Program.cs),
@@ -2486,7 +2516,7 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "branched") {
-        renderBranchedMessages(event.data.sessionId, event.data.messages || []);
+        renderBranchedMessages(event.data.sessionId, event.data.messages || [], event.data.model);
         hideResumeOverlay();
         return;
     }
@@ -4935,6 +4965,18 @@ function clearChat() {
     currentSessionId = null;
     _rewindBaseUserIdx = 0;
     _turnUserIdx = 0;
+
+    // #21 backlog item 16: a resumed session may have silently switched the
+    // picker to its own model (restoreSessionModel, no localStorage write) —
+    // without this, a fresh chat right after would carry that model forward
+    // instead of the one the user actually picked last. Bring the picker back
+    // to the persisted default; the divider no-ops on this empty transcript.
+    const storedModel = localStorage.getItem("chatModel");
+    if (storedModel && modelSelect.value !== storedModel &&
+        [...modelSelect.options].some(o => o.value === storedModel)) {
+        modelSelect.value = storedModel;
+        modelSelect.dispatchEvent(new Event("change"));
+    }
     _lastReportedActiveModel = modelSelect.value; // #14: fresh chat, fresh fallback tracking
     subagentTraces.clear(); // #13: old entries would point at now-removed DOM nodes
     updateUsageSessionValues();
@@ -4946,7 +4988,7 @@ function clearChat() {
     window.chrome.webview.postMessage({ type: "clear" });
 }
 
-function renderBranchedMessages(newSessionId, msgs) {
+function renderBranchedMessages(newSessionId, msgs, sessionModel) {
     if (welcome) { welcome.remove(); welcome = null; }
     messages.innerHTML = "";
     msgCounter = 0;
@@ -5058,6 +5100,9 @@ function renderBranchedMessages(newSessionId, msgs) {
         }
     }
     autoScroll();
+    // History resume/fork only — HandleBranchAsync's payload carries no
+    // model, so a mid-conversation ⎇ branch leaves the picker untouched.
+    restoreSessionModel(sessionModel);
 }
 
 // Re-renders a tool call from a session transcript (History resume / branch)

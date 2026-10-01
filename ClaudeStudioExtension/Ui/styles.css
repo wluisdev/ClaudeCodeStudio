@@ -2149,6 +2149,19 @@ html.light-theme .permission-item.active {
 html.light-theme .model-divider::before,
 html.light-theme .model-divider::after { background: #d8d8d8; }
 
+/* #21 backlog item 16: resuming a session restores its own model instead of
+   leaving the picker on whatever's globally selected. Plainer than
+   .model-divider on purpose — nothing changed mid-transcript here, this is
+   just what the whole session above already used. */
+.resume-model-note {
+    text-align: center;
+    color: #777;
+    font-size: 11px;
+    margin: 2px 2px 10px;
+    user-select: none;
+}
+html.light-theme .resume-model-note { color: #999; }
+
 .msg-branch {
     position: absolute;
     top: -8px;
