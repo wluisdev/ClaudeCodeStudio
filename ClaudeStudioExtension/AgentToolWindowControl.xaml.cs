@@ -3007,6 +3007,9 @@ public partial class AgentToolWindowControl : UserControl
                 // persist:true. Last occurrence wins.
                 var nativeCustom = "";
                 var nativeAi = "";
+                // Model of the last real assistant turn: resuming on a different
+                // one re-reads the whole context without cache (#21).
+                var lastModel = "";
 
                 try
                 {
@@ -3072,6 +3075,7 @@ public partial class AgentToolWindowControl : UserControl
                             {
                                 var m = modelEl.GetString();
                                 if (!string.IsNullOrEmpty(m) && m!.StartsWith("<")) continue;
+                                if (!string.IsNullOrEmpty(m)) lastModel = m!;
                             }
 
                             if (!msg.TryGetProperty("usage", out var usage)) continue;
@@ -3097,7 +3101,7 @@ public partial class AgentToolWindowControl : UserControl
                 }
                 catch { }
 
-                return (file, sessionId, preview, date, lastWrite, tokenCount, messageCount, assistantTurns, nativeCustom, nativeAi);
+                return (file, sessionId, preview, date, lastWrite, tokenCount, messageCount, assistantTurns, nativeCustom, nativeAi, lastModel);
             })));
 
             foreach (var entry in parsed.OrderByDescending(e => e.lastWrite))
@@ -3117,7 +3121,7 @@ public partial class AgentToolWindowControl : UserControl
                         ? entry.nativeCustom : null)
                     ?? SessionTitlesStore.GetGenerated(entry.sessionId)
                     ?? (entry.nativeAi.Length > 0 ? entry.nativeAi : null);
-                sessions.Add(new { id = entry.sessionId, preview, title, date = entry.date, tokens = entry.tokenCount, messages = entry.messageCount, isBranch });
+                sessions.Add(new { id = entry.sessionId, preview, title, date = entry.date, tokens = entry.tokenCount, messages = entry.messageCount, isBranch, model = entry.lastModel });
             }
         }
 
@@ -3159,6 +3163,20 @@ public partial class AgentToolWindowControl : UserControl
         // chip. Hold it here and flush it after the chip (manual compact) or
         // before the next message (auto-compact) to match the live order.
         (long pre, long post)? pendingCompact = null;
+        // #21 backlog item 16: the model picker is a global pick, not per
+        // session — resuming on a different model than the session last used
+        // forces a cache miss even inside the prompt-cache TTL. Track the last
+        // real (non-synthetic) model so the UI can restore it on resume.
+        var lastModel = "";
+        // #21 backlog item 16 (part 2): same turn also carries what the UI
+        // needs to warn about a likely-expired prompt cache — when the
+        // session went quiet and how big its context is. cacheTtlMin comes
+        // from the turn's own cache_creation breakdown (1h vs 5m ephemeral
+        // buckets) instead of a guess, so the heuristic matches this user's
+        // actual plan rather than assuming everyone gets the 1h tier.
+        var lastTurnAt = "";
+        long lastContextTokens = 0;
+        var cacheTtlMin = 0;
 
         try
         {
@@ -3183,6 +3201,32 @@ public partial class AgentToolWindowControl : UserControl
                     if (entryType != "user" && entryType != "assistant") continue;
                     if (ClaudeStudioShared.SessionOrdinals.IsHiddenReplayLine(root)) continue;
                     if (!root.TryGetProperty("message", out var msg)) continue;
+                    if (entryType == "assistant" && msg.TryGetProperty("model", out var modelEl))
+                    {
+                        var m = modelEl.GetString();
+                        if (!string.IsNullOrEmpty(m) && !m!.StartsWith("<"))
+                        {
+                            lastModel = m!;
+                            if (root.TryGetProperty("timestamp", out var tsEl))
+                                lastTurnAt = tsEl.GetString() ?? lastTurnAt;
+                            if (msg.TryGetProperty("usage", out var usage))
+                            {
+                                long In(string name) => usage.TryGetProperty(name, out var v) && v.TryGetInt64(out var n) ? n : 0;
+                                lastContextTokens = In("input_tokens") + In("cache_creation_input_tokens") + In("cache_read_input_tokens");
+
+                                // Overwritten on every turn that shows evidence, so by the
+                                // end of the file this reflects the MOST RECENT tier rather
+                                // than the first one ever seen (a plan change mid-session,
+                                // while rare, should count as the current behavior).
+                                if (usage.TryGetProperty("cache_creation", out var cc) && cc.ValueKind == JsonValueKind.Object)
+                                {
+                                    long Cc(string name) => cc.TryGetProperty(name, out var v) && v.TryGetInt64(out var n) ? n : 0;
+                                    if (Cc("ephemeral_1h_input_tokens") > 0) cacheTtlMin = 60;
+                                    else if (Cc("ephemeral_5m_input_tokens") > 0) cacheTtlMin = 5;
+                                }
+                            }
+                        }
+                    }
                     if (!msg.TryGetProperty("content", out var content)) continue;
 
                     string? text = null;
@@ -3259,7 +3303,11 @@ public partial class AgentToolWindowControl : UserControl
         {
             type = "branched",
             sessionId,
-            messages = msgs
+            messages = msgs,
+            model = lastModel,
+            lastTurnAt,
+            contextTokens = lastContextTokens,
+            cacheTtlMin
         });
         var dispatcher = System.Windows.Application.Current.Dispatcher;
         dispatcher.Invoke(() => Browser.CoreWebView2.PostWebMessageAsJson(json));

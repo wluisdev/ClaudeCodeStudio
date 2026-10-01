@@ -676,6 +676,17 @@ html.light-theme .usage-modal-close:hover { background: #ddd; color: #000; }
     width: 640px;
 }
 
+/* Click outside the permission modal: a short pulse instead of a deny. */
+.perm-modal.perm-modal-nudge {
+    animation: perm-modal-nudge 0.25s ease-out;
+}
+
+@keyframes perm-modal-nudge {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.02); }
+    100% { transform: scale(1); }
+}
+
 .perm-modal-header {
     display: flex;
     align-items: center;
@@ -2137,6 +2148,15 @@ html.light-theme .permission-item.active {
 }
 html.light-theme .model-divider::before,
 html.light-theme .model-divider::after { background: #d8d8d8; }
+
+/* #21 backlog item 16: resume/fork markers (model restored, cache likely
+   expired) reuse the model divider look, but the cache line is long enough
+   to need wrapping in a narrow panel instead of overflowing. */
+.model-divider.resume-divider .model-divider-label {
+    flex: 0 1 auto;
+    white-space: normal;
+    text-align: center;
+}
 
 .msg-branch {
     position: absolute;

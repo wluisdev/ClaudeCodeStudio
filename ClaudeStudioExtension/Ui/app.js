@@ -1283,7 +1283,7 @@ updateCaption();
 function insertOrUpdateModelDivider(text) {
     if (!messages.querySelector(".message")) return;
     const last = messages.lastElementChild;
-    if (last && last.classList.contains("model-divider")) {
+    if (last && last.classList.contains("model-divider") && !last.classList.contains("resume-divider")) {
         last.querySelector(".model-divider-label").textContent = text;
         autoScroll();
         return;
@@ -1296,19 +1296,97 @@ function insertOrUpdateModelDivider(text) {
     autoScroll();
 }
 
+// #21 backlog item 16: restoreSessionModel below flips this while it sets
+// modelSelect programmatically, so a resume doesn't persist its (possibly
+// one-off) model as the global default for new chats, nor drop the loud
+// "Switched to" divider meant for a manual pick mid-conversation.
+let _restoringSessionModel = false;
+
 function noteModelSwitch() {
     const newId = modelSelect.value;
     if (newId === activeModelId) return;
     activeModelId = newId;
-    localStorage.setItem("chatModel", newId);
     // A manual pick resets what #14 considers "the primary" — otherwise a
     // fallback recovery notice could fire against the old selection.
     _lastReportedActiveModel = newId;
+    if (_restoringSessionModel) return;
+    localStorage.setItem("chatModel", newId);
 
     const label = modelSelect.options[modelSelect.selectedIndex]?.text || newId;
     insertOrUpdateModelDivider(`🤖 Switched to ${label}`);
 }
 modelSelect.addEventListener("change", noteModelSwitch);
+
+// #21 backlog item 16: the model picker is a single global pick, so resuming
+// a session that last ran on a different model silently stayed on whatever's
+// currently selected — a guaranteed prompt-cache miss even inside the TTL
+// window, on top of being surprising. Restore the session's own model
+// instead, quietly: no write to the global default (a one-off resume
+// shouldn't decide what new chats start with). Returns the model's label for
+// showResumeNotice to report, or null if nothing changed (already current).
+function restoreSessionModel(rawId) {
+    if (!rawId) return null;
+    const bareId = String(rawId).replace(/-\d{8}$/, "");
+    const opt = [...modelSelect.options].find(o => o.value === bareId);
+    if (!opt || modelSelect.value === bareId) return null;
+    _restoringSessionModel = true;
+    modelSelect.value = bareId;
+    modelSelect.dispatchEvent(new Event("change"));
+    _restoringSessionModel = false;
+    return opt.text;
+}
+
+// #21 backlog item 16 (part 2): resuming a session whose prompt cache has
+// almost certainly expired pays a full re-cache on the next reply. This is
+// informational only — no action suggested, and deliberately rare: it only
+// fires for a session that's both been idle past its own inferred cache TTL
+// AND big enough (>50k tokens of context) that re-reading it is noticeable.
+// cacheTtlMin comes from the session's own cache_creation breakdown
+// (Program.cs/XAML.cs) rather than a hardcoded guess, since the TTL differs
+// by plan; a session with no evidence either way defaults to the more
+// conservative 1h tier so this stays rare rather than noisy. Returns the
+// notice text, or null if the heuristic doesn't clear.
+function cacheNoteText(lastTurnAt, contextTokens, cacheTtlMin) {
+    if (!lastTurnAt || !(contextTokens > 50000)) return null;
+    const idleMs = Date.now() - Date.parse(lastTurnAt);
+    if (!(idleMs > 0)) return null;
+    const ttlMs = (cacheTtlMin || 60) * 60000;
+    if (idleMs <= ttlMs) return null;
+    return `Idle for ${formatIdleDuration(idleMs)} · the next reply re-caches the full context (~${formatApproxTokens(contextTokens)})`;
+}
+
+function formatIdleDuration(ms) {
+    const hours = ms / 3600000;
+    if (hours >= 1) return `${hours < 10 ? hours.toFixed(1) : Math.round(hours)}h`;
+    return `${Math.max(1, Math.round(ms / 60000))}min`;
+}
+
+function formatApproxTokens(n) {
+    return n > 1000 ? `${(n / 1000).toFixed(1)}k tokens` : `${n} tokens`;
+}
+
+// #21 backlog item 16: both resume markers (model restored, cache likely
+// expired) are dividers appended at the END of the replayed transcript, the
+// point where the resumed conversation picks up and where the view sits after
+// autoScroll. At the top they were invisible in a long session without
+// scrolling all the way up. Same look as the "Switched to" divider, but
+// tagged resume-divider so a manual switch right after appends its own
+// divider instead of overwriting these (insertOrUpdateModelDivider).
+function showResumeNotice(rawModelId, lastTurnAt, contextTokens, cacheTtlMin) {
+    const modelLabel = restoreSessionModel(rawModelId);
+    const cacheMsg = cacheNoteText(lastTurnAt, contextTokens, cacheTtlMin);
+    if (modelLabel) appendResumeDivider(`🤖 Resumed on ${modelLabel}`);
+    if (cacheMsg) appendResumeDivider(`⏳ ${cacheMsg}`);
+    autoScroll();
+}
+
+function appendResumeDivider(text) {
+    const div = document.createElement("div");
+    div.className = "model-divider resume-divider";
+    div.innerHTML = `<span class="model-divider-label"></span>`;
+    div.querySelector(".model-divider-label").textContent = text;
+    messages.appendChild(div);
+}
 
 // #14: assistant.message.model can silently differ from what was requested
 // when --fallback-model engages. Server-authoritative signal (Program.cs),
@@ -2486,7 +2564,8 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "branched") {
-        renderBranchedMessages(event.data.sessionId, event.data.messages || []);
+        renderBranchedMessages(event.data.sessionId, event.data.messages || [], event.data.model,
+            event.data.lastTurnAt, event.data.contextTokens, event.data.cacheTtlMin);
         hideResumeOverlay();
         return;
     }
@@ -2918,6 +2997,7 @@ function closePermissionModal() {
     if (_captionAttention === "pending") setCaptionAttention(null);
     renderPresence("", "");
     document.getElementById("perm-modal-overlay").classList.remove("open");
+    document.querySelector("#perm-modal-overlay .perm-modal")?.classList.remove("perm-modal-nudge");
     if (pendingPermissionToolId) {
         const chip = messages.querySelector(`.tool-chip[data-tool-id="${CSS.escape(pendingPermissionToolId)}"]`);
         if (chip) chip.classList.remove("tool-pending");
@@ -2984,6 +3064,28 @@ function permissionDeny(reason) {
         reason: reason || "denied by user"
     });
     closePermissionModal();
+}
+
+// A drag that starts inside a modal and is released over its overlay (the
+// resize grip of the plan modal, a text selection) fires `click` on the
+// overlay, their common ancestor, so `event.target === this` alone closed the
+// modal mid-resize. Overlays only honour a click that also started on them.
+let _overlayPressTarget = null;
+document.addEventListener("mousedown", e => { _overlayPressTarget = e.target; }, true);
+
+function overlayClicked(e, overlay) {
+    return e.target === overlay && _overlayPressTarget === overlay;
+}
+
+// A click outside the permission modal used to deny the tool, so a slip next
+// to the resize grip threw the plan away. It now only nudges the modal: the
+// decision stays on the buttons (and Esc).
+function nudgePermissionModal() {
+    const modal = document.querySelector("#perm-modal-overlay .perm-modal");
+    if (!modal) return;
+    modal.classList.remove("perm-modal-nudge");
+    void modal.offsetWidth; // restart the animation on repeated clicks
+    modal.classList.add("perm-modal-nudge");
 }
 
 document.addEventListener("keydown", e => {
@@ -4912,6 +5014,18 @@ function clearChat() {
     currentSessionId = null;
     _rewindBaseUserIdx = 0;
     _turnUserIdx = 0;
+
+    // #21 backlog item 16: a resumed session may have silently switched the
+    // picker to its own model (restoreSessionModel, no localStorage write) —
+    // without this, a fresh chat right after would carry that model forward
+    // instead of the one the user actually picked last. Bring the picker back
+    // to the persisted default; the divider no-ops on this empty transcript.
+    const storedModel = localStorage.getItem("chatModel");
+    if (storedModel && modelSelect.value !== storedModel &&
+        [...modelSelect.options].some(o => o.value === storedModel)) {
+        modelSelect.value = storedModel;
+        modelSelect.dispatchEvent(new Event("change"));
+    }
     _lastReportedActiveModel = modelSelect.value; // #14: fresh chat, fresh fallback tracking
     subagentTraces.clear(); // #13: old entries would point at now-removed DOM nodes
     updateUsageSessionValues();
@@ -4923,7 +5037,7 @@ function clearChat() {
     window.chrome.webview.postMessage({ type: "clear" });
 }
 
-function renderBranchedMessages(newSessionId, msgs) {
+function renderBranchedMessages(newSessionId, msgs, sessionModel, lastTurnAt, contextTokens, cacheTtlMin) {
     if (welcome) { welcome.remove(); welcome = null; }
     messages.innerHTML = "";
     msgCounter = 0;
@@ -5035,6 +5149,9 @@ function renderBranchedMessages(newSessionId, msgs) {
         }
     }
     autoScroll();
+    // History resume/fork only — HandleBranchAsync's payload carries none of
+    // these fields, so a mid-conversation ⎇ branch shows no notice at all.
+    showResumeNotice(sessionModel, lastTurnAt, contextTokens, cacheTtlMin);
 }
 
 // Re-renders a tool call from a session transcript (History resume / branch)
@@ -5456,6 +5573,9 @@ function renderHistoryList(sessions, query) {
     list.innerHTML = sessions.map(s => {
         const tok = s.tokens > 1000 ? `${(s.tokens / 1000).toFixed(1)}k tok` : `${s.tokens} tok`;
         const msgs = (s.messages != null) ? `${s.messages} msg${s.messages === 1 ? "" : "s"} · ` : "";
+        const model = s.model
+            ? `<span title="Last model used: ${escapeAttr(s.model)}">${escapeHtml(historyModelLabel(s.model))}</span> · `
+            : "";
         // Generated/custom title (V18) leads when present; the raw preview
         // stays reachable via tooltip.
         const label = s.title || s.preview;
@@ -5468,9 +5588,18 @@ function renderHistoryList(sessions, query) {
     <button class="history-action" onclick="viewSession('${escapeAttr(s.id)}')" title="Open transcript in editor">⤢</button>
     <button class="history-delete" onclick="deleteSession('${escapeAttr(s.id)}')" title="Delete session">×</button>
   </div>
-  <div class="history-date">${escapeHtml(s.date)} · ${msgs}${tok}</div>
+  <div class="history-date">${escapeHtml(s.date)} · ${model}${msgs}${tok}</div>
 </div>`;
     }).join("");
+}
+
+// #21: the transcript stores the API id, often with a snapshot date
+// (claude-haiku-4-5-20251001). Map it to the picker label; unknown ids fall
+// back to the bare id without the "claude-" prefix.
+function historyModelLabel(id) {
+    const bare = String(id).replace(/-\d{8}$/, "");
+    const known = modelList.find(m => m.id === bare);
+    return known ? known.label : bare.replace(/^claude-/, "");
 }
 
 // D4: opens the past session's transcript as readable markdown in the editor.
