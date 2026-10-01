@@ -1283,7 +1283,7 @@ updateCaption();
 function insertOrUpdateModelDivider(text) {
     if (!messages.querySelector(".message")) return;
     const last = messages.lastElementChild;
-    if (last && last.classList.contains("model-divider")) {
+    if (last && last.classList.contains("model-divider") && !last.classList.contains("resume-divider")) {
         last.querySelector(".model-divider-label").textContent = text;
         autoScroll();
         return;
@@ -1321,23 +1321,71 @@ modelSelect.addEventListener("change", noteModelSwitch);
 // a session that last ran on a different model silently stayed on whatever's
 // currently selected — a guaranteed prompt-cache miss even inside the TTL
 // window, on top of being surprising. Restore the session's own model
-// instead, quietly: no divider (nothing changed mid-conversation, the whole
-// transcript above used this model) and no write to the global default (a
-// one-off resume shouldn't decide what new chats start with).
+// instead, quietly: no write to the global default (a one-off resume
+// shouldn't decide what new chats start with). Returns the model's label for
+// showResumeNotice to report, or null if nothing changed (already current).
 function restoreSessionModel(rawId) {
-    if (!rawId) return;
+    if (!rawId) return null;
     const bareId = String(rawId).replace(/-\d{8}$/, "");
     const opt = [...modelSelect.options].find(o => o.value === bareId);
-    if (!opt || modelSelect.value === bareId) return;
+    if (!opt || modelSelect.value === bareId) return null;
     _restoringSessionModel = true;
     modelSelect.value = bareId;
     modelSelect.dispatchEvent(new Event("change"));
     _restoringSessionModel = false;
+    return opt.text;
+}
 
-    const note = document.createElement("div");
-    note.className = "resume-model-note";
-    note.textContent = `🤖 Resumed on ${opt.text}`;
-    messages.insertBefore(note, messages.firstChild);
+// #21 backlog item 16 (part 2): resuming a session whose prompt cache has
+// almost certainly expired pays a full re-cache on the next reply. This is
+// informational only — no action suggested, and deliberately rare: it only
+// fires for a session that's both been idle past its own inferred cache TTL
+// AND big enough (>50k tokens of context) that re-reading it is noticeable.
+// cacheTtlMin comes from the session's own cache_creation breakdown
+// (Program.cs/XAML.cs) rather than a hardcoded guess, since the TTL differs
+// by plan; a session with no evidence either way defaults to the more
+// conservative 1h tier so this stays rare rather than noisy. Returns the
+// notice text, or null if the heuristic doesn't clear.
+function cacheNoteText(lastTurnAt, contextTokens, cacheTtlMin) {
+    if (!lastTurnAt || !(contextTokens > 50000)) return null;
+    const idleMs = Date.now() - Date.parse(lastTurnAt);
+    if (!(idleMs > 0)) return null;
+    const ttlMs = (cacheTtlMin || 60) * 60000;
+    if (idleMs <= ttlMs) return null;
+    return `Idle for ${formatIdleDuration(idleMs)} · the next reply re-caches the full context (~${formatApproxTokens(contextTokens)})`;
+}
+
+function formatIdleDuration(ms) {
+    const hours = ms / 3600000;
+    if (hours >= 1) return `${hours < 10 ? hours.toFixed(1) : Math.round(hours)}h`;
+    return `${Math.max(1, Math.round(ms / 60000))}min`;
+}
+
+function formatApproxTokens(n) {
+    return n > 1000 ? `${(n / 1000).toFixed(1)}k tokens` : `${n} tokens`;
+}
+
+// #21 backlog item 16: both resume markers (model restored, cache likely
+// expired) are dividers appended at the END of the replayed transcript, the
+// point where the resumed conversation picks up and where the view sits after
+// autoScroll. At the top they were invisible in a long session without
+// scrolling all the way up. Same look as the "Switched to" divider, but
+// tagged resume-divider so a manual switch right after appends its own
+// divider instead of overwriting these (insertOrUpdateModelDivider).
+function showResumeNotice(rawModelId, lastTurnAt, contextTokens, cacheTtlMin) {
+    const modelLabel = restoreSessionModel(rawModelId);
+    const cacheMsg = cacheNoteText(lastTurnAt, contextTokens, cacheTtlMin);
+    if (modelLabel) appendResumeDivider(`🤖 Resumed on ${modelLabel}`);
+    if (cacheMsg) appendResumeDivider(`⏳ ${cacheMsg}`);
+    autoScroll();
+}
+
+function appendResumeDivider(text) {
+    const div = document.createElement("div");
+    div.className = "model-divider resume-divider";
+    div.innerHTML = `<span class="model-divider-label"></span>`;
+    div.querySelector(".model-divider-label").textContent = text;
+    messages.appendChild(div);
 }
 
 // #14: assistant.message.model can silently differ from what was requested
@@ -2516,7 +2564,8 @@ window.chrome.webview.addEventListener("message", event => {
     }
 
     if (event.data.type === "branched") {
-        renderBranchedMessages(event.data.sessionId, event.data.messages || [], event.data.model);
+        renderBranchedMessages(event.data.sessionId, event.data.messages || [], event.data.model,
+            event.data.lastTurnAt, event.data.contextTokens, event.data.cacheTtlMin);
         hideResumeOverlay();
         return;
     }
@@ -4988,7 +5037,7 @@ function clearChat() {
     window.chrome.webview.postMessage({ type: "clear" });
 }
 
-function renderBranchedMessages(newSessionId, msgs, sessionModel) {
+function renderBranchedMessages(newSessionId, msgs, sessionModel, lastTurnAt, contextTokens, cacheTtlMin) {
     if (welcome) { welcome.remove(); welcome = null; }
     messages.innerHTML = "";
     msgCounter = 0;
@@ -5100,9 +5149,9 @@ function renderBranchedMessages(newSessionId, msgs, sessionModel) {
         }
     }
     autoScroll();
-    // History resume/fork only — HandleBranchAsync's payload carries no
-    // model, so a mid-conversation ⎇ branch leaves the picker untouched.
-    restoreSessionModel(sessionModel);
+    // History resume/fork only — HandleBranchAsync's payload carries none of
+    // these fields, so a mid-conversation ⎇ branch shows no notice at all.
+    showResumeNotice(sessionModel, lastTurnAt, contextTokens, cacheTtlMin);
 }
 
 // Re-renders a tool call from a session transcript (History resume / branch)

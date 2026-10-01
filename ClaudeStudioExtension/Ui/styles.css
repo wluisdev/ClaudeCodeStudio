@@ -2149,18 +2149,14 @@ html.light-theme .permission-item.active {
 html.light-theme .model-divider::before,
 html.light-theme .model-divider::after { background: #d8d8d8; }
 
-/* #21 backlog item 16: resuming a session restores its own model instead of
-   leaving the picker on whatever's globally selected. Plainer than
-   .model-divider on purpose — nothing changed mid-transcript here, this is
-   just what the whole session above already used. */
-.resume-model-note {
+/* #21 backlog item 16: resume/fork markers (model restored, cache likely
+   expired) reuse the model divider look, but the cache line is long enough
+   to need wrapping in a narrow panel instead of overflowing. */
+.model-divider.resume-divider .model-divider-label {
+    flex: 0 1 auto;
+    white-space: normal;
     text-align: center;
-    color: #777;
-    font-size: 11px;
-    margin: 2px 2px 10px;
-    user-select: none;
 }
-html.light-theme .resume-model-note { color: #999; }
 
 .msg-branch {
     position: absolute;
