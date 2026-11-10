@@ -89,6 +89,55 @@ public class PricingTests
     }
 
     [Fact]
+    public void Calculate_sonnet55_input_uses_its_own_rate_not_sonnet5()
+    {
+        // Regression: "claude-sonnet-5-5" starts with "claude-sonnet-5", so a
+        // first-match scan would bill it at Sonnet 5's $3. Longest-prefix wins → $2.
+        Assert.Equal(2m, Pricing.Calculate("claude-sonnet-5-5", 1_000_000, 0, 0, 0, 0));
+    }
+
+    [Fact]
+    public void Calculate_sonnet55_output_uses_its_own_rate()
+    {
+        Assert.Equal(10m, Pricing.Calculate("claude-sonnet-5-5", 0, 1_000_000, 0, 0, 0));
+    }
+
+    [Fact]
+    public void Calculate_sonnet55_cache_read_is_five_percent_not_ten()
+    {
+        // Sonnet 5.5 cache read is $0.10/1M, not input * 0.10 ($0.20).
+        Assert.Equal(0.10m, Pricing.Calculate("claude-sonnet-5-5", 0, 0, 1_000_000, 0, 0));
+    }
+
+    [Fact]
+    public void Calculate_sonnet5_dated_suffix_still_resolves_to_sonnet5()
+    {
+        // A dated Sonnet 5 must not be captured by the Sonnet 5.5 entry.
+        Assert.Equal(3m, Pricing.Calculate("claude-sonnet-5-20260401", 1_000_000, 0, 0, 0, 0));
+    }
+
+    [Fact]
+    public void Calculate_fable52_input_uses_its_own_rate_not_fable51()
+    {
+        // Regression: "claude-fable-5-2" starts with "claude-fable-5", so a
+        // first-match scan would bill it at Fable 5's $10. Longest-prefix wins → $8.
+        Assert.Equal(8m, Pricing.Calculate("claude-fable-5-2", 1_000_000, 0, 0, 0, 0));
+    }
+
+    [Fact]
+    public void Calculate_fable52_output_uses_its_own_rate()
+    {
+        Assert.Equal(40m, Pricing.Calculate("claude-fable-5-2", 0, 1_000_000, 0, 0, 0));
+    }
+
+    [Fact]
+    public void Calculate_fable52_cache_read_is_lower_than_fable5()
+    {
+        // Fable 5.2 cache read is $0.20/1M, not input * 0.10 ($0.80).
+        Assert.Equal(0.20m, Pricing.Calculate("claude-fable-5-2", 0, 0, 1_000_000, 0, 0));
+    }
+
+    [Fact]
     public void Calculate_output_tokens_priced_at_output_rate()
     {
         Assert.Equal(15m, Pricing.Calculate("claude-sonnet-5", 0, 1_000_000, 0, 0, 0));

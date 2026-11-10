@@ -14,11 +14,13 @@ public static class Pricing
     // $10 input = 2.5%), so it can't be derived from input anymore.
     private static readonly Dictionary<string, (decimal input, decimal output, decimal cacheRead)> _base = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["claude-sonnet-5-5"] = (2m, 10m, 0.10m), // cache read 5% of input, same ratio as Opus 5.5
         ["claude-sonnet-5"]   = (3m, 15m, 0.30m), // sticker price; intro $2/$10 runs through 2026-08-31
         ["claude-sonnet-4-6"] = (3m, 15m, 0.30m),
         ["claude-opus-5-5"]   = (4m, 20m, 0.20m), // cheaper than Opus 5; cache read 5% of input, not 10%
         ["claude-opus-5"]     = (5m, 25m, 0.50m), // same rate as Opus 4.8
         ["claude-opus-4-8"]   = (5m, 25m, 0.50m),
+        ["claude-fable-5-2"]  = (8m, 40m, 0.20m), // cheaper than Fable 5.1; cache read 2.5% of input
         ["claude-fable-5-1"]  = (10m, 50m, 0.25m), // cache read 2.5% of input
         ["claude-fable-5"]    = (10m, 50m, 1.00m),
         ["claude-mythos-5"]   = (10m, 50m, 1.00m),

@@ -2,6 +2,12 @@
 
 All notable changes to Claude Code Studio are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.8] - 2026-11-09
+
+### Added
+
+- **Claude Sonnet 5.5 and Claude Fable 5.2 in the model picker.** Both new models are selectable from the model dropdown and the `/model` command, and are now available as fallback models too. Cost tracking in the Usage window knows their rates, including the lower cache-read prices (Sonnet 5.5 reads at $0.10 per 1M, Fable 5.2 at $0.20), and model ids like `claude-sonnet-5-5` and `claude-fable-5-2` are no longer mis-priced against their predecessors.
+
 ## [1.1.7] - 2026-09-25
 
 ### Added
