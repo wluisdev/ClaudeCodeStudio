@@ -1176,6 +1176,14 @@ function renderAccountInfo() {
         el.onclick = startClaudeLogin;
         return;
     }
+    if (_accountInfo.authMode === "api-key") {
+        el.textContent = "API key";
+        el.title = "Claude Code API-key authentication is configured";
+        el.classList.remove("account-info-muted");
+        el.classList.remove("account-info-clickable");
+        el.onclick = null;
+        return;
+    }
     el.classList.remove("account-info-muted");
     el.classList.remove("account-info-clickable");
     el.onclick = null;

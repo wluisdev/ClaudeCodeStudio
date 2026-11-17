@@ -10,6 +10,7 @@ using ClaudeStudioExtension.Agent;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using System.Text.Json.Serialization;
+using ClaudeStudioShared;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.PlatformUI;
@@ -32,6 +33,7 @@ public partial class AgentToolWindowControl : UserControl
     private DateTime _sessionStart = DateTime.Now;
     private static bool _tempCleanupDone;
     private FileSystemWatcher? _claudeJsonWatcher;
+    private FileSystemWatcher? _claudeSettingsWatcher;
     private bool _lastSignedInStatus;
     private System.Threading.Timer? _claudeJsonDebounceTimer;
     private FileSystemWatcher? _trustedWorkspacesWatcher;
@@ -577,25 +579,44 @@ public partial class AgentToolWindowControl : UserControl
 
     private static string ClaudeJsonPath => ClaudePaths.ClaudeJsonPath;
 
-    // Lightweight check used by the pre-flight gate. Mirrors ReadAccountInfo's
-    // signed-in determination (presence of oauthAccount with any identity field)
-    // but avoids allocating the full payload.
+    // Lightweight check used by the pre-flight gate. Claude Code can authenticate
+    // with OAuth in ~/.claude.json or API credentials in settings/environment.
     private static bool IsSignedIn()
     {
         var path = ClaudeJsonPath;
-        if (!File.Exists(path)) return false;
+        if (File.Exists(path))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(path));
+                if (doc.RootElement.TryGetProperty("oauthAccount", out var acct) &&
+                    acct.ValueKind == JsonValueKind.Object &&
+                    (TryGetString(acct, "organizationName") != null
+                     || TryGetString(acct, "emailAddress") != null
+                     || TryGetString(acct, "email") != null
+                     || TryGetString(acct, "displayName") != null))
+                    return true;
+            }
+            catch { /* API-key credentials may still be configured separately. */ }
+        }
+
+        return HasApiKeyAuthentication();
+    }
+
+    private static bool HasApiKeyAuthentication()
+    {
+        string? settingsJson = null;
         try
         {
-            using var doc = JsonDocument.Parse(File.ReadAllText(path));
-            if (!doc.RootElement.TryGetProperty("oauthAccount", out var acct) ||
-                acct.ValueKind != JsonValueKind.Object)
-                return false;
-            return TryGetString(acct, "organizationName") != null
-                || TryGetString(acct, "emailAddress") != null
-                || TryGetString(acct, "email") != null
-                || TryGetString(acct, "displayName") != null;
+            var settingsPath = ClaudeConfig.UserSettingsPath;
+            if (File.Exists(settingsPath)) settingsJson = File.ReadAllText(settingsPath);
         }
-        catch { return false; }
+        catch { /* A missing or unreadable settings file is not API authentication. */ }
+
+        return GatewayAuth.HasApiCredentials(
+            settingsJson,
+            Environment.GetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN"),
+            Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"));
     }
 
     private static object ReadAccountInfo()
@@ -603,7 +624,7 @@ public partial class AgentToolWindowControl : UserControl
         var path = ClaudeJsonPath;
 
         if (!File.Exists(path))
-            return new { type = "account-info", signedIn = false };
+            return ApiKeyAccountInfoOrSignedOut();
 
         try
         {
@@ -621,9 +642,9 @@ public partial class AgentToolWindowControl : UserControl
                 accountDisplayName = TryGetString(acct, "displayName");
             }
 
-            // No oauthAccount object — treat as signed out (CLI hasn't logged in yet).
+            // Without OAuth identity data, API-key authentication may still be configured.
             if (organizationName == null && email == null && accountDisplayName == null)
-                return new { type = "account-info", signedIn = false };
+                return ApiKeyAccountInfoOrSignedOut();
 
             // Personal Claude Pro accounts use email-like org names; drop those so
             // the cascade in JS can fall back to a real display name.
@@ -649,9 +670,13 @@ public partial class AgentToolWindowControl : UserControl
         catch (Exception ex)
         {
             OutputLog.Warn($"~/.claude.json parse failed: {ex.Message}");
-            return new { type = "account-info", signedIn = false };
+            return ApiKeyAccountInfoOrSignedOut();
         }
     }
+
+    private static object ApiKeyAccountInfoOrSignedOut() => HasApiKeyAuthentication()
+        ? new { type = "account-info", signedIn = true, authMode = "api-key" }
+        : new { type = "account-info", signedIn = false };
 
     private static string? TryGetString(JsonElement el, string name)
     {
@@ -807,52 +832,54 @@ public partial class AgentToolWindowControl : UserControl
         catch { }
     }
 
-    // Watches ~/.claude.json so the titlebar/auth state updates when the user
-    // signs in (or out) via an external `claude login` / `claude logout`. The
-    // file gets multiple writes per save, so we debounce ~500ms before re-reading.
+    // Watches ~/.claude.json and ~/.claude/settings.json so the titlebar/auth
+    // state updates when OAuth or API-key credentials change outside Studio.
     private void StartClaudeJsonWatcher()
     {
         try
         {
-            if (_claudeJsonWatcher != null) return;
-
-            var dir = Path.GetDirectoryName(ClaudeJsonPath);
-            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+            if (_claudeJsonWatcher != null || _claudeSettingsWatcher != null) return;
 
             _lastSignedInStatus = IsSignedIn();
-
-            // Watch the whole user-profile dir without a Filter — the CLI may
-            // write via temp+rename, delete+recreate, or in-place, and filter
-            // patterns on dot-prefixed names have been unreliable. We re-check
-            // the FullPath inside the handler instead.
-            _claudeJsonWatcher = new FileSystemWatcher(dir)
-            {
-                NotifyFilter = NotifyFilters.LastWrite
-                    | NotifyFilters.CreationTime
-                    | NotifyFilters.FileName
-                    | NotifyFilters.Size,
-                EnableRaisingEvents = true,
-            };
-            var targetPath = ClaudeJsonPath;
-            FileSystemEventHandler onChange = (_, args) =>
-            {
-                if (string.Equals(args.FullPath, targetPath, StringComparison.OrdinalIgnoreCase))
-                    DebouncedReloadAccountInfo();
-            };
-            _claudeJsonWatcher.Changed += onChange;
-            _claudeJsonWatcher.Created += onChange;
-            _claudeJsonWatcher.Deleted += onChange;
-            _claudeJsonWatcher.Renamed += (_, args) =>
-            {
-                if (string.Equals(args.FullPath, targetPath, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(args.OldFullPath, targetPath, StringComparison.OrdinalIgnoreCase))
-                    DebouncedReloadAccountInfo();
-            };
+            _claudeJsonWatcher = CreateAuthConfigWatcher(ClaudeJsonPath);
+            _claudeSettingsWatcher = CreateAuthConfigWatcher(ClaudeConfig.UserSettingsPath);
         }
         catch (Exception ex)
         {
             OutputLog.Warn($"~/.claude.json watcher setup failed: {ex.Message}");
         }
+    }
+
+    private FileSystemWatcher? CreateAuthConfigWatcher(string targetPath)
+    {
+        var dir = Path.GetDirectoryName(targetPath);
+        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return null;
+
+        // The CLI may save via temp+rename, delete+recreate, or in-place, so
+        // watch all file names and filter the target path in the handlers.
+        var watcher = new FileSystemWatcher(dir)
+        {
+            NotifyFilter = NotifyFilters.LastWrite
+                | NotifyFilters.CreationTime
+                | NotifyFilters.FileName
+                | NotifyFilters.Size,
+            EnableRaisingEvents = true,
+        };
+        FileSystemEventHandler onChange = (_, args) =>
+        {
+            if (string.Equals(args.FullPath, targetPath, StringComparison.OrdinalIgnoreCase))
+                DebouncedReloadAccountInfo();
+        };
+        watcher.Changed += onChange;
+        watcher.Created += onChange;
+        watcher.Deleted += onChange;
+        watcher.Renamed += (_, args) =>
+        {
+            if (string.Equals(args.FullPath, targetPath, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(args.OldFullPath, targetPath, StringComparison.OrdinalIgnoreCase))
+                DebouncedReloadAccountInfo();
+        };
+        return watcher;
     }
 
     private void StopClaudeJsonWatcher()
@@ -861,6 +888,8 @@ public partial class AgentToolWindowControl : UserControl
         {
             _claudeJsonWatcher?.Dispose();
             _claudeJsonWatcher = null;
+            _claudeSettingsWatcher?.Dispose();
+            _claudeSettingsWatcher = null;
             _claudeJsonDebounceTimer?.Dispose();
             _claudeJsonDebounceTimer = null;
         }
@@ -1679,9 +1708,9 @@ public partial class AgentToolWindowControl : UserControl
                 ? request.WorkingDirectory
                 : currentSolutionDir;
 
-            // Pre-flight auth check: if ~/.claude.json has no oauthAccount, the
-            // agent will spawn and fail with a generic stream error. Surface an
-            // actionable CTA inline instead of letting that happen.
+            // Pre-flight auth check: if neither OAuth nor API-key credentials are
+            // configured, the agent would fail with a generic stream error.
+            // Surface an actionable CTA inline instead of letting that happen.
             if (!IsSignedIn())
             {
                 var authDispatcher = System.Windows.Application.Current.Dispatcher;
